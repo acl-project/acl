@@ -17,7 +17,7 @@ pub enum AuthError {
     )]
     InvalidUsernameChar { ch: char },
 
-    #[error("The account with the {uuid} does not exist")]
+    #[error("The account with UUID '{uuid}' does not exist")]
     AccountNotFound { uuid: Uuid },
 
     #[error("I/O error at path '{path}': {source}")]
@@ -27,7 +27,7 @@ pub enum AuthError {
         source: std::io::Error,
     },
 
-    #[error("Failed to parse json: {0}")]
+    #[error("Failed to parse JSON: {0}")]
     Json(#[from] serde_json::Error),
 }
 

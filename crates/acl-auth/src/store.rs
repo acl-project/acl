@@ -65,7 +65,7 @@ impl AccountStore {
             .map(|i| self.accounts.remove(i))
             .ok_or(AuthError::AccountNotFound { uuid });
 
-        if account.is_ok() {
+        if account.is_ok() && self.active_uuid == Some(uuid) {
             if let Some(first) = self.accounts.first() {
                 self.active_uuid = Some(first.uuid);
             } else {
@@ -90,10 +90,10 @@ impl AccountStore {
 
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if !path.exists() {
-            info!("Configuration file not found, using default settings");
-            let config = Self::default();
-            config.save(path)?;
-            return Ok(config);
+            info!("Accounts file not found, using default settings");
+            let store = Self::default();
+            store.save(path)?;
+            return Ok(store);
         }
 
         info!("Loading accounts from {}", path.display());
