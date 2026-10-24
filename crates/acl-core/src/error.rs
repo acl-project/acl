@@ -23,3 +23,24 @@ pub enum CoreError {
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_core_error_display() {
+        let err = CoreError::ProjectDirsUnavailable;
+        assert_eq!(
+            err.to_string(),
+            "Failed to determine standard application directories"
+        );
+
+        let io_err = CoreError::Io {
+            path: PathBuf::from("/test/path"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"),
+        };
+        assert!(io_err.to_string().contains("/test/path"));
+        assert!(io_err.to_string().contains("file not found"));
+    }
+}

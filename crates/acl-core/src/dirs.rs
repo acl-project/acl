@@ -92,3 +92,92 @@ impl LauncherDirs {
         self.data_dir.join("versions")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "acl_test_dirs_{}_{}_{}",
+                name,
+                std::process::id(),
+                id
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("failed to create temp test dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_with_paths_and_getters() {
+        let config_dir = PathBuf::from("/custom/config");
+        let data_dir = PathBuf::from("/custom/data");
+
+        let dirs = LauncherDirs::with_paths(config_dir.clone(), data_dir.clone());
+        assert_eq!(dirs.config_dir(), config_dir.as_path());
+        assert_eq!(dirs.data_dir(), data_dir.as_path());
+        assert_eq!(dirs.config_file(), config_dir.join("config.toml"));
+        assert_eq!(dirs.instances_dir(), data_dir.join("instances"));
+        assert_eq!(dirs.assets_dir(), data_dir.join("assets"));
+        assert_eq!(dirs.libraries_dir(), data_dir.join("libraries"));
+        assert_eq!(dirs.versions_dir(), data_dir.join("versions"));
+    }
+
+    #[test]
+    fn test_ensure_dirs_exist() {
+        let temp = TempDirGuard::new("ensure_dirs");
+        let config_dir = temp.path().join("config");
+        let data_dir = temp.path().join("data");
+
+        let dirs = LauncherDirs::with_paths(config_dir.clone(), data_dir.clone());
+
+        assert!(!config_dir.exists());
+        assert!(!data_dir.exists());
+        assert!(!dirs.assets_dir().exists());
+        assert!(!dirs.instances_dir().exists());
+        assert!(!dirs.libraries_dir().exists());
+        assert!(!dirs.versions_dir().exists());
+
+        dirs.ensure_dirs_exist()
+            .expect("failed to ensure dirs exist");
+
+        assert!(config_dir.is_dir());
+        assert!(data_dir.is_dir());
+        assert!(dirs.assets_dir().is_dir());
+        assert!(dirs.instances_dir().is_dir());
+        assert!(dirs.libraries_dir().is_dir());
+        assert!(dirs.versions_dir().is_dir());
+
+        // Calling it again when directories already exist should succeed idempotently
+        dirs.ensure_dirs_exist()
+            .expect("failed to call ensure_dirs_exist idempotently");
+    }
+
+    #[test]
+    fn test_new_launcher_dirs() {
+        if let Ok(dirs) = LauncherDirs::new() {
+            assert!(dirs.config_file().ends_with("config.toml"));
+            assert!(dirs.instances_dir().ends_with("instances"));
+        }
+    }
+}
