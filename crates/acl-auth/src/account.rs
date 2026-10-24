@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn test_validate_username_empty() {
         let err = Account::validate_username("").unwrap_err();
-        assert_eq!(err, AuthError::EmptyUsername);
+        assert!(matches!(err, AuthError::EmptyUsername));
     }
 
     #[test]
@@ -91,34 +91,34 @@ mod tests {
 
     #[test]
     fn test_validate_username_length_boundaries() {
-        assert_eq!(
+        assert!(matches!(
             Account::validate_username("ab").unwrap_err(),
             AuthError::InvalidUsernameLength { len: 2 }
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             Account::validate_username("a".repeat(17).as_str()).unwrap_err(),
             AuthError::InvalidUsernameLength { len: 17 }
-        );
+        ));
     }
 
     #[test]
     fn test_validate_username_invalid_chars() {
-        assert_eq!(
+        assert!(matches!(
             Account::validate_username("Player-1").unwrap_err(),
             AuthError::InvalidUsernameChar { ch: '-' }
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             Account::validate_username("Player 1").unwrap_err(),
             AuthError::InvalidUsernameChar { ch: ' ' }
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             Account::validate_username("Player!").unwrap_err(),
             AuthError::InvalidUsernameChar { ch: '!' }
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             Account::validate_username("测试玩家").unwrap_err(),
             AuthError::InvalidUsernameChar { ch: '测' }
-        );
+        ));
     }
 
     #[test]
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn test_new_offline_invalid() {
         let err = Account::new_offline("ab").unwrap_err();
-        assert_eq!(err, AuthError::InvalidUsernameLength { len: 2 });
+        assert!(matches!(err, AuthError::InvalidUsernameLength { len: 2 }));
     }
 
     #[test]

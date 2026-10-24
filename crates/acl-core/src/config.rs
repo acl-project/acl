@@ -41,7 +41,7 @@ impl LauncherConfig {
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if !path.exists() {
             info!("Configuration file not found, using default settings");
-            let config = Self::default();
+            let config: LauncherConfig = Self::default();
             config.save(path)?;
             return Ok(config);
         }

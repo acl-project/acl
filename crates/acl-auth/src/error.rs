@@ -1,7 +1,10 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Error type for authentication and account management operations.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Error)]
 pub enum AuthError {
     #[error("Username cannot be empty")]
     EmptyUsername,
@@ -13,6 +16,19 @@ pub enum AuthError {
         "Username contains invalid character '{ch}'; only ASCII alphanumeric characters and underscores are allowed"
     )]
     InvalidUsernameChar { ch: char },
+
+    #[error("The account with the {uuid} does not exist")]
+    AccountNotFound { uuid: Uuid },
+
+    #[error("I/O error at path '{path}': {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Failed to parse json: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;
