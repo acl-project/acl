@@ -27,7 +27,7 @@ impl Account {
         let username = username.into();
         Self::validate_username(&username)?;
 
-        let uuid = Self::get_offline_uuid(&username);
+        let uuid = Self::generate_offline_uuid(&username);
         debug!(
             "Created offline account for user '{}' with UUID {}",
             username, uuid
@@ -43,6 +43,9 @@ impl Account {
     /// Validates that a Minecraft username is 3-16 characters and contains only ASCII
     /// alphanumeric characters or underscores (`_`).
     pub fn validate_username(username: &str) -> Result<()> {
+        if username.is_empty() {
+            return Err(AuthError::EmptyUsername);
+        }
         let len = username.chars().count();
         if !(MIN_USERNAME_LEN..=MAX_USERNAME_LEN).contains(&len) {
             return Err(AuthError::InvalidUsernameLength { len });
@@ -58,7 +61,7 @@ impl Account {
         Ok(())
     }
 
-    pub fn get_offline_uuid(username: &str) -> Uuid {
+    pub fn generate_offline_uuid(username: &str) -> Uuid {
         let mut hasher = Md5::new();
         hasher.update(b"OfflinePlayer:");
         hasher.update(username.as_bytes());
