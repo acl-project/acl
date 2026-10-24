@@ -3,15 +3,31 @@
 version = 4
 
 [[package]]
-name = "acl"
+name = "acl-auth"
+version = "0.1.0"
+
+[[package]]
+name = "acl-core"
 version = "0.1.0"
 dependencies = [
+ "acl-auth",
+ "acl-minecraft",
+]
+
+[[package]]
+name = "acl-gui"
+version = "0.1.0"
+dependencies = [
+ "acl-core",
  "gtk4",
  "libadwaita",
  "relm4",
  "relm4-components",
- "relm4-macros",
 ]
+
+[[package]]
+name = "acl-minecraft"
+version = "0.1.0"
 
 [[package]]
 name = "autocfg"

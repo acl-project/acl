@@ -1,6 +1,6 @@
-use relm4::prelude::*;
-use relm4::adw; 
 use gtk::prelude::*;
+use relm4::adw;
+use relm4::prelude::*;
 
 struct AppModel;
 
@@ -17,7 +17,7 @@ impl SimpleComponent for AppModel {
 
     view! {
         adw::ApplicationWindow {
-            set_title: Some("My Launcher"),
+            set_title: Some("Adwaita Craft Launcher"),
             set_default_width: 480,
             set_default_height: 320,
 
@@ -31,7 +31,7 @@ impl SimpleComponent for AppModel {
 
                 #[wrap(Some)]
                 set_content = &gtk::Label {
-                    set_label: "Relm4 + GTK4 + libadwaita 就绪",
+                    set_label: "Relm4 + GTK4 + libadwaita Ready",
                     set_vexpand: true,
                 },
             },
@@ -56,7 +56,6 @@ impl SimpleComponent for AppModel {
 }
 
 fn main() {
-
     adw::init().expect("Failed to initialize libadwaita");
 
     let app = relm4::RelmApp::new("com.example.MyLauncher");

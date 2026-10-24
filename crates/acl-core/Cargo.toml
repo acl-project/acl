@@ -1,0 +1,8 @@
+[package]
+name = "acl-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+acl-minecraft = { workspace = true }
+acl-auth = { workspace = true }

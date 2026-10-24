@@ -1,0 +1,4 @@
+[package]
+name = "acl-minecraft"
+version.workspace = true
+edition.workspace = true

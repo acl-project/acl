@@ -1,0 +1,16 @@
+[package]
+name = "acl-gui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "acl"
+path = "src/main.rs"
+
+[dependencies]
+acl-core = { workspace = true }
+
+gtk = { workspace = true }
+libadwaita = { workspace = true }
+relm4 = { workspace = true }
+relm4-components = { workspace = true }
