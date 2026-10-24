@@ -70,3 +70,97 @@ impl Account {
         uuid::Builder::from_md5_bytes(digest).into_uuid()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_username_empty() {
+        let err = Account::validate_username("").unwrap_err();
+        assert_eq!(err, AuthError::EmptyUsername);
+    }
+
+    #[test]
+    fn test_validate_username_valid() {
+        assert!(Account::validate_username("abc").is_ok());
+        assert!(Account::validate_username("Player_1").is_ok());
+        assert!(Account::validate_username("Steve").is_ok());
+        assert!(Account::validate_username("1234567890123456").is_ok());
+    }
+
+    #[test]
+    fn test_validate_username_length_boundaries() {
+        assert_eq!(
+            Account::validate_username("ab").unwrap_err(),
+            AuthError::InvalidUsernameLength { len: 2 }
+        );
+        assert_eq!(
+            Account::validate_username("a".repeat(17).as_str()).unwrap_err(),
+            AuthError::InvalidUsernameLength { len: 17 }
+        );
+    }
+
+    #[test]
+    fn test_validate_username_invalid_chars() {
+        assert_eq!(
+            Account::validate_username("Player-1").unwrap_err(),
+            AuthError::InvalidUsernameChar { ch: '-' }
+        );
+        assert_eq!(
+            Account::validate_username("Player 1").unwrap_err(),
+            AuthError::InvalidUsernameChar { ch: ' ' }
+        );
+        assert_eq!(
+            Account::validate_username("Player!").unwrap_err(),
+            AuthError::InvalidUsernameChar { ch: '!' }
+        );
+        assert_eq!(
+            Account::validate_username("测试玩家").unwrap_err(),
+            AuthError::InvalidUsernameChar { ch: '测' }
+        );
+    }
+
+    #[test]
+    fn test_generate_offline_uuid_known_vectors() {
+        let steve_uuid = Account::generate_offline_uuid("Steve");
+        assert_eq!(
+            steve_uuid.to_string(),
+            "5627dd98-e6be-3c21-b8a8-e92344183641"
+        );
+        assert_eq!(steve_uuid.get_version_num(), 3);
+
+        let alex_uuid = Account::generate_offline_uuid("Alex");
+        assert_eq!(
+            alex_uuid.to_string(),
+            "36532b5e-c442-3dbb-a24c-c7e55d0f979a"
+        );
+        assert_eq!(alex_uuid.get_version_num(), 3);
+    }
+
+    #[test]
+    fn test_new_offline_success() {
+        let account = Account::new_offline("Steve").expect("Account creation should succeed");
+        assert_eq!(account.username, "Steve");
+        assert_eq!(account.account_type, AccountType::Offline);
+        assert_eq!(account.uuid, Account::generate_offline_uuid("Steve"));
+    }
+
+    #[test]
+    fn test_new_offline_invalid() {
+        let err = Account::new_offline("ab").unwrap_err();
+        assert_eq!(err, AuthError::InvalidUsernameLength { len: 2 });
+    }
+
+    #[test]
+    fn test_account_type_and_clone() {
+        let t1 = AccountType::Offline;
+        let t2 = AccountType::Microsoft;
+        assert_ne!(t1, t2);
+        assert_eq!(t1, t1.clone());
+
+        let account = Account::new_offline("Steve").unwrap();
+        let cloned = account.clone();
+        assert_eq!(account, cloned);
+    }
+}

@@ -16,3 +16,24 @@ pub enum AuthError {
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_auth_error_display() {
+        assert_eq!(
+            AuthError::EmptyUsername.to_string(),
+            "Username cannot be empty"
+        );
+        assert_eq!(
+            AuthError::InvalidUsernameLength { len: 2 }.to_string(),
+            "Username length must be between 3 and 16 characters, got 2"
+        );
+        assert_eq!(
+            AuthError::InvalidUsernameChar { ch: '@' }.to_string(),
+            "Username contains invalid character '@'; only ASCII alphanumeric characters and underscores are allowed"
+        );
+    }
+}
