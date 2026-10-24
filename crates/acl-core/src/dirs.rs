@@ -34,7 +34,7 @@ impl LauncherDirs {
         }
     }
 
-    pub fn ensure_dir_exist(&self) -> Result<()> {
+    pub fn ensure_dirs_exist(&self) -> Result<()> {
         let dirs = [
             self.config_dir(),
             self.data_dir(),

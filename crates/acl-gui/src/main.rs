@@ -67,6 +67,6 @@ fn main() {
     info!("Starting Adwaita Craft Launcher");
     adw::init().expect("Failed to initialize libadwaita");
 
-    let app = relm4::RelmApp::new("com.acl-project.acl");
+    let app = relm4::RelmApp::new("com.acl-project.adwaita-craft-launcher");
     app.run::<AppModel>(());
 }
