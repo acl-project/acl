@@ -51,5 +51,22 @@ mod tests {
             AuthError::InvalidUsernameChar { ch: '@' }.to_string(),
             "Username contains invalid character '@'; only ASCII alphanumeric characters and underscores are allowed"
         );
+        let test_uuid = Uuid::nil();
+        assert_eq!(
+            AuthError::AccountNotFound { uuid: test_uuid }.to_string(),
+            format!("The account with UUID '{test_uuid}' does not exist")
+        );
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        assert_eq!(
+            AuthError::Io {
+                path: PathBuf::from("/test/path"),
+                source: io_err,
+            }
+            .to_string(),
+            "I/O error at path '/test/path': file not found"
+        );
+        let json_err = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
+        let expected_json_msg = format!("Failed to parse JSON: {json_err}");
+        assert_eq!(AuthError::Json(json_err).to_string(), expected_json_msg);
     }
 }
