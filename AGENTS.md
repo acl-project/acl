@@ -1,4 +1,4 @@
-Do not make any modifications to the code.
+Do not make any modifications to the code. (Except for unit tests.)
 
 # Code Review Guidelines
 
