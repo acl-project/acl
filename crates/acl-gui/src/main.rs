@@ -1,7 +1,8 @@
 use gtk::prelude::*;
 use relm4::adw;
 use relm4::prelude::*;
-
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 struct AppModel;
 
 #[derive(Debug)]
@@ -55,9 +56,17 @@ impl SimpleComponent for AppModel {
     }
 }
 
+fn init_logging() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
 fn main() {
+    init_logging();
+
+    info!("Starting Adwaita Craft Launcher");
     adw::init().expect("Failed to initialize libadwaita");
 
-    let app = relm4::RelmApp::new("com.example.MyLauncher");
+    let app = relm4::RelmApp::new("com.acl-project.acl");
     app.run::<AppModel>(());
 }
