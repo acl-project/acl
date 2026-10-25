@@ -262,4 +262,187 @@ mod tests {
         let index = result.expect("fetch_and_verify should read from cached file");
         assert!(index.objects.is_empty());
     }
+
+    #[test]
+    fn test_reconstruct_legacy_assets_virtual() {
+        let temp = TempDirGuard::new("reconstruct_virtual");
+        let assets_dir = temp.path().join("assets");
+        let game_dir = temp.path().join("game");
+
+        let object_hash = "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598";
+        let object_dir = assets_dir.join("objects").join(&object_hash[..2]);
+        std::fs::create_dir_all(&object_dir).expect("failed to create object dir");
+        let object_file = object_dir.join(object_hash);
+        std::fs::write(&object_file, b"sound-content").expect("failed to write object file");
+
+        let mut objects = HashMap::new();
+        objects.insert(
+            "minecraft/sounds/cave.ogg".to_string(),
+            AssetObject {
+                hash: object_hash.to_string(),
+                size: 13,
+            },
+        );
+
+        let index = AssetIndex {
+            objects,
+            map_to_resources: false,
+            is_virtual: true,
+        };
+
+        index
+            .reconstruct_legacy_assets("1.7.2", &assets_dir, &game_dir)
+            .expect("should reconstruct virtual assets");
+
+        let reconstructed = assets_dir.join("virtual/1.7.2/minecraft/sounds/cave.ogg");
+        assert!(reconstructed.exists());
+        let content = std::fs::read(&reconstructed).expect("failed to read reconstructed file");
+        assert_eq!(content, b"sound-content");
+    }
+
+    #[test]
+    fn test_reconstruct_legacy_assets_map_to_resources() {
+        let temp = TempDirGuard::new("reconstruct_resources");
+        let assets_dir = temp.path().join("assets");
+        let game_dir = temp.path().join("game");
+
+        let object_hash = "88523c0612c62c96c4664da6929a8a3a79d0bcf3";
+        let object_dir = assets_dir.join("objects").join(&object_hash[..2]);
+        std::fs::create_dir_all(&object_dir).expect("failed to create object dir");
+        let object_file = object_dir.join(object_hash);
+        std::fs::write(&object_file, b"music-content").expect("failed to write object file");
+
+        let mut objects = HashMap::new();
+        objects.insert(
+            "music/game/calm1.ogg".to_string(),
+            AssetObject {
+                hash: object_hash.to_string(),
+                size: 13,
+            },
+        );
+
+        let index = AssetIndex {
+            objects,
+            map_to_resources: true,
+            is_virtual: false,
+        };
+
+        index
+            .reconstruct_legacy_assets("pre-1.6", &assets_dir, &game_dir)
+            .expect("should reconstruct resource-mapped assets");
+
+        let reconstructed = game_dir.join("resources/music/game/calm1.ogg");
+        assert!(reconstructed.exists());
+        let content = std::fs::read(&reconstructed).expect("failed to read reconstructed file");
+        assert_eq!(content, b"music-content");
+    }
+
+    #[test]
+    fn test_reconstruct_legacy_assets_modern_noop() {
+        let temp = TempDirGuard::new("modern_noop");
+        let assets_dir = temp.path().join("assets");
+        let game_dir = temp.path().join("game");
+
+        let mut objects = HashMap::new();
+        objects.insert(
+            "icons/icon_16x16.png".to_string(),
+            AssetObject {
+                hash: "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598".to_string(),
+                size: 3665,
+            },
+        );
+
+        let index = AssetIndex {
+            objects,
+            map_to_resources: false,
+            is_virtual: false,
+        };
+
+        index
+            .reconstruct_legacy_assets("1.20", &assets_dir, &game_dir)
+            .expect("modern asset index should be a no-op");
+
+        assert!(!assets_dir.join("virtual").exists());
+        assert!(!game_dir.join("resources").exists());
+    }
+
+    #[test]
+    fn test_reconstruct_legacy_assets_unsafe_and_invalid_paths_skipped() {
+        let temp = TempDirGuard::new("unsafe_paths");
+        let assets_dir = temp.path().join("assets");
+        let game_dir = temp.path().join("game");
+
+        let mut objects = HashMap::new();
+        objects.insert(
+            "../outside.txt".to_string(),
+            AssetObject {
+                hash: "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598".to_string(),
+                size: 10,
+            },
+        );
+        objects.insert(
+            "/etc/passwd".to_string(),
+            AssetObject {
+                hash: "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598".to_string(),
+                size: 10,
+            },
+        );
+        objects.insert(
+            "invalid_hash.txt".to_string(),
+            AssetObject {
+                hash: "not_a_valid_hex".to_string(),
+                size: 10,
+            },
+        );
+
+        let index = AssetIndex {
+            objects,
+            map_to_resources: false,
+            is_virtual: true,
+        };
+
+        index
+            .reconstruct_legacy_assets("legacy", &assets_dir, &game_dir)
+            .expect("unsafe paths should be skipped without returning error");
+
+        assert!(!temp.path().join("outside.txt").exists());
+    }
+
+    #[test]
+    fn test_reconstruct_legacy_assets_idempotency() {
+        let temp = TempDirGuard::new("idempotency");
+        let assets_dir = temp.path().join("assets");
+        let game_dir = temp.path().join("game");
+
+        let object_hash = "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598";
+        let object_dir = assets_dir.join("objects").join(&object_hash[..2]);
+        std::fs::create_dir_all(&object_dir).expect("failed to create object dir");
+        let object_file = object_dir.join(object_hash);
+        std::fs::write(&object_file, b"sample").expect("failed to write object file");
+
+        let mut objects = HashMap::new();
+        objects.insert(
+            "test/sample.txt".to_string(),
+            AssetObject {
+                hash: object_hash.to_string(),
+                size: 6,
+            },
+        );
+
+        let index = AssetIndex {
+            objects,
+            map_to_resources: false,
+            is_virtual: true,
+        };
+
+        index
+            .reconstruct_legacy_assets("idemp", &assets_dir, &game_dir)
+            .expect("first run should succeed");
+        index
+            .reconstruct_legacy_assets("idemp", &assets_dir, &game_dir)
+            .expect("second run should be idempotent and succeed");
+
+        let target_file = assets_dir.join("virtual/idemp/test/sample.txt");
+        assert!(target_file.exists());
+    }
 }
