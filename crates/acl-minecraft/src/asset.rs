@@ -1,10 +1,26 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, fs, os::unix::fs::symlink, path::Path};
 
-use crate::{AssetIndexInfo, Result};
+use crate::{AssetIndexInfo, MinecraftError, Result};
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 pub const RESOURCES_BASE_URL: &str = "https://resources.download.minecraft.net";
+
+fn link_asset_file(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if dst.symlink_metadata().is_ok() {
+        return Ok(());
+    }
+
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let abs_src = src.canonicalize()?;
+
+    // Prefer hard links; if crossing mount points (EXDEV), automatically fall back to symbolic links.
+    fs::hard_link(&abs_src, dst).or_else(|_| symlink(abs_src, dst))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetObject {
@@ -46,6 +62,49 @@ impl AssetIndex {
     ) -> Result<Self> {
         let path = assets_dir.join("indexes").join(format!("{}.json", info.id));
         crate::cache::fetch_verified_json(client, &info.url, &info.sha1, &info.id, &path).await
+    }
+
+    /// Reconstruct virtual or resource-mapped assets for legacy Minecraft versions using links.
+    pub fn reconstruct_legacy_assets(
+        &self,
+        index_id: &str,
+        assets_dir: &Path,
+        game_dir: &Path,
+    ) -> Result<()> {
+        let target_root = if self.map_to_resources {
+            game_dir.join("resources")
+        } else if self.is_virtual {
+            assets_dir.join("virtual").join(index_id)
+        } else {
+            return Ok(());
+        };
+
+        for (logical_path, obj) in &self.objects {
+            let rel_dest = Path::new(logical_path);
+            // Prevent path traversal.
+            if rel_dest
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+            {
+                warn!("Skipping unsafe legacy asset path: {logical_path}");
+                continue;
+            }
+            let Some(rel_obj) = obj.relative_path() else {
+                warn!(
+                    "Skipping asset '{logical_path}' with invalid hash '{}'",
+                    obj.hash
+                );
+                continue;
+            };
+
+            let src = assets_dir.join("objects").join(rel_obj);
+            let dst = target_root.join(rel_dest);
+
+            link_asset_file(&src, &dst)
+                .map_err(|source| MinecraftError::Io { path: dst, source })?;
+        }
+
+        Ok(())
     }
 }
 
