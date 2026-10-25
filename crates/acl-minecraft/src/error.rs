@@ -22,6 +22,13 @@ pub enum MinecraftError {
 
     #[error("System clock error: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
+
+    #[error("SHA-1 mismatch for '{target}': expected {expected}, actual {actual}")]
+    HashMismatch {
+        target: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, MinecraftError>;
