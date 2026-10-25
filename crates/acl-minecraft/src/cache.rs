@@ -229,4 +229,62 @@ mod tests {
         let result = Cached::<String>::load_from_file(&cache_file);
         assert!(matches!(result, Err(MinecraftError::Json(_))));
     }
+
+    #[test]
+    fn test_verify_sha1() {
+        let content = b"hello minecraft";
+        let mut hasher = Sha1::new();
+        hasher.update(content);
+        let valid_sha1 = hex::encode(hasher.finalize());
+
+        assert!(verify_sha1(content, &valid_sha1, "test-target").is_ok());
+        // Verify case insensitivity
+        assert!(verify_sha1(content, &valid_sha1.to_uppercase(), "test-target").is_ok());
+
+        let result = verify_sha1(
+            content,
+            "0000000000000000000000000000000000000000",
+            "test-target",
+        );
+        assert!(result.is_err());
+        match result {
+            Err(MinecraftError::HashMismatch {
+                target,
+                expected,
+                actual,
+            }) => {
+                assert_eq!(target, "test-target");
+                assert_eq!(expected, "0000000000000000000000000000000000000000");
+                assert_eq!(actual, valid_sha1);
+            }
+            _ => panic!("Expected HashMismatch error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_verified_json_from_valid_local_cache() {
+        let temp = TempDirGuard::new("fetch_verified_valid");
+        let cache_file = temp.path().join("verified.json");
+
+        let payload = r#"{"name":"test_entry","count":42}"#;
+        fs::write(&cache_file, payload).expect("failed to write payload");
+
+        let mut hasher = Sha1::new();
+        hasher.update(payload.as_bytes());
+        let expected_sha1 = hex::encode(hasher.finalize());
+
+        let client = reqwest::Client::new();
+        let parsed: serde_json::Value = fetch_verified_json(
+            &client,
+            "http://127.0.0.1:9/unused",
+            &expected_sha1,
+            "test_target",
+            &cache_file,
+        )
+        .await
+        .expect("should load from local cache without hitting network");
+
+        assert_eq!(parsed["name"], "test_entry");
+        assert_eq!(parsed["count"], 42);
+    }
 }
