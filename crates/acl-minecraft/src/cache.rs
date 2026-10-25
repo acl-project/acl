@@ -6,6 +6,7 @@ use std::{
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tracing::{debug, warn};
 pub const DEFAULT_MANIFEST_TTL: Duration = Duration::from_secs(3600);
 
 pub fn cache_key_for_url(url: &str) -> String {
@@ -61,6 +62,70 @@ impl<T: Serialize + DeserializeOwned> Cached<T> {
 
         Ok(())
     }
+}
+
+pub fn verify_sha1(bytes: &[u8], expected_sha1: &str, target: &str) -> Result<()> {
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    let actual = hex::encode(hasher.finalize());
+
+    if !actual.eq_ignore_ascii_case(expected_sha1) {
+        return Err(MinecraftError::HashMismatch {
+            target: target.to_string(),
+            expected: expected_sha1.to_string(),
+            actual,
+        });
+    }
+
+    Ok(())
+}
+/// First load from the local cache; if the hash does not match, fetch from the URL and save it locally.
+pub async fn fetch_verified_json<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    url: &str,
+    expected_sha1: &str,
+    target_id: &str,
+    cache_path: &Path,
+) -> Result<T> {
+    if cache_path.exists() {
+        match fs::read(cache_path) {
+            Ok(bytes) => {
+                if verify_sha1(&bytes, expected_sha1, target_id).is_ok()
+                    && let Ok(parsed) = serde_json::from_slice::<T>(&bytes)
+                {
+                    debug!(
+                        "Loaded verified metadata for '{}' from {}",
+                        target_id,
+                        cache_path.display()
+                    );
+                    return Ok(parsed);
+                }
+
+                warn!(
+                    "Local cached file at {} failed verification or parsing, re-fetching",
+                    cache_path.display()
+                );
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to read cached file at {}: {err}",
+                    cache_path.display()
+                );
+            }
+        }
+    }
+
+    let response = client.get(url).send().await?.error_for_status()?;
+    let bytes = response.bytes().await?;
+
+    verify_sha1(&bytes, expected_sha1, target_id)?;
+    let parsed: T = serde_json::from_slice(&bytes)?;
+
+    if let Err(err) = acl_common::fs::write_atomic(cache_path, &bytes) {
+        warn!("Failed to save file to {}: {err}", cache_path.display());
+    }
+
+    Ok(parsed)
 }
 
 #[cfg(test)]
@@ -163,5 +228,63 @@ mod tests {
         fs::write(&cache_file, "not valid json").expect("failed to write invalid json");
         let result = Cached::<String>::load_from_file(&cache_file);
         assert!(matches!(result, Err(MinecraftError::Json(_))));
+    }
+
+    #[test]
+    fn test_verify_sha1() {
+        let content = b"hello minecraft";
+        let mut hasher = Sha1::new();
+        hasher.update(content);
+        let valid_sha1 = hex::encode(hasher.finalize());
+
+        assert!(verify_sha1(content, &valid_sha1, "test-target").is_ok());
+        // Verify case insensitivity
+        assert!(verify_sha1(content, &valid_sha1.to_uppercase(), "test-target").is_ok());
+
+        let result = verify_sha1(
+            content,
+            "0000000000000000000000000000000000000000",
+            "test-target",
+        );
+        assert!(result.is_err());
+        match result {
+            Err(MinecraftError::HashMismatch {
+                target,
+                expected,
+                actual,
+            }) => {
+                assert_eq!(target, "test-target");
+                assert_eq!(expected, "0000000000000000000000000000000000000000");
+                assert_eq!(actual, valid_sha1);
+            }
+            _ => panic!("Expected HashMismatch error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_verified_json_from_valid_local_cache() {
+        let temp = TempDirGuard::new("fetch_verified_valid");
+        let cache_file = temp.path().join("verified.json");
+
+        let payload = r#"{"name":"test_entry","count":42}"#;
+        fs::write(&cache_file, payload).expect("failed to write payload");
+
+        let mut hasher = Sha1::new();
+        hasher.update(payload.as_bytes());
+        let expected_sha1 = hex::encode(hasher.finalize());
+
+        let client = reqwest::Client::new();
+        let parsed: serde_json::Value = fetch_verified_json(
+            &client,
+            "http://127.0.0.1:9/unused",
+            &expected_sha1,
+            "test_target",
+            &cache_file,
+        )
+        .await
+        .expect("should load from local cache without hitting network");
+
+        assert_eq!(parsed["name"], "test_entry");
+        assert_eq!(parsed["count"], 42);
     }
 }

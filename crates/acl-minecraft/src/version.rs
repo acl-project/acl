@@ -1,10 +1,8 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
-use sha1::{Digest, Sha1};
-use tracing::{debug, warn};
 
-use crate::{MinecraftError, Result, VersionEntry, VersionType, rule::Rule};
+use crate::{Result, Rule, VersionEntry, VersionType};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadFile {
@@ -165,22 +163,6 @@ pub struct VersionMetadata {
 }
 
 impl VersionMetadata {
-    pub fn verify_sha1(bytes: &[u8], expected_sha1: &str, version_id: &str) -> Result<()> {
-        let mut hasher = Sha1::new();
-        hasher.update(bytes);
-        let actual = hex::encode(hasher.finalize());
-
-        if !actual.eq_ignore_ascii_case(expected_sha1) {
-            return Err(MinecraftError::HashMismatch {
-                target: version_id.to_string(),
-                expected: expected_sha1.to_string(),
-                actual,
-            });
-        }
-
-        Ok(())
-    }
-
     /// Fetch version metadata JSON from local cache (`versions/<id>/<id>.json`) or remote URL,
     /// verifying its SHA-1 against `entry.sha1`.
     pub async fn fetch_and_verify(
@@ -188,53 +170,11 @@ impl VersionMetadata {
         entry: &VersionEntry,
         versions_dir: &Path,
     ) -> Result<Self> {
-        let version_json_path = versions_dir
+        let path = versions_dir
             .join(&entry.id)
             .join(format!("{}.json", entry.id));
-        // Check whether the local cache exists and is valid.
-        if version_json_path.exists() {
-            match fs::read(&version_json_path) {
-                Ok(bytes) => {
-                    if Self::verify_sha1(&bytes, &entry.sha1, &entry.id).is_ok()
-                        && let Ok(metadata) = serde_json::from_slice::<Self>(&bytes)
-                    {
-                        debug!(
-                            "Loaded verified version metadata for '{}' from {}",
-                            entry.id,
-                            version_json_path.display()
-                        );
-                        return Ok(metadata);
-                    }
 
-                    warn!(
-                        "Local version metadata at {} failed verification or parsing, re-fetching",
-                        version_json_path.display()
-                    );
-                }
-
-                Err(err) => {
-                    warn!(
-                        "Failed to read cached version metadata at {}: {err}",
-                        version_json_path.display()
-                    );
-                }
-            }
-        }
-
-        let response = client.get(&entry.url).send().await?.error_for_status()?;
-        let bytes = response.bytes().await?;
-
-        Self::verify_sha1(&bytes, &entry.sha1, &entry.id)?;
-        let metadata: Self = serde_json::from_slice(&bytes)?;
-
-        if let Err(err) = acl_common::fs::write_atomic(&version_json_path, &bytes) {
-            warn!(
-                "Failed to save version metadata to {}: {err}",
-                version_json_path.display()
-            );
-        }
-
-        Ok(metadata)
+        crate::cache::fetch_verified_json(client, &entry.url, &entry.sha1, &entry.id, &path).await
     }
 
     /// Return all libraries that are enabled on Linux.
@@ -530,40 +470,6 @@ mod tests {
             ]
         );
         assert!(metadata_legacy.resolve_jvm_arguments().is_empty());
-    }
-
-    #[test]
-    fn test_verify_sha1() {
-        let content = b"hello minecraft";
-        let mut hasher = Sha1::new();
-        hasher.update(content);
-        let valid_sha1 = hex::encode(hasher.finalize());
-
-        assert!(VersionMetadata::verify_sha1(content, &valid_sha1, "test-version").is_ok());
-        // Verify case insensitivity
-        assert!(
-            VersionMetadata::verify_sha1(content, &valid_sha1.to_uppercase(), "test-version")
-                .is_ok()
-        );
-
-        let result = VersionMetadata::verify_sha1(
-            content,
-            "0000000000000000000000000000000000000000",
-            "test-version",
-        );
-        assert!(result.is_err());
-        match result {
-            Err(MinecraftError::HashMismatch {
-                target,
-                expected,
-                actual,
-            }) => {
-                assert_eq!(target, "test-version");
-                assert_eq!(expected, "0000000000000000000000000000000000000000");
-                assert_eq!(actual, valid_sha1);
-            }
-            _ => panic!("Expected HashMismatch error"),
-        }
     }
 
     #[test]
