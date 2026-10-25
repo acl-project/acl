@@ -479,4 +479,76 @@ mod tests {
         let target_file = assets_dir.join("virtual/idemp/test/sample.txt");
         assert!(target_file.exists());
     }
+
+    #[test]
+    fn test_asset_download_tasks() {
+        let mut objects = HashMap::new();
+        // Two objects with duplicate hashes should be deduplicated
+        objects.insert(
+            "icons/icon_1.png".to_string(),
+            AssetObject {
+                hash: "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598".to_string(),
+                size: 100,
+            },
+        );
+        objects.insert(
+            "icons/icon_2.png".to_string(),
+            AssetObject {
+                hash: "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598".to_string(),
+                size: 100,
+            },
+        );
+        // Valid unique hash
+        objects.insert(
+            "sounds/cave.ogg".to_string(),
+            AssetObject {
+                hash: "88523c0612c62c96c4664da6929a8a3a79d0bcf3".to_string(),
+                size: 200,
+            },
+        );
+        // Invalid hash (non-hex / too short) should be skipped
+        objects.insert(
+            "bad/asset.png".to_string(),
+            AssetObject {
+                hash: "invalid_hash".to_string(),
+                size: 50,
+            },
+        );
+
+        let index = AssetIndex {
+            objects,
+            map_to_resources: false,
+            is_virtual: false,
+        };
+
+        let assets_dir = Path::new("/mock/assets");
+        let tasks = index.asset_download_tasks(assets_dir);
+
+        // Deduplication and invalid hash skipping should leave exactly 2 tasks
+        assert_eq!(tasks.len(), 2);
+
+        for task in &tasks {
+            if task.sha1 == "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598" {
+                assert_eq!(
+                    task.destination,
+                    assets_dir
+                        .join("objects")
+                        .join("bd")
+                        .join("bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598")
+                );
+                assert_eq!(task.size, 100);
+            } else if task.sha1 == "88523c0612c62c96c4664da6929a8a3a79d0bcf3" {
+                assert_eq!(
+                    task.destination,
+                    assets_dir
+                        .join("objects")
+                        .join("88")
+                        .join("88523c0612c62c96c4664da6929a8a3a79d0bcf3")
+                );
+                assert_eq!(task.size, 200);
+            } else {
+                panic!("unexpected task sha1: {}", task.sha1);
+            }
+        }
+    }
 }

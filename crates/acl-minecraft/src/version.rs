@@ -596,4 +596,217 @@ mod tests {
         assert_eq!(parsed.libraries.len(), 1);
         assert_eq!(parsed.libraries[0].name, "com.mojang:authlib:6.0.55");
     }
+
+    #[test]
+    fn test_client_download_task() {
+        let metadata = VersionMetadata {
+            id: "1.21.1".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: None,
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com/asset".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "abcdef0123456789".to_string(),
+                    size: 54321,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries: Vec::new(),
+        };
+
+        let versions_dir = Path::new("/mock/versions");
+        let task = metadata.client_download_task(versions_dir);
+
+        assert_eq!(task.name, "1.21.1.jar");
+        assert_eq!(task.url, "https://example.com/client.jar");
+        assert_eq!(task.sha1, "abcdef0123456789");
+        assert_eq!(task.size, 54321);
+        assert_eq!(
+            task.destination,
+            versions_dir.join("1.21.1").join("1.21.1.jar")
+        );
+    }
+
+    #[test]
+    fn test_library_download_tasks() {
+        let libraries_dir = Path::new("/mock/libraries");
+
+        // 1. Standard library with explicit path
+        let lib_standard = Library {
+            name: "com.mojang:authlib:6.0.55".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("com/mojang/authlib/6.0.55/authlib-6.0.55.jar".to_string()),
+                    sha1: "sha_authlib".to_string(),
+                    size: 1000,
+                    url: "https://example.com/authlib.jar".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        // 2. Library with artifact path=None (should fallback to maven_artifact_path)
+        let lib_maven_fallback = Library {
+            name: "org.lwjgl:lwjgl:3.3.3".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: None,
+                    sha1: "sha_lwjgl".to_string(),
+                    size: 2000,
+                    url: "https://example.com/lwjgl.jar".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        // 3. Library with native classifier for linux
+        let mut natives_map = HashMap::new();
+        natives_map.insert("linux".to_string(), "natives-linux".to_string());
+        let mut classifiers_map = HashMap::new();
+        classifiers_map.insert(
+            "natives-linux".to_string(),
+            LibraryArtifact {
+                path: Some("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar".to_string()),
+                sha1: "sha_lwjgl_natives".to_string(),
+                size: 3000,
+                url: "https://example.com/lwjgl-natives.jar".to_string(),
+            },
+        );
+        let lib_native = Library {
+            name: "org.lwjgl:lwjgl:3.3.3".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: None,
+                classifiers: Some(classifiers_map),
+            }),
+            natives: Some(natives_map),
+            rules: None,
+            extract: None,
+        };
+
+        // 4. Duplicate library sharing same SHA1 as lib_standard (should be deduplicated)
+        let lib_duplicate = Library {
+            name: "com.mojang:authlib-duplicate:6.0.55".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("com/mojang/authlib/6.0.55/authlib-6.0.55.jar".to_string()),
+                    sha1: "sha_authlib".to_string(),
+                    size: 1000,
+                    url: "https://example.com/authlib-dup.jar".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        // 5. Library disallowed on Linux (should be excluded)
+        let lib_windows_only = Library {
+            name: "windows:only:1.0".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("windows/only/1.0/only-1.0.jar".to_string()),
+                    sha1: "sha_win".to_string(),
+                    size: 500,
+                    url: "https://example.com/win.jar".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: Some(vec![Rule {
+                action: RuleAction::Allow,
+                os: Some(OsRule {
+                    name: Some("windows".to_string()),
+                    arch: None,
+                }),
+                features: None,
+            }]),
+            extract: None,
+        };
+
+        let metadata = VersionMetadata {
+            id: "1.21.1".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: None,
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com/asset".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "client_sha1".to_string(),
+                    size: 100,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries: vec![
+                lib_standard,
+                lib_maven_fallback,
+                lib_native,
+                lib_duplicate,
+                lib_windows_only,
+            ],
+        };
+
+        let tasks = metadata.library_download_tasks(libraries_dir);
+
+        // Expected 3 tasks: standard, maven fallback, and linux native (duplicate & windows-only excluded)
+        assert_eq!(tasks.len(), 3);
+
+        let standard_task = tasks
+            .iter()
+            .find(|t| t.sha1 == "sha_authlib")
+            .expect("standard task should exist");
+        assert_eq!(
+            standard_task.destination,
+            libraries_dir.join("com/mojang/authlib/6.0.55/authlib-6.0.55.jar")
+        );
+        assert_eq!(standard_task.size, 1000);
+
+        let fallback_task = tasks
+            .iter()
+            .find(|t| t.sha1 == "sha_lwjgl")
+            .expect("fallback task should exist");
+        assert_eq!(
+            fallback_task.destination,
+            libraries_dir.join("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3.jar")
+        );
+        assert_eq!(fallback_task.size, 2000);
+
+        let native_task = tasks
+            .iter()
+            .find(|t| t.sha1 == "sha_lwjgl_natives")
+            .expect("native task should exist");
+        assert_eq!(
+            native_task.destination,
+            libraries_dir.join("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar")
+        );
+        assert_eq!(native_task.name, "org.lwjgl:lwjgl:3.3.3:natives-linux");
+        assert_eq!(native_task.size, 3000);
+    }
 }
