@@ -13,4 +13,4 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 sha1 = { workspace = true }
-hex = {workspace = true }
+hex = { workspace = true }

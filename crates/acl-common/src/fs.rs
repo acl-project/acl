@@ -6,7 +6,11 @@ pub fn write_atomic(path: impl AsRef<Path>, bytes: &[u8]) -> std::io::Result<()>
         std::fs::create_dir_all(parent)?;
     }
 
-    let tmp_path = path.with_extension("tmp");
+    let mut tmp_os_str = path.as_os_str().to_os_string();
+    // Prevent interference caused by multiple processes.
+    tmp_os_str.push(format!(".tmp.{}", std::process::id()));
+    let tmp_path = std::path::PathBuf::from(tmp_os_str);
+
     let res = (|| -> std::io::Result<()> {
         let mut file = std::fs::File::create(&tmp_path)?;
         file.write_all(bytes)?;

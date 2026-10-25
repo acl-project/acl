@@ -26,7 +26,7 @@ pub enum VersionType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionEntry {
-    // Version munber
+    // Version number
     pub id: String,
 
     #[serde(rename = "type")]
@@ -78,8 +78,9 @@ impl VersionManifest {
 
         let cached = Cached::<Self>::load_from_file(&cache_path).ok();
 
+        // If a clock anomaly occurs, unwrap_or(false) ensures that it does not abort early and instead continues to issue the network request below.
         if let Some(ref entry) = cached
-            && entry.is_fresh()?
+            && entry.is_fresh().unwrap_or(false)
         {
             debug!(
                 "Using fresh version manifest cache from {}",
@@ -90,12 +91,14 @@ impl VersionManifest {
 
         match Self::fetch_from_url(client, url).await {
             Ok(manifest) => {
-                let entry = Cached::new(manifest.clone(), ttl)?;
-                if let Err(err) = entry.save_to_file(&cache_path) {
+                if let Err(err) = Cached::new(manifest.clone(), ttl)
+                    .and_then(|entry| entry.save_to_file(&cache_path))
+                {
                     warn!("Failed to save version manifest cache: {err}");
                 }
                 Ok(manifest)
             }
+
             Err(err) => {
                 // Fallback to expired cache when offline or network fails
                 if let Some(entry) = cached {
