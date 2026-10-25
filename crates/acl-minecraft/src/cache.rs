@@ -62,3 +62,106 @@ impl<T: Serialize + DeserializeOwned> Cached<T> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "acl_test_mc_cache_{}_{}_{}",
+                name,
+                std::process::id(),
+                id
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("failed to create temp test dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_cache_key_for_url() {
+        let key1 =
+            cache_key_for_url("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
+        let key2 =
+            cache_key_for_url("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
+        let key3 = cache_key_for_url("https://example.com/other.json");
+
+        assert_eq!(key1, key2);
+        assert_ne!(key1, key3);
+        assert!(key1.ends_with(".json"));
+        // SHA1 is 40 hex chars + 5 for ".json"
+        assert_eq!(key1.len(), 45);
+    }
+
+    #[test]
+    fn test_cached_freshness() {
+        let cached = Cached::new("manifest_data".to_string(), Duration::from_secs(3600))
+            .expect("failed to create cached");
+        assert!(cached.is_fresh().expect("failed to check freshness"));
+
+        let expired = Cached {
+            cached_at: cached.cached_at.saturating_sub(100),
+            ttl_secs: 10,
+            data: "manifest_data".to_string(),
+        };
+        assert!(!expired.is_fresh().expect("failed to check freshness"));
+    }
+
+    #[test]
+    fn test_cached_save_and_load_roundtrip() {
+        let temp = TempDirGuard::new("roundtrip");
+        let cache_file = temp.path().join("cache.json");
+
+        let cached = Cached::new("test_payload".to_string(), Duration::from_secs(120))
+            .expect("failed to create cached");
+        cached
+            .save_to_file(&cache_file)
+            .expect("failed to save cached to file");
+
+        let loaded: Cached<String> =
+            Cached::load_from_file(&cache_file).expect("failed to load cached from file");
+        assert_eq!(loaded.data, "test_payload");
+        assert_eq!(loaded.cached_at, cached.cached_at);
+        assert_eq!(loaded.ttl_secs, cached.ttl_secs);
+    }
+
+    #[test]
+    fn test_cached_load_from_nonexistent_file() {
+        let temp = TempDirGuard::new("missing");
+        let cache_file = temp.path().join("nonexistent.json");
+
+        let result = Cached::<String>::load_from_file(&cache_file);
+        assert!(matches!(result, Err(MinecraftError::Io { .. })));
+    }
+
+    #[test]
+    fn test_cached_load_from_invalid_json() {
+        let temp = TempDirGuard::new("invalid_json");
+        let cache_file = temp.path().join("invalid.json");
+
+        fs::write(&cache_file, "not valid json").expect("failed to write invalid json");
+        let result = Cached::<String>::load_from_file(&cache_file);
+        assert!(matches!(result, Err(MinecraftError::Json(_))));
+    }
+}

@@ -25,3 +25,28 @@ pub enum MinecraftError {
 }
 
 pub type Result<T> = std::result::Result<T, MinecraftError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_minecraft_error_display() {
+        let err = MinecraftError::VersionNotFound {
+            version_id: "1.21".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "Minecraft version '1.21' not found in manifest"
+        );
+
+        let io_err = MinecraftError::Io {
+            path: PathBuf::from("/test/path"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "file missing"),
+        };
+        assert_eq!(
+            io_err.to_string(),
+            "I/O error at path '/test/path': file missing"
+        );
+    }
+}
