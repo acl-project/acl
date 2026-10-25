@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+acl-common = { workspace = true }
+
 md-5 = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

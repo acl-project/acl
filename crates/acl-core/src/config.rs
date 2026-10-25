@@ -1,6 +1,5 @@
 use std::{
-    fs::{self, File},
-    io::Write,
+    fs::{self},
     path::{Path, PathBuf},
 };
 
@@ -59,39 +58,11 @@ impl LauncherConfig {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|source| CoreError::Io {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-
         let content = toml::to_string_pretty(self)?;
 
-        let tmp_path = path.with_extension("toml.tmp");
-
-        // Write the file atomically.
-        let write_result = (|| -> std::io::Result<()> {
-            let mut tmp_file = File::create(&tmp_path)?;
-            tmp_file.write_all(content.as_bytes())?;
-            tmp_file.sync_all()?;
-            Ok(())
-        })();
-
-        if let Err(source) = write_result {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(CoreError::Io {
-                path: tmp_path,
-                source,
-            });
-        }
-
-        fs::rename(&tmp_path, path).map_err(|source| {
-            let _ = fs::remove_file(&tmp_path);
-            CoreError::Io {
-                path: path.to_path_buf(),
-                source,
-            }
+        acl_common::fs::write_atomic(path, content.as_bytes()).map_err(|source| CoreError::Io {
+            path: path.to_path_buf(),
+            source,
         })?;
 
         info!("Configuration saved to {}", path.display());

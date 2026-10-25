@@ -6,7 +6,7 @@ Do not make any modifications to the code, except for unit tests.
 - **Obtain explicit approval.** Do not write or modify any unit tests until explicit approval has been given.
 - **Strictly limit the scope of changes.** You are only allowed to write or modify unit tests. All other code modifications are strictly prohibited.
 - Do not modify production code, configuration files, build scripts, dependencies, or other project files.
-- If the required unit tests cannot be written without modifying files outside the permitted scope, explain the limitation and request approval before proceeding.
+- If the required unit tests cannot be written without modifying files outside the permitted scope, explain the limitation and do not modify other code.
 
 # Code Review Guidelines
 
@@ -22,6 +22,7 @@ When reviewing the code, follow these guidelines:
 - Ensure that all comments and log messages are written in English.
 - Verify that changes are being made on a branch other than `main`.
 - Ensure that branch names follow the `feat/` or `fix/` naming conventions, as appropriate.
+- Strictly forbidden to cause crashes due to `unwrap`.
 
 # Mandatory Pre-Delivery Verification
 
