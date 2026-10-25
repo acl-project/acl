@@ -29,6 +29,13 @@ pub enum MinecraftError {
         expected: String,
         actual: String,
     },
+
+    #[error("Zip archive error at path '{path}': {source}")]
+    Zip {
+        path: PathBuf,
+        #[source]
+        source: zip::result::ZipError,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, MinecraftError>;

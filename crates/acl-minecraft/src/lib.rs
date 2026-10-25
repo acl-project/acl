@@ -3,6 +3,7 @@ pub mod cache;
 pub mod download;
 pub mod error;
 pub mod manifest;
+pub mod native;
 pub mod rule;
 pub mod version;
 
@@ -11,6 +12,9 @@ pub use cache::{Cached, DEFAULT_MANIFEST_TTL, cache_key_for_url};
 pub use error::{MinecraftError, Result};
 pub use manifest::{
     LatestVersions, VERSION_MANIFEST_URL, VersionEntry, VersionManifest, VersionType,
+};
+pub use native::{
+    DEFAULT_NATIVE_EXCLUDE, NativeArchive, extract_all_natives, extract_native_archive,
 };
 pub use rule::{OsRule, Rule, RuleAction};
 pub use version::{

@@ -1,12 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::{Result, Rule, VersionEntry, VersionType, download::DownloadTask};
+use crate::{
+    Result, Rule, VersionEntry, VersionType, download::DownloadTask, native::NativeArchive,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadFile {
@@ -93,6 +95,19 @@ impl Library {
         };
 
         Some(format!("{group_path}/{artifact}/{version}/{file_name}"))
+    }
+    /// Resolve relative artifact path from explicit `artifact.path` or Maven coordinate fallback.
+    pub fn artifact_relative_path(&self, artifact: &LibraryArtifact) -> Option<String> {
+        artifact.path.clone().or_else(|| self.maven_artifact_path())
+    }
+
+    /// Check whether the Maven coordinate represents a modern Linux native artifact (1.19+).
+    /// For example: `org.lwjgl:lwjgl:3.3.3:natives-linux`
+    pub fn is_modern_linux_native(&self) -> bool {
+        self.name
+            .split(':')
+            .nth(3)
+            .is_some_and(|classifier| classifier == "natives-linux")
     }
 }
 
@@ -275,6 +290,89 @@ impl VersionMetadata {
             }
         }
         tasks
+    }
+
+    pub fn native_archives(&self, libraries_dir: &Path) -> Vec<NativeArchive> {
+        let mut archives = Vec::new();
+        let mut seen_paths = HashSet::new();
+
+        for lib in self.active_libraries() {
+            let Some(downloads) = &lib.downloads else {
+                continue;
+            };
+
+            let exclude = match &lib.extract {
+                Some(ExtractRules {
+                    exclude: Some(list),
+                }) => list.clone(),
+                _ => Vec::new(),
+            };
+
+            if let (Some(natives), Some(classifiers)) = (&lib.natives, &downloads.classifiers)
+                && let Some(classifier_key) = natives.get("linux")
+                && let Some(native_artifact) = classifiers.get(classifier_key)
+                && let Some(rel_path) = &native_artifact.path
+            {
+                let archive_path = libraries_dir.join(rel_path);
+                if seen_paths.insert(archive_path.clone()) {
+                    archives.push(NativeArchive {
+                        name: format!("{}:{classifier_key}", lib.name),
+                        archive_path,
+                        exclude: exclude.clone(),
+                    });
+                }
+            }
+
+            if lib.is_modern_linux_native()
+                && let Some(artifact) = &downloads.artifact
+                && let Some(rel_path) = lib.artifact_relative_path(artifact)
+            {
+                let archive_path = libraries_dir.join(rel_path);
+                if seen_paths.insert(archive_path.clone()) {
+                    archives.push(NativeArchive {
+                        name: lib.name.clone(),
+                        archive_path,
+                        exclude,
+                    });
+                }
+            }
+        }
+        archives
+    }
+
+    /// Extract all active Linux native libraries into `natives_dir`.
+    pub fn extract_natives(&self, libraries_dir: &Path, natives_dir: &Path) -> Result<()> {
+        let archives = self.native_archives(libraries_dir);
+        crate::native::extract_all_natives(&archives, natives_dir)
+    }
+
+    /// Build the ordered list of classpath jar paths (all active library artifacts + client jar).
+    pub fn classpath_entries(&self, libraries_dir: &Path, versions_dir: &Path) -> Vec<PathBuf> {
+        let mut entries = Vec::new();
+        let mut seen_paths = HashSet::new();
+
+        for lib in self.active_libraries() {
+            let Some(downloads) = &lib.downloads else {
+                continue;
+            };
+
+            if let Some(artifact) = &downloads.artifact {
+                if let Some(rel_path) = lib.artifact_relative_path(artifact) {
+                    let full_path = libraries_dir.join(rel_path);
+                    if seen_paths.insert(full_path.clone()) {
+                        entries.push(full_path);
+                    }
+                } else {
+                    warn!(
+                        "Skipping library '{}' in classpath with invalid Maven coordinate",
+                        lib.name
+                    );
+                }
+            }
+        }
+
+        entries.push(versions_dir.join(&self.id).join(format!("{}.jar", self.id)));
+        entries
     }
 }
 
