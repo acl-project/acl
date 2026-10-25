@@ -22,6 +22,13 @@ pub enum MinecraftError {
 
     #[error("System clock error: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
+
+    #[error("SHA-1 mismatch for '{target}': expected {expected}, actual {actual}")]
+    HashMismatch {
+        target: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, MinecraftError>;
@@ -47,6 +54,16 @@ mod tests {
         assert_eq!(
             io_err.to_string(),
             "I/O error at path '/test/path': file missing"
+        );
+
+        let hash_err = MinecraftError::HashMismatch {
+            target: "1.21.json".to_string(),
+            expected: "abcdef".to_string(),
+            actual: "123456".to_string(),
+        };
+        assert_eq!(
+            hash_err.to_string(),
+            "SHA-1 mismatch for '1.21.json': expected abcdef, actual 123456"
         );
     }
 }
