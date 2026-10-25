@@ -6,6 +6,7 @@ use std::{
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tracing::{debug, warn};
 pub const DEFAULT_MANIFEST_TTL: Duration = Duration::from_secs(3600);
 
 pub fn cache_key_for_url(url: &str) -> String {
@@ -61,6 +62,70 @@ impl<T: Serialize + DeserializeOwned> Cached<T> {
 
         Ok(())
     }
+}
+
+pub fn verify_sha1(bytes: &[u8], expected_sha1: &str, target: &str) -> Result<()> {
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    let actual = hex::encode(hasher.finalize());
+
+    if !actual.eq_ignore_ascii_case(expected_sha1) {
+        return Err(MinecraftError::HashMismatch {
+            target: target.to_string(),
+            expected: expected_sha1.to_string(),
+            actual,
+        });
+    }
+
+    Ok(())
+}
+/// First load from the local cache; if the hash does not match, fetch from the URL and save it locally.
+pub async fn fetch_verified_json<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    url: &str,
+    expected_sha1: &str,
+    target_id: &str,
+    cache_path: &Path,
+) -> Result<T> {
+    if cache_path.exists() {
+        match fs::read(cache_path) {
+            Ok(bytes) => {
+                if verify_sha1(&bytes, expected_sha1, target_id).is_ok()
+                    && let Ok(parsed) = serde_json::from_slice::<T>(&bytes)
+                {
+                    debug!(
+                        "Loaded verified metadata for '{}' from {}",
+                        target_id,
+                        cache_path.display()
+                    );
+                    return Ok(parsed);
+                }
+
+                warn!(
+                    "Local cached file at {} failed verification or parsing, re-fetching",
+                    cache_path.display()
+                );
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to read cached file at {}: {err}",
+                    cache_path.display()
+                );
+            }
+        }
+    }
+
+    let response = client.get(url).send().await?.error_for_status()?;
+    let bytes = response.bytes().await?;
+
+    verify_sha1(&bytes, expected_sha1, target_id)?;
+    let parsed: T = serde_json::from_slice(&bytes)?;
+
+    if let Err(err) = acl_common::fs::write_atomic(cache_path, &bytes) {
+        warn!("Failed to save file to {}: {err}", cache_path.display());
+    }
+
+    Ok(parsed)
 }
 
 #[cfg(test)]
