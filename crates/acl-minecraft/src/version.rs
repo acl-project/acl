@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -223,15 +226,19 @@ impl VersionMetadata {
         }
     }
 
-    pub fn library_download_task(&self, libraries_dir: &Path) -> Vec<DownloadTask> {
+    pub fn library_download_tasks(&self, libraries_dir: &Path) -> Vec<DownloadTask> {
         let mut tasks = Vec::new();
-
+        let mut seen_hashed = HashSet::new();
         for lib in self.active_libraries() {
             let Some(downloads) = &lib.downloads else {
                 continue;
             };
 
             if let Some(artifact) = &downloads.artifact {
+                if !seen_hashed.insert(artifact.sha1.clone()) {
+                    continue;
+                }
+
                 let rel_path = artifact.path.clone().or_else(|| lib.maven_artifact_path());
                 if let Some(rel_path) = rel_path {
                     tasks.push(DownloadTask {
@@ -254,6 +261,10 @@ impl VersionMetadata {
                 && let Some(native_artifact) = classifiers.get(classifier_key)
                 && let Some(rel_path) = &native_artifact.path
             {
+                if !seen_hashed.insert(native_artifact.sha1.clone()) {
+                    continue;
+                }
+
                 tasks.push(DownloadTask {
                     name: format!("{}:{classifier_key}", lib.name),
                     url: native_artifact.url.clone(),

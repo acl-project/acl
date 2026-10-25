@@ -8,10 +8,10 @@ use crate::{MinecraftError, Result, cache::verify_sha1};
 use std::{path::PathBuf, sync::Arc};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadTask {
-    // Label name used for logging.
+    /// Label name used for logging.
     pub name: String,
     pub url: String,
-    // The fully assembled complete local save path.
+    /// The fully assembled complete local save path.
     pub destination: PathBuf,
     pub sha1: String,
     pub size: u64,
@@ -101,7 +101,10 @@ pub async fn download_all(
             let _permit = semaphore
                 .acquire_owned()
                 .await
-                .expect("semaphore should not be closed");
+                .map_err(|err| MinecraftError::Io {
+                    path: task.destination.clone(),
+                    source: std::io::Error::other(err),
+                })?;
             download_and_verify_file(&client, &task).await?;
             Ok::<u64, MinecraftError>(task.size)
         });
