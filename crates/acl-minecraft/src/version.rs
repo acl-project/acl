@@ -1,8 +1,9 @@
 use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
-use crate::{Result, Rule, VersionEntry, VersionType};
+use crate::{Result, Rule, VersionEntry, VersionType, download::DownloadTask};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadFile {
@@ -209,6 +210,60 @@ impl VersionMetadata {
         } else {
             Vec::new()
         }
+    }
+
+    pub fn client_download_task(&self, versions_dir: &Path) -> DownloadTask {
+        let client = &self.downloads.client;
+        DownloadTask {
+            name: format!("{}.jar", self.id),
+            url: client.url.clone(),
+            destination: versions_dir.join(&self.id).join(format!("{}.jar", self.id)),
+            sha1: client.sha1.clone(),
+            size: client.size,
+        }
+    }
+
+    pub fn library_download_task(&self, libraries_dir: &Path) -> Vec<DownloadTask> {
+        let mut tasks = Vec::new();
+
+        for lib in self.active_libraries() {
+            let Some(downloads) = &lib.downloads else {
+                continue;
+            };
+
+            if let Some(artifact) = &downloads.artifact {
+                let rel_path = artifact.path.clone().or_else(|| lib.maven_artifact_path());
+                if let Some(rel_path) = rel_path {
+                    tasks.push(DownloadTask {
+                        name: lib.name.clone(),
+                        url: artifact.url.clone(),
+                        destination: libraries_dir.join(rel_path),
+                        sha1: artifact.sha1.clone(),
+                        size: artifact.size,
+                    });
+                } else {
+                    warn!(
+                        "Skipping library '{}' with invalid Maven coordinate",
+                        lib.name
+                    );
+                }
+            }
+
+            if let (Some(natives), Some(classifiers)) = (&lib.natives, &downloads.classifiers)
+                && let Some(classifier_key) = natives.get("linux")
+                && let Some(native_artifact) = classifiers.get(classifier_key)
+                && let Some(rel_path) = &native_artifact.path
+            {
+                tasks.push(DownloadTask {
+                    name: format!("{}:{classifier_key}", lib.name),
+                    url: native_artifact.url.clone(),
+                    destination: libraries_dir.join(rel_path),
+                    sha1: native_artifact.sha1.clone(),
+                    size: native_artifact.size,
+                });
+            }
+        }
+        tasks
     }
 }
 

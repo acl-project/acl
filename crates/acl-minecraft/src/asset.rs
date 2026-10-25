@@ -1,6 +1,11 @@
-use std::{collections::HashMap, fs, os::unix::fs::symlink, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    os::unix::fs::symlink,
+    path::Path,
+};
 
-use crate::{AssetIndexInfo, MinecraftError, Result};
+use crate::{AssetIndexInfo, MinecraftError, Result, download::DownloadTask};
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -105,6 +110,35 @@ impl AssetIndex {
         }
 
         Ok(())
+    }
+
+    pub fn asset_download_tasks(&self, assets_dir: &Path) -> Vec<DownloadTask> {
+        let mut seen_hashed = HashSet::new();
+        let mut tasks = Vec::new();
+
+        for (logical_path, obj) in &self.objects {
+            if !seen_hashed.insert(&obj.hash) {
+                continue;
+            }
+
+            let (Some(rel_path), Some(url)) = (obj.relative_path(), obj.download_url()) else {
+                warn!(
+                    "Skipping asset '{logical_path}' with invalid hash '{}'",
+                    obj.hash
+                );
+                continue;
+            };
+
+            tasks.push(DownloadTask {
+                name: logical_path.clone(),
+                url,
+                destination: assets_dir.join("objects").join(rel_path),
+                sha1: obj.hash.clone(),
+                size: obj.size,
+            });
+        }
+
+        tasks
     }
 }
 
