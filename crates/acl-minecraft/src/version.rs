@@ -15,8 +15,8 @@ pub struct DownloadFile {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionDownloads {
-    clinet: DownloadFile,
-    server: Option<DownloadFile>,
+    pub client: DownloadFile,
+    pub server: Option<DownloadFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,15 +165,15 @@ pub struct VersionMetadata {
 }
 
 impl VersionMetadata {
-    pub fn verify_sha1(bytes: &[u8], excpected_sha1: &str, version_id: &str) -> Result<()> {
+    pub fn verify_sha1(bytes: &[u8], expected_sha1: &str, version_id: &str) -> Result<()> {
         let mut hasher = Sha1::new();
         hasher.update(bytes);
         let actual = hex::encode(hasher.finalize());
 
-        if !actual.eq_ignore_ascii_case(excpected_sha1) {
+        if !actual.eq_ignore_ascii_case(expected_sha1) {
             return Err(MinecraftError::HashMismatch {
                 target: version_id.to_string(),
-                expected: excpected_sha1.to_string(),
+                expected: expected_sha1.to_string(),
                 actual,
             });
         }
