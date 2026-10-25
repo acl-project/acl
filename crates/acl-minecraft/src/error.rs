@@ -55,5 +55,15 @@ mod tests {
             io_err.to_string(),
             "I/O error at path '/test/path': file missing"
         );
+
+        let hash_err = MinecraftError::HashMismatch {
+            target: "1.21.json".to_string(),
+            expected: "abcdef".to_string(),
+            actual: "123456".to_string(),
+        };
+        assert_eq!(
+            hash_err.to_string(),
+            "SHA-1 mismatch for '1.21.json': expected abcdef, actual 123456"
+        );
     }
 }
