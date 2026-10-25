@@ -1,5 +1,4 @@
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs::{self};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -107,39 +106,11 @@ impl AccountStore {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|source| AuthError::Io {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-
         let content = serde_json::to_string_pretty(self)?;
 
-        let tmp_path = path.with_extension("json.tmp");
-
-        // Write the file atomically.
-        let write_result = (|| -> std::io::Result<()> {
-            let mut tmp_file = File::create(&tmp_path)?;
-            tmp_file.write_all(content.as_bytes())?;
-            tmp_file.sync_all()?;
-            Ok(())
-        })();
-
-        if let Err(source) = write_result {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(AuthError::Io {
-                path: tmp_path,
-                source,
-            });
-        }
-
-        fs::rename(&tmp_path, path).map_err(|source| {
-            let _ = fs::remove_file(&tmp_path);
-            AuthError::Io {
-                path: path.to_path_buf(),
-                source,
-            }
+        acl_common::fs::write_atomic(path, content.as_bytes()).map_err(|source| AuthError::Io {
+            path: path.to_path_buf(),
+            source,
         })?;
 
         info!("Accounts saved to {}", path.display());

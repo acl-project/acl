@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 acl-minecraft = { workspace = true }
 acl-auth = { workspace = true }
+acl-common = { workspace = true }
 
 directories = { workspace = true }
 serde = { workspace = true }
