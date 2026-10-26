@@ -907,4 +907,459 @@ mod tests {
         assert_eq!(native_task.name, "org.lwjgl:lwjgl:3.3.3:natives-linux");
         assert_eq!(native_task.size, 3000);
     }
+
+    #[test]
+    fn test_artifact_relative_path_and_is_modern_linux_native() {
+        let lib_explicit = Library {
+            name: "org.lwjgl:lwjgl:3.3.3".to_string(),
+            downloads: None,
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        let artifact_explicit = LibraryArtifact {
+            path: Some("explicit/path/to/lib.jar".to_string()),
+            sha1: "abc".to_string(),
+            size: 10,
+            url: "https://example.com".to_string(),
+        };
+        assert_eq!(
+            lib_explicit.artifact_relative_path(&artifact_explicit),
+            Some("explicit/path/to/lib.jar".to_string())
+        );
+
+        let artifact_fallback = LibraryArtifact {
+            path: None,
+            sha1: "abc".to_string(),
+            size: 10,
+            url: "https://example.com".to_string(),
+        };
+        assert_eq!(
+            lib_explicit.artifact_relative_path(&artifact_fallback),
+            Some("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3.jar".to_string())
+        );
+
+        let lib_invalid = Library {
+            name: "invalid-coordinate".to_string(),
+            downloads: None,
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        assert_eq!(lib_invalid.artifact_relative_path(&artifact_fallback), None);
+
+        let modern_native = Library {
+            name: "org.lwjgl:lwjgl:3.3.3:natives-linux".to_string(),
+            downloads: None,
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        assert!(modern_native.is_modern_linux_native());
+
+        let modern_windows = Library {
+            name: "org.lwjgl:lwjgl:3.3.3:natives-windows".to_string(),
+            downloads: None,
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        assert!(!modern_windows.is_modern_linux_native());
+
+        let standard_lib = Library {
+            name: "org.lwjgl:lwjgl:3.3.3".to_string(),
+            downloads: None,
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        assert!(!standard_lib.is_modern_linux_native());
+    }
+
+    #[test]
+    fn test_native_archives() {
+        let libraries_dir = Path::new("/mock/libraries");
+
+        // 1. Legacy native library with classifiers
+        let mut natives_map = HashMap::new();
+        natives_map.insert("linux".to_string(), "natives-linux".to_string());
+        let mut classifiers_map = HashMap::new();
+        classifiers_map.insert(
+            "natives-linux".to_string(),
+            LibraryArtifact {
+                path: Some(
+                    "org/lwjgl/lwjgl-platform/2.9.4/lwjgl-platform-2.9.4-natives-linux.jar"
+                        .to_string(),
+                ),
+                sha1: "sha_legacy".to_string(),
+                size: 100,
+                url: "https://example.com".to_string(),
+            },
+        );
+        let lib_legacy = Library {
+            name: "org.lwjgl:lwjgl-platform:2.9.4".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: None,
+                classifiers: Some(classifiers_map),
+            }),
+            natives: Some(natives_map),
+            rules: None,
+            extract: Some(ExtractRules {
+                exclude: Some(vec!["META-INF/".to_string()]),
+            }),
+        };
+
+        // 2. Modern native library (1.19+)
+        let lib_modern = Library {
+            name: "org.lwjgl:lwjgl:3.3.3:natives-linux".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar".to_string()),
+                    sha1: "sha_modern".to_string(),
+                    size: 200,
+                    url: "https://example.com".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        // 3. Modern native with fallback path
+        let lib_modern_fallback = Library {
+            name: "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-linux".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: None,
+                    sha1: "sha_jemalloc".to_string(),
+                    size: 300,
+                    url: "https://example.com".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        // 4. Windows-only library
+        let lib_windows = Library {
+            name: "org.lwjgl:lwjgl:3.3.3:natives-windows".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-windows.jar".to_string()),
+                    sha1: "sha_win".to_string(),
+                    size: 200,
+                    url: "https://example.com".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: Some(vec![Rule {
+                action: RuleAction::Allow,
+                os: Some(OsRule {
+                    name: Some("windows".to_string()),
+                    arch: None,
+                }),
+                features: None,
+            }]),
+            extract: None,
+        };
+
+        // 5. Duplicate of lib_modern (should be deduplicated)
+        let lib_modern_dup = lib_modern.clone();
+
+        let metadata = VersionMetadata {
+            id: "1.21.1".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: None,
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "sha_client".to_string(),
+                    size: 1000,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries: vec![
+                lib_legacy,
+                lib_modern,
+                lib_modern_fallback,
+                lib_windows,
+                lib_modern_dup,
+            ],
+        };
+
+        let archives = metadata.native_archives(libraries_dir);
+        assert_eq!(archives.len(), 3);
+
+        assert_eq!(
+            archives[0].name,
+            "org.lwjgl:lwjgl-platform:2.9.4:natives-linux"
+        );
+        assert_eq!(
+            archives[0].archive_path,
+            libraries_dir
+                .join("org/lwjgl/lwjgl-platform/2.9.4/lwjgl-platform-2.9.4-natives-linux.jar")
+        );
+        assert_eq!(archives[0].exclude, vec!["META-INF/"]);
+
+        assert_eq!(archives[1].name, "org.lwjgl:lwjgl:3.3.3:natives-linux");
+        assert_eq!(
+            archives[1].archive_path,
+            libraries_dir.join("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar")
+        );
+        assert!(archives[1].exclude.is_empty());
+
+        assert_eq!(
+            archives[2].name,
+            "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-linux"
+        );
+        assert_eq!(
+            archives[2].archive_path,
+            libraries_dir
+                .join("org/lwjgl/lwjgl-jemalloc/3.3.3/lwjgl-jemalloc-3.3.3-natives-linux.jar")
+        );
+        assert!(archives[2].exclude.is_empty());
+    }
+
+    #[test]
+    fn test_classpath_entries() {
+        let libraries_dir = Path::new("/mock/libraries");
+        let versions_dir = Path::new("/mock/versions");
+
+        let lib1 = Library {
+            name: "com.mojang:authlib:6.0.55".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("com/mojang/authlib/6.0.55/authlib-6.0.55.jar".to_string()),
+                    sha1: "sha1".to_string(),
+                    size: 100,
+                    url: "https://example.com".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        let lib2 = Library {
+            name: "org.lwjgl:lwjgl:3.3.3".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: None,
+                    sha1: "sha2".to_string(),
+                    size: 200,
+                    url: "https://example.com".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        // Disallowed on Linux
+        let lib_windows = Library {
+            name: "win:only:1.0".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("win/only/1.0/only.jar".to_string()),
+                    sha1: "sha3".to_string(),
+                    size: 300,
+                    url: "https://example.com".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: Some(vec![Rule {
+                action: RuleAction::Allow,
+                os: Some(OsRule {
+                    name: Some("windows".to_string()),
+                    arch: None,
+                }),
+                features: None,
+            }]),
+            extract: None,
+        };
+
+        // Duplicate of lib1 (same path, should be deduplicated)
+        let lib_dup = Library {
+            name: "com.mojang:authlib-alias:6.0.55".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("com/mojang/authlib/6.0.55/authlib-6.0.55.jar".to_string()),
+                    sha1: "sha1".to_string(),
+                    size: 100,
+                    url: "https://example.com".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        let metadata = VersionMetadata {
+            id: "1.21.1".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: None,
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "sha_client".to_string(),
+                    size: 1000,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries: vec![lib1, lib2, lib_windows, lib_dup],
+        };
+
+        let cp = metadata.classpath_entries(libraries_dir, versions_dir);
+        assert_eq!(
+            cp,
+            vec![
+                libraries_dir.join("com/mojang/authlib/6.0.55/authlib-6.0.55.jar"),
+                libraries_dir.join("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3.jar"),
+                versions_dir.join("1.21.1").join("1.21.1.jar"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_extract_natives() {
+        use std::{
+            fs::File,
+            io::Write,
+            sync::atomic::{AtomicUsize, Ordering},
+        };
+        use zip::{ZipWriter, write::SimpleFileOptions};
+
+        struct TempDirGuard {
+            path: PathBuf,
+        }
+
+        impl TempDirGuard {
+            fn new(name: &str) -> Self {
+                static COUNTER: AtomicUsize = AtomicUsize::new(0);
+                let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+                let path = std::env::temp_dir().join(format!(
+                    "acl_test_version_extract_{}_{}_{}",
+                    name,
+                    std::process::id(),
+                    id
+                ));
+                let _ = std::fs::remove_dir_all(&path);
+                std::fs::create_dir_all(&path).expect("failed to create temp test dir");
+                Self { path }
+            }
+
+            fn path(&self) -> &Path {
+                &self.path
+            }
+        }
+
+        impl Drop for TempDirGuard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
+
+        let temp = TempDirGuard::new("extract_natives");
+        let libraries_dir = temp.path().join("libraries");
+        let natives_dir = temp.path().join("natives");
+        let rel_jar_path = "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar";
+        let jar_path = libraries_dir.join(rel_jar_path);
+
+        if let Some(parent) = jar_path.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create library parent dir");
+        }
+        std::fs::create_dir_all(&natives_dir).expect("failed to create natives dir");
+
+        // Create a mock native jar
+        let file = File::create(&jar_path).expect("failed to create jar file");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+        zip.start_file("liblwjgl.so", options)
+            .expect("failed to add file to zip");
+        zip.write_all(b"ELF_NATIVE_CONTENT")
+            .expect("failed to write zip content");
+        zip.finish().expect("failed to finish zip");
+
+        let lib_native = Library {
+            name: "org.lwjgl:lwjgl:3.3.3:natives-linux".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some(rel_jar_path.to_string()),
+                    sha1: "sha_native".to_string(),
+                    size: 100,
+                    url: "https://example.com".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+
+        let metadata = VersionMetadata {
+            id: "1.21.1".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: None,
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "sha_client".to_string(),
+                    size: 1000,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries: vec![lib_native],
+        };
+
+        metadata
+            .extract_natives(&libraries_dir, &natives_dir)
+            .expect("extract_natives should succeed");
+
+        assert_eq!(
+            std::fs::read(natives_dir.join("liblwjgl.so"))
+                .expect("extracted liblwjgl.so should exist"),
+            b"ELF_NATIVE_CONTENT"
+        );
+    }
 }

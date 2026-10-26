@@ -72,5 +72,14 @@ mod tests {
             hash_err.to_string(),
             "SHA-1 mismatch for '1.21.json': expected abcdef, actual 123456"
         );
+
+        let zip_err = MinecraftError::Zip {
+            path: PathBuf::from("/test/archive.jar"),
+            source: zip::result::ZipError::FileNotFound,
+        };
+        assert_eq!(
+            zip_err.to_string(),
+            "Zip archive error at path '/test/archive.jar': specified file not found in archive"
+        );
     }
 }
