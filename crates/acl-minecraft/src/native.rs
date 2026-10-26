@@ -23,7 +23,7 @@ pub struct NativeArchive {
 
 impl NativeArchive {
     pub fn is_excluded(&self, entry_name: &str) -> bool {
-        if self.name.starts_with(DEFAULT_NATIVE_EXCLUDE) {
+        if entry_name.starts_with(DEFAULT_NATIVE_EXCLUDE) {
             return true;
         }
 
@@ -103,7 +103,7 @@ pub fn extract_native_archive(archive: &NativeArchive, natives_dir: &Path) -> Re
             })?;
 
         acl_common::fs::write_atomic(&dest_path, &buf).map_err(|source| MinecraftError::Io {
-            path: archive.archive_path.clone(),
+            path: dest_path,
             source,
         })?;
     }

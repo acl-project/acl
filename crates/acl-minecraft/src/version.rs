@@ -254,7 +254,7 @@ impl VersionMetadata {
                     continue;
                 }
 
-                let rel_path = artifact.path.clone().or_else(|| lib.maven_artifact_path());
+                let rel_path = lib.artifact_relative_path(artifact);
                 if let Some(rel_path) = rel_path {
                     tasks.push(DownloadTask {
                         name: lib.name.clone(),
