@@ -31,6 +31,7 @@ pub struct JavaInstallation {
 }
 
 impl JavaInfo {
+    /// The input is `java -XshowSettings:properties - ￺version`
     pub fn parse_from_output(path: &Path, output: &str) -> Result<Self> {
         let mut java_version = None;
         let mut spec_version = None;
@@ -104,9 +105,9 @@ pub fn probe_java(java_path: &Path) -> Result<JavaInstallation> {
     let info = JavaInfo::parse_from_output(java_path, &combined)?;
 
     debug!(
-        "Probe java {} {} in {}",
+        "Probed Java runtime {} ({}) at {}",
         info.major_version,
-        info.vendor.as_ref().map_or("Unknown", |vendor| vendor),
+        info.vendor.as_ref().map_or("Unknown", |v| v),
         java_path.display()
     );
 
@@ -138,8 +139,8 @@ fn java_from_pattern(seen: &mut HashSet<PathBuf>) -> Vec<JavaInstallation> {
         "/opt/java/*/bin/java",
         "/opt/jdk/*/bin/java",
     ] {
-        for path in glob(pattern).into_iter().flatten().flatten() {
-            if let Some(java) = try_add(&path, &mut *seen) {
+        for java_path in glob(pattern).into_iter().flatten().flatten() {
+            if let Some(java) = try_add(&java_path, seen) {
                 javas.push(java);
             }
         }
@@ -171,7 +172,7 @@ fn java_from_path(seen: &mut HashSet<PathBuf>) -> Vec<JavaInstallation> {
 
     vec
 }
-
+/// Search for Java by scanning common system directories and checking JAVA_HOME and PATH.
 pub fn discover_java_installations() -> Vec<JavaInstallation> {
     let mut seen = HashSet::new();
     let mut javas = Vec::new();

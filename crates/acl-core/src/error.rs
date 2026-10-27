@@ -21,13 +21,13 @@ pub enum CoreError {
     #[error("Failed to serialize configuration: {0}")]
     ConfigSerialize(#[from] toml::ser::Error),
 
-    #[error("Failed to find any java runtime")]
+    #[error("Failed to find any Java runtime")]
     JavaNotFound,
 
-    #[error("Failed to probe java version: {path} {reason}")]
+    #[error("Failed to probe Java version: {path}: {reason}")]
     JavaProbeFailed { path: PathBuf, reason: String },
 
-    #[error("Jave version mismatch required {required_major} found {found_major} path {path}")]
+    #[error("Java version mismatch: required {required_major}, found {found_major}, path: {path}")]
     JavaVersionMismatch {
         required_major: u32,
         found_major: u32,

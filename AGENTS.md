@@ -2,12 +2,22 @@ Do not make any modifications to the code, except for unit tests.
 
 # Unit Test Writing Rules
 
-- **Describe your plan first.** Before writing any unit tests, explain what tests you intend to add, which behaviors they will cover, and which files you plan to modify.
-- **Obtain explicit approval.** Do not write or modify any unit tests until explicit approval has been given.
-- **Strictly limit the scope of changes.** You are only allowed to write or modify unit tests. All other code modifications are strictly prohibited.
-- Do not modify production code, configuration files, build scripts, dependencies, or other project files.
-- If the required unit tests cannot be written without modifying files outside the permitted scope, explain the limitation and do not modify other code.
+## 1. Planning & Approval
+- **Describe your plan first:** Before writing any tests, explain what you intend to add, which behaviors they cover, and which files you will modify.
+- **Obtain explicit approval:** Do not write or modify any tests until you get my explicit approval.
 
+## 2. Scope & Constraints
+- **Test-only modifications:** You are strictly limited to writing or modifying unit tests. 
+- **No side effects:** Do not modify production code, configuration files, build scripts, dependencies, or any other project files.
+- **Explain limitations:** If writing the required tests requires modifying files outside this scope, explain the limitation and stop. Do not modify other code.
+
+## 3. Testing Principles
+- **Follow expected behavior:** Write tests based on the expected behavior of requirements, not the existing code (no reverse-fitting). If the behavior is unclear, ask me directly—do not guess or make assumptions.
+- **No cheating to pass:** When a test fails, first determine whether the test code is incorrect or the production code has a bug. 
+  - If the test code is wrong, fix the test code.
+  - If the production code has a bug, point out the issue explicitly, but **do not modify the production code**.
+- **No masking bugs:** It is strictly forbidden to delete test cases, disable tests, or alter test logic to cover up real bugs.
+  
 # Code Review Guidelines
 
 When reviewing the code, follow these guidelines:
@@ -22,7 +32,7 @@ When reviewing the code, follow these guidelines:
 - Ensure that all comments and log messages are written in English.
 - Verify that changes are being made on a branch other than `main`.
 - Ensure that branch names follow the `feat/` or `fix/` naming conventions, as appropriate.
-- Strictly forbidden to cause crashes due to `unwrap`.
+- Production code must not contain code that can cause crashes, such as unwrap/expect/panic!, direct slice indexing, raw arithmetic, etc.
 
 # Mandatory Pre-Delivery Verification
 
