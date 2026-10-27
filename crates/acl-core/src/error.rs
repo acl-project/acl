@@ -33,6 +33,18 @@ pub enum CoreError {
         found_major: u32,
         path: PathBuf,
     },
+
+    #[error("Instance '{id}' not found")]
+    InstanceNotFound { id: String },
+
+    #[error("Instance '{id}' already exists")]
+    InstanceAlreadyExists { id: String },
+
+    #[error("Invalid instance id '{id}': {reason}")]
+    InvalidInstanceId { id: String, reason: String },
+
+    #[error("System clock error: {0}")]
+    SystemTime(#[from] std::time::SystemTimeError),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
