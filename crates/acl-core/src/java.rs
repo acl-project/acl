@@ -156,6 +156,22 @@ fn java_from_home(seen: &mut HashSet<PathBuf>) -> Option<JavaInstallation> {
     try_add(&java_path, seen)
 }
 
+fn java_from_path(seen: &mut HashSet<PathBuf>) -> Vec<JavaInstallation> {
+    let mut vec = Vec::new();
+
+    if let Some(path) = env::var_os("PATH") {
+        for p in env::split_paths(&path) {
+            let path = p.join("java");
+
+            if let Some(java) = try_add(&path, seen) {
+                vec.push(java);
+            }
+        }
+    }
+
+    vec
+}
+
 pub fn discover_java_installations() -> Vec<JavaInstallation> {
     let mut seen = HashSet::new();
     let mut javas = Vec::new();
@@ -165,6 +181,8 @@ pub fn discover_java_installations() -> Vec<JavaInstallation> {
     if let Some(java) = java_from_home(&mut seen) {
         javas.push(java);
     }
+
+    javas.append(&mut java_from_path(&mut seen));
 
     javas
 }
