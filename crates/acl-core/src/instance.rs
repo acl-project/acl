@@ -172,23 +172,14 @@ impl Instance {
         }
     }
 
-    pub fn load(id: &str, version_dir: &Path) -> Result<Self> {
-        InstanceConfig::validate_instance_id(id)?;
-
-        let config_path = version_dir.join(id).join(CONFIG_NAME);
+    pub fn load_from_dir(instance_dir: &Path) -> Result<Self> {
+        let config_path = instance_dir.join(CONFIG_NAME);
         let config = InstanceConfig::load(&config_path)?;
 
-        if config.id != id {
-            return Err(CoreError::InvalidInstanceId {
-                id: id.to_owned(),
-                reason: format!(
-                    "Instance config id {} is not equal with id {}",
-                    config.id, id
-                ),
-            });
-        }
-
-        Ok(Instance::from_config(config, version_dir))
+        Ok(Self {
+            dir: instance_dir.to_path_buf(),
+            config,
+        })
     }
 
     pub fn save(&self) -> Result<()> {
