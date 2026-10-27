@@ -45,6 +45,19 @@ pub enum CoreError {
 
     #[error("System clock error: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
+
+    #[error("Invalid memory configuration: min {min_mb} MB cannot exceed max {max_mb} MB")]
+    InvalidMemoryConfig { min_mb: u32, max_mb: u32 },
+
+    #[error("Failed to spawn game process with Java '{java_path}': {source}")]
+    ProcessSpawn {
+        java_path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Failed to join classpath entries: {0}")]
+    JoinPaths(#[from] std::env::JoinPathsError),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

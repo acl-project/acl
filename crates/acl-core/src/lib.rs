@@ -3,6 +3,7 @@ pub mod dirs;
 pub mod error;
 pub mod instance;
 pub mod java;
+pub mod launch;
 
 pub use config::LauncherConfig;
 pub use dirs::LauncherDirs;

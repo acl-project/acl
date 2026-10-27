@@ -228,7 +228,12 @@ impl VersionMetadata {
                 .flat_map(ArgumentEntry::resolve_for_linux)
                 .collect()
         } else {
-            Vec::new()
+            // for old version
+            vec![
+                "-Djava.library.path=${natives_directory}".to_owned(),
+                "-cp".to_owned(),
+                "${classpath}".to_owned(),
+            ]
         }
     }
 
@@ -646,7 +651,14 @@ mod tests {
                 "${version_name}"
             ]
         );
-        assert!(metadata_legacy.resolve_jvm_arguments().is_empty());
+        assert_eq!(
+            metadata_legacy.resolve_jvm_arguments(),
+            vec![
+                "-Djava.library.path=${natives_directory}",
+                "-cp",
+                "${classpath}"
+            ]
+        );
     }
 
     #[test]
