@@ -187,3 +187,124 @@ pub fn discover_java_installations() -> Vec<JavaInstallation> {
 
     javas
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_modern_java_output() {
+        let output = r#"
+Property settings:
+    java.specification.version = 21
+    java.vendor = Eclipse Adoptium
+    java.version = 21.0.2
+    sun.arch.data.model = 64
+"#;
+        let path = Path::new("/mock/jvm/java-21/bin/java");
+        let info = JavaInfo::parse_from_output(path, output).expect("should parse successfully");
+
+        assert_eq!(info.version, "21.0.2");
+        assert_eq!(info.major_version, 21);
+        assert_eq!(info.vendor.as_deref(), Some("Eclipse Adoptium"));
+        assert!(info.is_64bit);
+    }
+
+    #[test]
+    fn test_parse_legacy_java8_output() {
+        let output = r#"
+Property settings:
+    java.specification.version = 1.8
+    java.vendor = Oracle Corporation
+    java.version = 1.8.0_402
+    sun.arch.data.model = 64
+"#;
+        let path = Path::new("/mock/jvm/java-8/bin/java");
+        let info = JavaInfo::parse_from_output(path, output).expect("should parse legacy Java 8");
+
+        assert_eq!(info.version, "1.8.0_402");
+        assert_eq!(info.major_version, 8);
+        assert_eq!(info.vendor.as_deref(), Some("Oracle Corporation"));
+        assert!(info.is_64bit);
+    }
+
+    #[test]
+    fn test_parse_32bit_and_missing_vendor() {
+        let output = r#"
+    java.specification.version = 17
+    java.version = 17.0.1
+    sun.arch.data.model = 32
+"#;
+        let path = Path::new("/mock/jvm/java-32bit/bin/java");
+        let info = JavaInfo::parse_from_output(path, output).expect("should parse 32-bit java");
+
+        assert_eq!(info.version, "17.0.1");
+        assert_eq!(info.major_version, 17);
+        assert_eq!(info.vendor, None);
+        assert!(!info.is_64bit);
+    }
+
+    #[test]
+    fn test_parse_missing_java_version_fails() {
+        let output = r#"
+    java.specification.version = 21
+    sun.arch.data.model = 64
+"#;
+        let path = Path::new("/mock/jvm/invalid/bin/java");
+        let err = JavaInfo::parse_from_output(path, output)
+            .expect_err("should fail without java.version");
+        match err {
+            CoreError::JavaProbeFailed {
+                path: err_path,
+                reason,
+            } => {
+                assert_eq!(err_path, path);
+                assert!(reason.contains("Missing java.version property"));
+            }
+            _ => panic!("Unexpected error variant: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_missing_spec_version_fails() {
+        let output = r#"
+    java.version = 21.0.2
+    sun.arch.data.model = 64
+"#;
+        let path = Path::new("/mock/jvm/invalid/bin/java");
+        let err = JavaInfo::parse_from_output(path, output)
+            .expect_err("should fail without java.specification.version");
+        match err {
+            CoreError::JavaProbeFailed {
+                path: err_path,
+                reason,
+            } => {
+                assert_eq!(err_path, path);
+                assert!(reason.contains("Missing java.specification.version property"));
+            }
+            _ => panic!("Unexpected error variant: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_invalid_major_version_fails() {
+        let output = r#"
+    java.version = 21.0.2
+    java.specification.version = invalid_version
+    sun.arch.data.model = 64
+"#;
+        let path = Path::new("/mock/jvm/invalid/bin/java");
+        let err = JavaInfo::parse_from_output(path, output)
+            .expect_err("should fail with non-numeric spec version");
+        match err {
+            CoreError::JavaProbeFailed {
+                path: err_path,
+                reason,
+            } => {
+                assert_eq!(err_path, path);
+                assert!(reason.contains("Failed to parse major version"));
+            }
+            _ => panic!("Unexpected error variant: {err:?}"),
+        }
+    }
+}

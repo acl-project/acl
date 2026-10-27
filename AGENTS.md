@@ -12,6 +12,7 @@ Do not make any modifications to the code, except for unit tests.
 - **Explain limitations:** If writing the required tests requires modifying files outside this scope, explain the limitation and stop. Do not modify other code.
 
 ## 3. Testing Principles
+- **Hermetic & Deterministic:** Unit tests must be strictly isolated. Do not depend on the local environment, external asset files, network, or file systems. Mock external dependencies and use in-memory data instead.
 - **Follow expected behavior:** Write tests based on the expected behavior of requirements, not the existing code (no reverse-fitting). If the behavior is unclear, ask me directly—do not guess or make assumptions.
 - **No cheating to pass:** When a test fails, first determine whether the test code is incorrect or the production code has a bug. 
   - If the test code is wrong, fix the test code.
