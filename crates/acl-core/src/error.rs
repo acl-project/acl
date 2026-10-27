@@ -93,4 +93,35 @@ mod tests {
             "Java version mismatch: required 17, found 8, path: /mock/jvm/java-8/bin/java"
         );
     }
+
+    #[test]
+    fn test_instance_error_display() {
+        let not_found = CoreError::InstanceNotFound {
+            id: "inst1".to_string(),
+        };
+        assert_eq!(not_found.to_string(), "Instance 'inst1' not found");
+
+        let already_exists = CoreError::InstanceAlreadyExists {
+            id: "inst1".to_string(),
+        };
+        assert_eq!(
+            already_exists.to_string(),
+            "Instance 'inst1' already exists"
+        );
+
+        let invalid_id = CoreError::InvalidInstanceId {
+            id: "bad/id".to_string(),
+            reason: "contains slash".to_string(),
+        };
+        assert_eq!(
+            invalid_id.to_string(),
+            "Invalid instance id 'bad/id': contains slash"
+        );
+
+        let sys_time_err = std::time::UNIX_EPOCH
+            .duration_since(std::time::SystemTime::now())
+            .expect_err("system time should be after epoch");
+        let sys_err = CoreError::SystemTime(sys_time_err);
+        assert!(sys_err.to_string().starts_with("System clock error:"));
+    }
 }
