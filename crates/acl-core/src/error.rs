@@ -20,6 +20,19 @@ pub enum CoreError {
 
     #[error("Failed to serialize configuration: {0}")]
     ConfigSerialize(#[from] toml::ser::Error),
+
+    #[error("Failed to find any java runtime")]
+    JavaNotFound,
+
+    #[error("Failed to probe java version: {path} {reason}")]
+    JavaProbeFailed { path: PathBuf, reason: String },
+
+    #[error("Jave version mismatch required {required_major} found {found_major} path {path}")]
+    JavaVersionMismatch {
+        required_major: u32,
+        found_major: u32,
+        path: PathBuf,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
