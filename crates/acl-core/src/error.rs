@@ -169,5 +169,14 @@ mod tests {
                 .to_string()
                 .starts_with("Failed to join classpath entries:")
         );
+
+        let mc_err = acl_minecraft::MinecraftError::VersionNotFound {
+            version_id: "1.99".to_string(),
+        };
+        let core_mc_err = CoreError::from(mc_err);
+        assert_eq!(
+            core_mc_err.to_string(),
+            "Minecraft error: Minecraft version '1.99' not found in manifest"
+        );
     }
 }
