@@ -28,6 +28,7 @@ dependencies = [
  "acl-minecraft",
  "directories",
  "glob",
+ "reqwest",
  "serde",
  "thiserror",
  "tokio",
