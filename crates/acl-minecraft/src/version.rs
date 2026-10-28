@@ -164,6 +164,7 @@ pub struct Arguments {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionMetadata {
+    /// Minecraft version id not instance id
     pub id: String,
     #[serde(rename = "type")]
     pub version_type: VersionType,
@@ -187,11 +188,12 @@ impl VersionMetadata {
     pub async fn fetch_and_verify(
         client: &reqwest::Client,
         entry: &VersionEntry,
+        instance_id: &str,
         versions_dir: &Path,
     ) -> Result<Self> {
         let path = versions_dir
-            .join(&entry.id)
-            .join(format!("{}.json", entry.id));
+            .join(instance_id)
+            .join(format!("{instance_id}.json"));
 
         crate::cache::fetch_verified_json(client, &entry.url, &entry.sha1, &entry.id, &path).await
     }
@@ -226,16 +228,23 @@ impl VersionMetadata {
                 .flat_map(ArgumentEntry::resolve_for_linux)
                 .collect()
         } else {
-            Vec::new()
+            // for old version
+            vec![
+                "-Djava.library.path=${natives_directory}".to_owned(),
+                "-cp".to_owned(),
+                "${classpath}".to_owned(),
+            ]
         }
     }
 
-    pub fn client_download_task(&self, versions_dir: &Path) -> DownloadTask {
+    pub fn client_download_task(&self, instance_id: &str, versions_dir: &Path) -> DownloadTask {
         let client = &self.downloads.client;
         DownloadTask {
-            name: format!("{}.jar", self.id),
+            name: format!("{}.jar", instance_id),
             url: client.url.clone(),
-            destination: versions_dir.join(&self.id).join(format!("{}.jar", self.id)),
+            destination: versions_dir
+                .join(instance_id)
+                .join(format!("{}.jar", instance_id)),
             sha1: client.sha1.clone(),
             size: client.size,
         }
@@ -347,7 +356,12 @@ impl VersionMetadata {
     }
 
     /// Build the ordered list of classpath jar paths (all active library artifacts + client jar).
-    pub fn classpath_entries(&self, libraries_dir: &Path, versions_dir: &Path) -> Vec<PathBuf> {
+    pub fn classpath_entries(
+        &self,
+        libraries_dir: &Path,
+        instance_id: &str,
+        versions_dir: &Path,
+    ) -> Vec<PathBuf> {
         let mut entries = Vec::new();
         let mut seen_paths = HashSet::new();
 
@@ -371,7 +385,11 @@ impl VersionMetadata {
             }
         }
 
-        entries.push(versions_dir.join(&self.id).join(format!("{}.jar", self.id)));
+        entries.push(
+            versions_dir
+                .join(instance_id)
+                .join(format!("{instance_id}.jar")),
+        );
         entries
     }
 }
@@ -633,7 +651,14 @@ mod tests {
                 "${version_name}"
             ]
         );
-        assert!(metadata_legacy.resolve_jvm_arguments().is_empty());
+        assert_eq!(
+            metadata_legacy.resolve_jvm_arguments(),
+            vec![
+                "-Djava.library.path=${natives_directory}",
+                "-cp",
+                "${classpath}"
+            ]
+        );
     }
 
     #[test]
@@ -724,7 +749,7 @@ mod tests {
         };
 
         let versions_dir = Path::new("/mock/versions");
-        let task = metadata.client_download_task(versions_dir);
+        let task = metadata.client_download_task("1.21.1", versions_dir);
 
         assert_eq!(task.name, "1.21.1.jar");
         assert_eq!(task.url, "https://example.com/client.jar");
@@ -1239,7 +1264,7 @@ mod tests {
             libraries: vec![lib1, lib2, lib_windows, lib_dup],
         };
 
-        let cp = metadata.classpath_entries(libraries_dir, versions_dir);
+        let cp = metadata.classpath_entries(libraries_dir, "1.21.1", versions_dir);
         assert_eq!(
             cp,
             vec![

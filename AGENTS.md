@@ -1,4 +1,5 @@
 Do not make any modifications to the code, except for unit tests.
+Even if forced to modify production code, modification is not allowed.
 
 # Unit Test Writing Rules
 

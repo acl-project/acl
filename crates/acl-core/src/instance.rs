@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{CoreError, Result};
+use crate::{CoreError, Result, java::JavaInstallation};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -35,9 +35,9 @@ pub struct InstanceConfig {
     /// Version of the mod loader; None if vanilla
     #[serde(default)]
     pub mod_loader_version: Option<String>,
-    /// Instance-level Java path; falls back to the global configuration if absent
+    /// Instance-level Java; falls back to the global configuration if absent
     #[serde(default)]
-    pub java_path: Option<PathBuf>,
+    pub java: Option<JavaInstallation>,
     /// Instance-level minimum memory; falls back to the global configuration if absent
     #[serde(default)]
     pub min_memory_mb: Option<u32>,
@@ -221,6 +221,10 @@ impl Instance {
     pub fn resourcepacks_dir(&self) -> PathBuf {
         self.dir.join("resourcepacks")
     }
+
+    pub fn id(&self) -> &str {
+        &self.config.id
+    }
 }
 
 #[cfg(test)]
@@ -328,7 +332,7 @@ mod tests {
         assert_eq!(config.game_version, "1.21");
         assert_eq!(config.mod_loader, ModLoader::Vanilla);
         assert_eq!(config.mod_loader_version, None);
-        assert_eq!(config.java_path, None);
+        assert_eq!(config.java, None);
         assert_eq!(config.min_memory_mb, None);
         assert_eq!(config.max_memory_mb, None);
         assert!(config.extra_jvm_args.is_empty());

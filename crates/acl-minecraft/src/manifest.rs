@@ -26,7 +26,7 @@ pub enum VersionType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionEntry {
-    // Version number
+    // Minecraft version number, not instance id
     pub id: String,
 
     #[serde(rename = "type")]
