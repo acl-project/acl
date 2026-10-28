@@ -1,5 +1,5 @@
 use std::{
-    fs::{self},
+    fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -262,18 +262,20 @@ impl Instance {
                 source,
             })?;
 
-            let p = entry.path();
+            let path = entry.path();
 
-            if p.is_file() {
+            if !path.is_dir() {
                 continue;
             }
 
-            let config = p.join(CONFIG_NAME);
+            let config = path.join(CONFIG_NAME);
             if !config.exists() {
                 continue;
             }
 
-            instances.push(Instance::load_from_dir(&p)?);
+            if let Ok(instance) = Instance::load_from_dir(&path) {
+                instances.push(instance);
+            }
         }
 
         instances.sort_by_key(|a| std::cmp::Reverse(a.config.last_play_at));
@@ -287,7 +289,7 @@ impl Instance {
             return Ok(());
         }
 
-        fs::remove_dir_all(self.dir.clone()).map_err(|source| CoreError::Io {
+        fs::remove_dir_all(&self.dir).map_err(|source| CoreError::Io {
             path: self.dir.clone(),
             source,
         })
@@ -326,7 +328,7 @@ impl Instance {
         tasks
     }
 
-    /// Map resource files and extract local libraries.
+    /// Map resource files and extract native libraries.
     pub fn prepare_runtime(
         &self,
         metadata: &VersionMetadata,
