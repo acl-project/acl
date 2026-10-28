@@ -35,7 +35,7 @@ pub struct InstanceConfig {
     /// Version of the mod loader; None if vanilla
     #[serde(default)]
     pub mod_loader_version: Option<String>,
-    /// Instance-level Java path; falls back to the global configuration if absent
+    /// Instance-level Java; falls back to the global configuration if absent
     #[serde(default)]
     pub java: Option<JavaInstallation>,
     /// Instance-level minimum memory; falls back to the global configuration if absent

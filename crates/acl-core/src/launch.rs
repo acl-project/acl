@@ -6,6 +6,7 @@ use std::{
 
 use acl_auth::Account;
 use acl_minecraft::{VersionMetadata, VersionType};
+use tracing::{debug, info, warn};
 
 use crate::{CoreError, Instance, LauncherConfig, LauncherDirs, Result, java::JavaInstallation};
 
@@ -20,7 +21,16 @@ pub struct GameProcess {
 impl GameProcess {
     /// Asynchronously wait for the game to exit, returning the exit status (`status.success()` being true indicates a normal exit; false indicates a crash).
     pub async fn wait(mut self) -> io::Result<process::ExitStatus> {
-        self.child.wait().await
+        let status = self.child.wait().await?;
+        if status.success() {
+            info!("Game process exited successfully");
+        } else {
+            warn!(
+                "Game process exited with non-zero status: {:?}",
+                status.code()
+            );
+        }
+        Ok(status)
     }
 }
 
@@ -42,12 +52,10 @@ impl LaunchCommand {
         account: &Account,
         classpath: String,
     ) -> Vec<(&'static str, String)> {
-        // relative path
         let natives_dir = instance.natives_dir().to_string_lossy().into_owned();
-        // relative path
         let game_dir = instance.game_dir().to_string_lossy().into_owned();
-        // absolute path
         let assets_dir = dirs.assets_dir().to_string_lossy().into_owned();
+
         let version_type = match metadata.version_type {
             VersionType::Release => "release",
             VersionType::Snapshot => "snapshot",
@@ -148,11 +156,19 @@ impl LaunchCommand {
     }
 
     pub async fn spawn(&self) -> Result<GameProcess> {
-        let _ = fs::create_dir_all(&self.game_dir).map_err(|source| CoreError::Io {
+        fs::create_dir_all(&self.game_dir).map_err(|source| CoreError::Io {
             path: self.game_dir.clone(),
             source,
-        });
+        })?;
 
+        info!(
+            "Spawning Minecraft process using Java: {}",
+            self.java_path.display()
+        );
+        debug!("Working directory: {}", self.game_dir.display());
+        debug!("JVM arguments: {:?}", self.jvm_args);
+        debug!("Main class: {}", self.main_class);
+        // don't print sensitive game arguments
         let child = tokio::process::Command::new(&self.java_path)
             .current_dir(&self.game_dir)
             .args(&self.jvm_args)
@@ -167,73 +183,101 @@ impl LaunchCommand {
                 source,
             })?;
 
+        let pid = child.id();
+        info!("Minecraft process spawned successfully with PID: {:?}", pid);
+
         Ok(GameProcess {
             id: child.id(),
             child,
         })
     }
+}
 
-    pub fn resolve_java_for_launch(
-        instance: &Instance,
-        global_config: &LauncherConfig,
-        metadata: &VersionMetadata,
-    ) -> Result<JavaInstallation> {
-        let required_major = metadata
-            .java_version
-            .as_ref()
-            .map_or(8, |j| j.major_version);
+pub fn select_java(
+    instance: &Instance,
+    global_config: &LauncherConfig,
+    metadata: &VersionMetadata,
+) -> Result<JavaInstallation> {
+    let required_major = metadata
+        .java_version
+        .as_ref()
+        .map_or(8, |j| j.major_version);
 
-        // Try to obtain it from the game-configured Java or the global Java.
-        if let Some(java) = instance
-            .config
-            .java
-            .as_ref()
-            .or(global_config.defalut_java.as_ref())
-        {
-            if java.info.major_version < required_major {
-                return Err(CoreError::JavaVersionMismatch {
-                    required_major,
-                    found_major: java.info.major_version,
-                    path: java.path.clone(),
-                });
-            }
-            return Ok(java.clone());
-        }
+    debug!(
+        "Resolving Java runtime for required major version: {}",
+        required_major
+    );
 
-        if global_config.java_list.is_empty() {
-            return Err(CoreError::JavaNotFound);
-        }
-
-        // Try to obtain the exact version from the global Java list.
-        if let Some(exact) = global_config
-            .java_list
-            .iter()
-            .find(|j| j.info.major_version == required_major)
-        {
-            return Ok(exact.clone());
-        }
-
-        // Try to find a Java version greater than the target version from the global Java list.
-        if let Some(compatible) = global_config
-            .java_list
-            .iter()
-            .filter(|j| j.info.major_version > required_major)
-            .min_by_key(|j| j.info.major_version)
-        {
-            return Ok(compatible.clone());
-        }
-
-        // No suitable Java found; find the highest version to return an error.
-        let best_incompatible = global_config
-            .java_list
-            .iter()
-            .max_by_key(|j| j.info.major_version)
-            .ok_or(CoreError::JavaNotFound)?;
-
-        Err(CoreError::JavaVersionMismatch {
-            required_major,
-            found_major: best_incompatible.info.major_version,
-            path: best_incompatible.path.clone(),
-        })
+    // Try to obtain it from the game-configured Java or the global Java.
+    if let Some(java) = instance
+        .config
+        .java
+        .as_ref()
+        .or(global_config.default_java.as_ref())
+        && java.info.major_version >= required_major
+    {
+        info!(
+            "Selected preferred Java runtime {} at {}",
+            java.info.major_version,
+            java.path.display()
+        );
+        return Ok(java.clone());
     }
+
+    debug!(
+        "Preferred Java runtime is unavailable or incompatible, searching discovered installations"
+    );
+
+    if global_config.java_list.is_empty() {
+        return Err(CoreError::JavaNotFound);
+    }
+
+    // Try to obtain the exact version from the global Java list.
+    if let Some(exact) = global_config
+        .java_list
+        .iter()
+        .find(|j| j.info.major_version == required_major)
+    {
+        info!(
+            "Selected exact matching Java runtime {} at {}",
+            exact.info.major_version,
+            exact.path.display()
+        );
+
+        return Ok(exact.clone());
+    }
+
+    // Try to find a Java version greater than the target version from the global Java list.
+    if let Some(compatible) = global_config
+        .java_list
+        .iter()
+        .filter(|j| j.info.major_version > required_major)
+        .min_by_key(|j| j.info.major_version)
+    {
+        info!(
+            "Selected compatible higher Java runtime {} at {}",
+            compatible.info.major_version,
+            compatible.path.display()
+        );
+
+        return Ok(compatible.clone());
+    }
+
+    warn!(
+        "No compatible Java installation found for major version {}",
+        required_major
+    );
+
+    // No suitable Java found; find the highest version to return an error.
+    let best_incompatible = global_config
+        .java_list
+        .iter()
+        .max_by_key(|j| j.info.major_version)
+        .ok_or(CoreError::JavaNotFound)?;
+
+    Err(CoreError::JavaVersionMismatch {
+        required_major,
+        found_major: best_incompatible.info.major_version,
+        path: best_incompatible.path.clone(),
+    })
 }

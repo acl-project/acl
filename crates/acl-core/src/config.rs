@@ -4,7 +4,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     error::{CoreError, Result},
@@ -19,9 +19,9 @@ pub struct LauncherConfig {
     pub min_memory_mb: u32,
     /// Maximum JVM memory allocation in megabytes (MB).
     pub max_memory_mb: u32,
-    /// Defalut java
-    pub defalut_java: Option<JavaInstallation>,
-    /// All javas to the Java executable.
+    /// Default java
+    pub default_java: Option<JavaInstallation>,
+    /// Discovered or configured Java installations.
     pub java_list: Vec<JavaInstallation>,
     /// Maximum number of concurrent file downloads.
     pub max_concurrent_downloads: usize,
@@ -34,7 +34,7 @@ impl Default for LauncherConfig {
         Self {
             min_memory_mb: 1024,
             max_memory_mb: 4096,
-            defalut_java: None,
+            default_java: None,
             java_list: Vec::new(),
             max_concurrent_downloads: 16,
             close_launcher_on_launch: false,
@@ -75,16 +75,28 @@ impl LauncherConfig {
         Ok(())
     }
 
-    pub fn serach_java(&mut self) {
+    pub fn search_java(&mut self) {
         let java_list = java::discover_java_installations();
+
+        info!("Discovered {} Java installation(s)", java_list.len());
 
         let default_java = java_list
             .iter()
             .max_by_key(|j| j.info.major_version)
             .cloned();
 
+        if let Some(ref default) = default_java {
+            info!(
+                "Selected default Java runtime {} at {}",
+                default.info.major_version,
+                default.path.display()
+            );
+        } else {
+            warn!("No valid Java installation found during discovery");
+        }
+
         self.java_list = java_list;
-        self.defalut_java = default_java;
+        self.default_java = default_java;
     }
 }
 
@@ -131,7 +143,7 @@ mod tests {
         let config = LauncherConfig::default();
         assert_eq!(config.min_memory_mb, 1024);
         assert_eq!(config.max_memory_mb, 4096);
-        assert_eq!(config.defalut_java, None);
+        assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
         assert_eq!(config.max_concurrent_downloads, 16);
         assert!(!config.close_launcher_on_launch);
@@ -151,7 +163,7 @@ mod tests {
         let config = LauncherConfig {
             min_memory_mb: 2048,
             max_memory_mb: 8192,
-            defalut_java: Some(java.clone()),
+            default_java: Some(java.clone()),
             java_list: vec![java],
             max_concurrent_downloads: 8,
             close_launcher_on_launch: true,
@@ -175,7 +187,7 @@ mod tests {
         assert!(config.close_launcher_on_launch);
         assert_eq!(config.min_memory_mb, 1024);
         assert_eq!(config.max_concurrent_downloads, 16);
-        assert_eq!(config.defalut_java, None);
+        assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
     }
 
