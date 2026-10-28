@@ -137,4 +137,34 @@ mod tests {
         let sys_err = CoreError::SystemTime(sys_time_err);
         assert!(sys_err.to_string().starts_with("System clock error:"));
     }
+
+    #[test]
+    fn test_launch_and_process_error_display() {
+        let mem_err = CoreError::InvalidMemoryConfig {
+            min_mb: 2048,
+            max_mb: 1024,
+        };
+        assert_eq!(
+            mem_err.to_string(),
+            "Invalid memory configuration: min 2048 MB cannot exceed max 1024 MB"
+        );
+
+        let proc_err = CoreError::ProcessSpawn {
+            java_path: PathBuf::from("/mock/bin/java"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "not found"),
+        };
+        assert_eq!(
+            proc_err.to_string(),
+            "Failed to spawn game process with Java '/mock/bin/java': not found"
+        );
+
+        let join_err = std::env::join_paths([std::path::Path::new("foo:bar")])
+            .expect_err("path separator should fail join_paths");
+        let core_join_err = CoreError::from(join_err);
+        assert!(
+            core_join_err
+                .to_string()
+                .starts_with("Failed to join classpath entries:")
+        );
+    }
 }
