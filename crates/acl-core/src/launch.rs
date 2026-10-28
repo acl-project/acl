@@ -109,12 +109,12 @@ impl LaunchCommand {
         let max_mem = instance
             .config
             .max_memory_mb
-            .map_or(global_config.max_memory_mb, |mb| mb);
+            .unwrap_or(global_config.max_memory_mb);
 
         let min_mem = instance
             .config
             .min_memory_mb
-            .map_or(global_config.min_memory_mb, |mb| mb);
+            .unwrap_or(global_config.min_memory_mb);
 
         if min_mem > max_mem {
             return Err(CoreError::InvalidMemoryConfig {
