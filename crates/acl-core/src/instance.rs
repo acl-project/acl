@@ -1,10 +1,11 @@
 use std::{
-    fs,
+    fs::{self},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{CoreError, Result, java::JavaInstallation};
+use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
+use acl_minecraft::{AssetIndex, VersionEntry, VersionMetadata, download::DownloadTask};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -182,7 +183,7 @@ impl Instance {
         })
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save_config(&self) -> Result<()> {
         self.config.save(&self.config_file())
     }
 
@@ -224,6 +225,123 @@ impl Instance {
 
     pub fn id(&self) -> &str {
         &self.config.id
+    }
+
+    pub fn create(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        game_version: impl Into<String>,
+        version_dir: &Path,
+    ) -> Result<Self> {
+        let id = id.into();
+        let instance = Instance::new(id.clone(), name, game_version, version_dir)?;
+        if instance.dir.exists() {
+            return Err(CoreError::InstanceAlreadyExists { id });
+        }
+
+        instance.save_config()?;
+
+        Ok(instance)
+    }
+
+    pub fn discover_all(version_dir: &Path) -> Result<Vec<Self>> {
+        let mut instances = Vec::new();
+
+        if !version_dir.exists() {
+            return Ok(instances);
+        }
+
+        let read_dir = fs::read_dir(version_dir).map_err(|source| CoreError::Io {
+            path: version_dir.to_path_buf(),
+            source,
+        })?;
+
+        for entry in read_dir {
+            let entry = entry.map_err(|source| CoreError::Io {
+                path: version_dir.to_path_buf(),
+                source,
+            })?;
+
+            let p = entry.path();
+
+            if p.is_file() {
+                continue;
+            }
+
+            let config = p.join(CONFIG_NAME);
+            if !config.exists() {
+                continue;
+            }
+
+            instances.push(Instance::load_from_dir(&p)?);
+        }
+
+        instances.sort_by_key(|a| std::cmp::Reverse(a.config.last_play_at));
+
+        Ok(instances)
+    }
+
+    pub fn delete(&self) -> Result<()> {
+        // If the directory does not exist, return directly.
+        if !self.dir.exists() {
+            return Ok(());
+        }
+
+        fs::remove_dir_all(self.dir.clone()).map_err(|source| CoreError::Io {
+            path: self.dir.clone(),
+            source,
+        })
+    }
+
+    pub fn update_last_play(&mut self) -> Result<()> {
+        self.config.last_play_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        self.save_config()?;
+        Ok(())
+    }
+
+    /// Get the metadata for the current instance version.
+    pub async fn fetch_metadata(
+        &self,
+        client: &reqwest::Client,
+        entry: &VersionEntry,
+        dirs: &LauncherDirs,
+    ) -> Result<VersionMetadata> {
+        Ok(
+            VersionMetadata::fetch_and_verify(client, entry, self.id(), &dirs.versions_dir())
+                .await?,
+        )
+    }
+
+    /// Get the download tasks required for the current instance version.
+    pub fn download_tasks(
+        &self,
+        metadata: &VersionMetadata,
+        asset_index: &AssetIndex,
+        dirs: &LauncherDirs,
+    ) -> Vec<DownloadTask> {
+        let mut tasks = Vec::new();
+        tasks.push(metadata.client_download_task(self.id(), &dirs.versions_dir()));
+        tasks.extend(metadata.library_download_tasks(&dirs.libraries_dir()));
+        tasks.extend(asset_index.asset_download_tasks(&dirs.assets_dir()));
+        tasks
+    }
+
+    /// Map resource files and extract local libraries.
+    pub fn prepare_runtime(
+        &self,
+        metadata: &VersionMetadata,
+        asset_index: &AssetIndex,
+        dirs: &LauncherDirs,
+    ) -> Result<()> {
+        asset_index.reconstruct_legacy_assets(
+            &metadata.asset_index.id,
+            &dirs.assets_dir(),
+            self.game_dir(),
+        )?;
+
+        metadata.extract_natives(&dirs.libraries_dir(), &self.natives_dir())?;
+
+        Ok(())
     }
 }
 
@@ -424,7 +542,7 @@ mod tests {
 
         let instance = Instance::new("my_inst", "My Instance", "1.21", version_dir)
             .expect("should create instance");
-        instance.save().expect("should save instance config");
+        instance.save_config().expect("should save instance config");
 
         let loaded = Instance::load_from_dir(&instance.dir).expect("should load from dir");
         assert_eq!(loaded.dir, instance.dir);
@@ -445,7 +563,9 @@ mod tests {
             dir: original_dir.clone(),
             config,
         };
-        instance.save().expect("should save config in original dir");
+        instance
+            .save_config()
+            .expect("should save config in original dir");
 
         let renamed_dir = temp.path().join("player_renamed_pack");
         fs::rename(&original_dir, &renamed_dir).expect("should rename directory");

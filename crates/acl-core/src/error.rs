@@ -58,6 +58,9 @@ pub enum CoreError {
 
     #[error("Failed to join classpath entries: {0}")]
     JoinPaths(#[from] std::env::JoinPathsError),
+
+    #[error("Minecraft error: {0}")]
+    Minecraft(#[from] acl_minecraft::MinecraftError),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
