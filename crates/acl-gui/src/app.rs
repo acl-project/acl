@@ -172,3 +172,54 @@ impl SimpleComponent for AppModel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nav_page_default() {
+        assert_eq!(NavPage::default(), NavPage::Home);
+    }
+
+    #[test]
+    fn test_nav_page_as_str_and_title() {
+        let cases = [
+            (NavPage::Home, "home", "Home"),
+            (NavPage::Instances, "instances", "Instances"),
+            (NavPage::Accounts, "accounts", "Accounts"),
+            (NavPage::Settings, "settings", "Settings"),
+        ];
+
+        for (page, expected_str, expected_title) in cases {
+            assert_eq!(page.as_str(), expected_str);
+            assert_eq!(page.title(), expected_title);
+        }
+    }
+
+    #[test]
+    fn test_nav_page_from_str_success_and_roundtrip() {
+        let pages = [
+            NavPage::Home,
+            NavPage::Instances,
+            NavPage::Accounts,
+            NavPage::Settings,
+        ];
+
+        for page in pages {
+            let str_val = page.as_str();
+            let parsed: Result<NavPage, ()> = str_val.parse();
+            assert_eq!(parsed, Ok(page));
+        }
+    }
+
+    #[test]
+    fn test_nav_page_from_str_invalid() {
+        let invalid_inputs = ["", "Home", "instances ", "unknown", "SETTINGS"];
+
+        for input in invalid_inputs {
+            let parsed: Result<NavPage, ()> = input.parse();
+            assert!(parsed.is_err());
+        }
+    }
+}
