@@ -17,3 +17,5 @@ relm4-components = { workspace = true }
 
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+sysinfo = { workspace = true }

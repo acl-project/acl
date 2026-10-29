@@ -32,7 +32,7 @@ pub struct LauncherConfig {
 impl Default for LauncherConfig {
     fn default() -> Self {
         Self {
-            min_memory_mb: 1024,
+            min_memory_mb: 512,
             max_memory_mb: 4096,
             default_java: None,
             java_list: Vec::new(),
