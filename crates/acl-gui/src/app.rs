@@ -1,4 +1,6 @@
-use crate::pages::home::HomePage;
+use crate::pages::{
+    accounts::AccountsPage, home::HomePage, instances::InstancesPage, settings::SettingsPage,
+};
 use adw::prelude::*;
 use gtk::prelude::GtkWindowExt;
 use libadwaita::NavigationPage;
@@ -35,7 +37,10 @@ impl NavPage {
 
 pub struct AppModel {
     current_page: NavPage,
-    home_page: Controller<HomePage>,
+    home: Controller<HomePage>,
+    instances: Controller<InstancesPage>,
+    accounts: Controller<AccountsPage>,
+    settings: Controller<SettingsPage>,
 }
 
 #[derive(Debug)]
@@ -69,8 +74,8 @@ impl SimpleComponent for AppModel {
                     set_child = &adw::ToolbarView {
                         add_top_bar = &adw::HeaderBar {},
                         #[wrap(Some)]
-                        set_content = &gtk::StackSidebar {
-                            set_stack: &stack,
+                        set_content = &adw::ViewSwitcherSidebar {
+                            set_stack: Some(&stack),
                         },
                     },
                 },
@@ -87,9 +92,12 @@ impl SimpleComponent for AppModel {
 
                         #[name = "stack"]
                         #[wrap(Some)]
-                        set_content = &gtk::Stack {
+                        set_content = &adw::ViewStack {
 
-                            add_titled: (model.home_page.widget(), Some(NavPage::Home.as_str()), NavPage::Home.title()),
+                            add_titled_with_icon: (model.home.widget(), Some(NavPage::Home.as_str()), NavPage::Home.title(), "go-home-symbolic"),
+                            add_titled_with_icon: (model.instances.widget(), Some(NavPage::Instances.as_str()), NavPage::Instances.title(), "view-grid-symbolic"),
+                            add_titled_with_icon: (model.accounts.widget(), Some(NavPage::Accounts.as_str()), NavPage::Accounts.title(), "avatar-default-symbolic"),
+                            add_titled_with_icon: (model.settings.widget(), Some(NavPage::Settings.as_str()), NavPage::Settings.title(), "emblem-system-symbolic"),
 
                             #[watch]
                             set_visible_child_name: model.current_page.as_str(),
@@ -107,11 +115,16 @@ impl SimpleComponent for AppModel {
         root: Self::Root,
         _sender: relm4::prelude::ComponentSender<Self>,
     ) -> relm4::prelude::ComponentParts<Self> {
-        let home_page = HomePage::builder().launch(()).detach();
-
+        let home = HomePage::builder().launch(()).detach();
+        let instances = InstancesPage::builder().launch(()).detach();
+        let accounts = AccountsPage::builder().launch(()).detach();
+        let settings = SettingsPage::builder().launch(()).detach();
         let model = AppModel {
             current_page: NavPage::Home,
-            home_page,
+            home,
+            instances,
+            accounts,
+            settings,
         };
 
         let widgets = view_output!();
