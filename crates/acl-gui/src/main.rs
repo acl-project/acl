@@ -1,9 +1,11 @@
 pub mod app;
 pub mod pages;
 
+use std::process::ExitCode;
+
 use relm4::adw;
 
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 use crate::app::AppModel;
@@ -13,13 +15,18 @@ fn init_logging() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
-fn main() {
+fn main() -> ExitCode {
     init_logging();
 
     info!("Starting Adwaita Craft Launcher");
 
-    adw::init().expect("Failed to initialize libadwaita");
+    if let Err(err) = adw::init() {
+        error!("Failed to initialize libadwaita: {err}");
+        return ExitCode::FAILURE;
+    }
 
     let app = relm4::RelmApp::new("com.acl-project.adwaita-craft-launcher");
     app.run::<AppModel>(());
+
+    ExitCode::SUCCESS
 }

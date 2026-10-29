@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::pages::{
     accounts::AccountsPage, home::HomePage, instances::InstancesPage, settings::SettingsPage,
 };
@@ -35,6 +37,20 @@ impl NavPage {
     }
 }
 
+impl FromStr for NavPage {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "home" => Ok(Self::Home),
+            "instances" => Ok(Self::Instances),
+            "accounts" => Ok(Self::Accounts),
+            "settings" => Ok(Self::Settings),
+            _ => Err(()),
+        }
+    }
+}
+
 pub struct AppModel {
     current_page: NavPage,
     home: Controller<HomePage>,
@@ -58,12 +74,13 @@ impl SimpleComponent for AppModel {
     type Init = ();
 
     view! {
+
         adw::ApplicationWindow {
             set_title: Some("Adwaita Craft Launcher"),
             set_default_width: 860,
             set_default_height: 540,
 
-
+            #[name = "split_view"]
             adw::NavigationSplitView {
                 #[wrap(Some)]
                 set_sidebar = &adw::NavigationPage {
@@ -83,6 +100,7 @@ impl SimpleComponent for AppModel {
                 #[wrap(Some)]
                 set_content = &NavigationPage {
 
+                    #[watch]
                     set_title: model.current_page.title(),
 
                     #[wrap(Some)]
@@ -113,7 +131,7 @@ impl SimpleComponent for AppModel {
     fn init(
         _init: Self::Init,
         root: Self::Root,
-        _sender: relm4::prelude::ComponentSender<Self>,
+        sender: relm4::prelude::ComponentSender<Self>,
     ) -> relm4::prelude::ComponentParts<Self> {
         let home = HomePage::builder().launch(()).detach();
         let instances = InstancesPage::builder().launch(()).detach();
@@ -128,6 +146,19 @@ impl SimpleComponent for AppModel {
         };
 
         let widgets = view_output!();
+
+        widgets.stack.connect_visible_child_name_notify({
+            let sender = sender.clone();
+            let split_view = widgets.split_view.clone();
+            move |stack| {
+                if let Some(name) = stack.visible_child_name()
+                    && let Ok(page) = name.parse::<NavPage>()
+                {
+                    sender.input(AppMsg::Navigate(page));
+                }
+                split_view.set_show_content(true);
+            }
+        });
 
         ComponentParts { model, widgets }
     }
