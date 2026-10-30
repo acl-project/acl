@@ -34,7 +34,7 @@ impl SettingsPage {
     fn save_config(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.config.read().save(&self.config_path) {
             let msg = format!("Failed to save configuration: {err}");
-            error!(msg);
+            error!("{err}");
             let _ = sender.output(SettingsMsg::ShowToast(msg));
         }
     }
@@ -62,7 +62,7 @@ impl SettingsPage {
         cfg.default_java
             .as_ref()
             .and_then(|def| cfg.java_list.iter().position(|j| j.path == def.path))
-            .unwrap_or(0) as u32
+            .unwrap_or(gtk::INVALID_LIST_POSITION as usize) as u32
     }
 }
 
@@ -101,7 +101,7 @@ impl SimpleComponent for SettingsPage {
                         set_adjustment: &gtk::Adjustment::new(
                             model.config.read().max_memory_mb as f64,
                             model.config.read().min_memory_mb as f64,
-                            (memory_info().total / (1024 * 1024)) as f64,
+                            ((memory_info().total / (1024 * 1024)) as f64).max(model.config.read().min_memory_mb as f64),
                             256.0,
                             512.0,
                             0.0,

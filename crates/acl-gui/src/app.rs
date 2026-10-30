@@ -147,13 +147,13 @@ impl SimpleComponent for AppModel {
         root: Self::Root,
         sender: relm4::prelude::ComponentSender<Self>,
     ) -> relm4::prelude::ComponentParts<Self> {
-        // Initialize luancher core
+        // Initialize launcher core
 
         let config = match LauncherConfig::load_or_default(&dirs.config_file()) {
             Ok(cfg) => cfg,
             Err(err) => {
-                let err = format!("Failed to load ￹config, using defaults: {err}");
-                error!(err);
+                let err = format!("Failed to load config, using defaults: {err}");
+                error!("{err}");
                 sender.input(AppMsg::ShowToast(err));
                 LauncherConfig::default()
             }
