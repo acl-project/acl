@@ -314,3 +314,40 @@ impl SimpleComponent for AccountsPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_account_type_label() {
+        let offline_row = AccountRow {
+            account: Account {
+                uuid: Uuid::nil(),
+                username: "Steve".to_string(),
+                account_type: AccountType::Offline,
+            },
+            is_active: false,
+        };
+        assert_eq!(offline_row.account_type_label(), "Offline");
+
+        let ms_row = AccountRow {
+            account: Account {
+                uuid: Uuid::nil(),
+                username: "Alex".to_string(),
+                account_type: AccountType::Microsoft,
+            },
+            is_active: true,
+        };
+        assert_eq!(ms_row.account_type_label(), "Microsoft");
+    }
+
+    #[test]
+    fn test_accounts_msg_equality() {
+        let msg1 = AccountsMsg::ShowToast("Test".to_string());
+        let msg2 = AccountsMsg::ShowToast("Test".to_string());
+        let msg3 = AccountsMsg::ShowToast("Other".to_string());
+        assert_eq!(msg1, msg2);
+        assert_ne!(msg1, msg3);
+    }
+}

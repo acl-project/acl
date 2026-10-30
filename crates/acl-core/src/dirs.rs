@@ -146,6 +146,7 @@ mod tests {
         assert_eq!(dirs.assets_dir(), data_dir.join("assets"));
         assert_eq!(dirs.libraries_dir(), data_dir.join("libraries"));
         assert_eq!(dirs.versions_dir(), data_dir.join("versions"));
+        assert_eq!(dirs.accounts_file(), config_dir.join("accounts.toml"));
     }
 
     #[test]
