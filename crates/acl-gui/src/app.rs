@@ -12,8 +12,10 @@ use libadwaita::NavigationPage;
 use relm4::{SharedState, prelude::*};
 
 use acl_auth::AccountStore;
-use acl_core::{LauncherConfig, LauncherDirs};
+use acl_core::{Instance, LauncherConfig, LauncherDirs};
 use tracing::error;
+
+pub type InstancesVec = Arc<SharedState<Vec<Instance>>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NavPage {
@@ -62,15 +64,17 @@ pub struct AppModel {
     current_page: NavPage,
     /// Used to pop up hint messages or errors below.
     toast_overlay: adw::ToastOverlay,
-    home: Controller<HomePage>,
-    instances: Controller<InstancesPage>,
-    accounts: Controller<AccountsPage>,
-    settings: Controller<SettingsPage>,
+    home_page: Controller<HomePage>,
+    instances_page: Controller<InstancesPage>,
+    accounts_page: Controller<AccountsPage>,
+    settings_page: Controller<SettingsPage>,
 
     #[allow(dead_code)]
     config: Arc<SharedState<LauncherConfig>>,
     #[allow(dead_code)]
-    accounts_store: Arc<SharedState<AccountStore>>,
+    accounts: Arc<SharedState<AccountStore>>,
+    #[allow(dead_code)]
+    instances: InstancesVec,
 }
 
 #[derive(Debug)]
@@ -129,10 +133,10 @@ impl SimpleComponent for AppModel {
                             #[wrap(Some)]
                             set_content = &adw::ViewStack {
 
-                                add_titled_with_icon: (model.home.widget(), Some(NavPage::Home.as_str()), NavPage::Home.title(), "go-home-symbolic"),
-                                add_titled_with_icon: (model.instances.widget(), Some(NavPage::Instances.as_str()), NavPage::Instances.title(), "view-grid-symbolic"),
-                                add_titled_with_icon: (model.accounts.widget(), Some(NavPage::Accounts.as_str()), NavPage::Accounts.title(), "avatar-default-symbolic"),
-                                add_titled_with_icon: (model.settings.widget(), Some(NavPage::Settings.as_str()), NavPage::Settings.title(), "emblem-system-symbolic"),
+                                add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), NavPage::Home.title(), "go-home-symbolic"),
+                                add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), NavPage::Instances.title(), "view-grid-symbolic"),
+                                add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), NavPage::Accounts.title(), "avatar-default-symbolic"),
+                                add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), NavPage::Settings.title(), "emblem-system-symbolic"),
 
                                 #[watch]
                                 set_visible_child_name: model.current_page.as_str(),
@@ -178,17 +182,34 @@ impl SimpleComponent for AppModel {
         let accounts_state = Arc::new(SharedState::<AccountStore>::new());
         *accounts_state.write() = store;
 
-        // Initialize ui widgets
-        let home = HomePage::builder().launch(()).detach();
-        let instances = InstancesPage::builder().launch(()).detach();
+        let instances = Instance::discover_all(&dirs.versions_dir()).unwrap_or_default();
 
-        let accounts = AccountsPage::builder()
+        // Check whether the current instance exists.
+        if let Some(active_id) = &config_state.read().active_instance {
+            let alive = instances
+                .iter()
+                .find(|ins| ins.id() == active_id)
+                .map(|ins| ins.exist())
+                .unwrap_or(false);
+            if !alive {
+                config_state.write().active_instance =
+                    instances.first().map(|ins| ins.id().to_string());
+            }
+        }
+        let instances_state = Arc::new(SharedState::<Vec<Instance>>::new());
+        *instances_state.write() = instances;
+
+        // Initialize ui widgets
+        let home_page = HomePage::builder().launch(()).detach();
+        let instances_page = InstancesPage::builder().launch(()).detach();
+
+        let accounts_page = AccountsPage::builder()
             .launch((Arc::clone(&accounts_state), accounts_path))
             .forward(sender.input_sender(), |msg| match msg {
                 AccountsMsg::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
-        let settings = SettingsPage::builder()
+        let settings_page = SettingsPage::builder()
             .launch((Arc::clone(&config_state), dirs.config_file()))
             .forward(sender.input_sender(), |msg| match msg {
                 SettingsMsg::ShowToast(message) => AppMsg::ShowToast(message),
@@ -198,12 +219,13 @@ impl SimpleComponent for AppModel {
         let model = AppModel {
             current_page: NavPage::Home,
             toast_overlay,
-            home,
-            instances,
-            accounts,
-            settings,
+            home_page,
+            instances_page,
+            accounts_page,
+            settings_page,
             config: config_state,
-            accounts_store: accounts_state,
+            accounts: accounts_state,
+            instances: instances_state,
         };
 
         let toast_overlay = &model.toast_overlay;

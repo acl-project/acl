@@ -345,6 +345,18 @@ impl Instance {
 
         Ok(())
     }
+
+    pub fn exist(&self) -> bool {
+        if !self.dir.exists() {
+            return false;
+        }
+
+        if !self.config_file().exists() {
+            return false;
+        }
+
+        true
+    }
 }
 
 #[cfg(test)]
