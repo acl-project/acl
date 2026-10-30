@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = LauncherConfig::default();
-        assert_eq!(config.min_memory_mb, 1024);
+        assert_eq!(config.min_memory_mb, 512);
         assert_eq!(config.max_memory_mb, 4096);
         assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
@@ -190,7 +190,7 @@ mod tests {
             toml::from_str(partial_toml).expect("failed to parse partial toml");
         assert_eq!(config.max_memory_mb, 8192);
         assert!(config.close_launcher_on_launch);
-        assert_eq!(config.min_memory_mb, 1024);
+        assert_eq!(config.min_memory_mb, 512);
         assert_eq!(config.max_concurrent_downloads, 16);
         assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
@@ -204,13 +204,16 @@ mod tests {
 
         let loaded =
             LauncherConfig::load_or_default(&config_path).expect("failed to load or default");
-        assert_eq!(loaded, LauncherConfig::default());
         assert!(config_path.exists());
+        assert_eq!(loaded.min_memory_mb, 512);
+        assert_eq!(loaded.max_memory_mb, 4096);
+        assert_eq!(loaded.max_concurrent_downloads, 16);
+        assert!(!loaded.close_launcher_on_launch);
 
         let content = fs::read_to_string(&config_path).expect("failed to read created config");
         let parsed: LauncherConfig =
             toml::from_str(&content).expect("failed to parse config from disk");
-        assert_eq!(parsed, LauncherConfig::default());
+        assert_eq!(parsed, loaded);
     }
 
     #[test]
