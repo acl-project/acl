@@ -12,6 +12,8 @@ pub struct SettingsPage {
     config: Arc<SharedState<LauncherConfig>>,
     config_path: PathBuf,
     java_model: gtk::StringList,
+    /// Set when max memory changes; cleared after it has been persisted.
+    max_memory_dirty: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +25,8 @@ pub enum SettingsMsg {
 pub enum SettingsInput {
     SetMinMemory(u32),
     SetMaxMemory(u32),
+    /// Persist max memory if it changed (sent on pointer/touch/key release or scroll).
+    CommitMaxMemory,
     SetMaxConcurrentDownloads(usize),
     SetCloseOnLaunch(bool),
     SelectDefaultJava(usize),
@@ -111,11 +115,26 @@ impl SimpleComponent for SettingsPage {
                             sender.input(SettingsInput::SetMaxMemory(scale.value() as u32));
                         },
 
-                        add_controller = gtk::GestureClick {
-                            connect_released[sender] => move |_, _, _, _| {
-                                sender.input(SettingsInput::SaveConfig);
+                        // Not a gesture, so it is never cancelled by GtkRange's internal gestures.
+                        add_controller = gtk::EventControllerLegacy {
+                            set_propagation_phase: gtk::PropagationPhase::Capture,
+                            connect_event[sender] => move |_, event| {
+                                use gtk::gdk::EventType;
+                                if matches!(
+                                    event.event_type(),
+                                    EventType::ButtonRelease
+                                        | EventType::TouchEnd
+                                        | EventType::TouchCancel
+                                        | EventType::KeyRelease
+                                        | EventType::Scroll
+                                ) {
+                                    sender.input(SettingsInput::CommitMaxMemory);
+                                }
+                                // Let GtkScale handle the event as usual.
+                                gtk::glib::Propagation::Proceed
                             },
                         },
+
                     },
 
                 },
@@ -189,6 +208,7 @@ impl SimpleComponent for SettingsPage {
             config,
             config_path,
             java_model: java_model.clone(),
+            max_memory_dirty: false,
         };
 
         model.refresh_java_model();
@@ -205,6 +225,13 @@ impl SimpleComponent for SettingsPage {
             }
             SettingsInput::SetMaxMemory(val) => {
                 self.config.write().max_memory_mb = val;
+                self.max_memory_dirty = true;
+            }
+            SettingsInput::CommitMaxMemory => {
+                if self.max_memory_dirty {
+                    self.max_memory_dirty = false;
+                    self.save_config(&sender);
+                }
             }
             SettingsInput::SetMaxConcurrentDownloads(val) => {
                 self.config.write().max_concurrent_downloads = val;

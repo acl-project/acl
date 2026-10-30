@@ -1,7 +1,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use crate::pages::{
-    accounts::AccountsPage,
+    accounts::{AccountsMsg, AccountsPage},
     home::HomePage,
     instances::InstancesPage,
     settings::{SettingsMsg, SettingsPage},
@@ -11,6 +11,7 @@ use gtk::prelude::GtkWindowExt;
 use libadwaita::NavigationPage;
 use relm4::{SharedState, prelude::*};
 
+use acl_auth::AccountStore;
 use acl_core::{LauncherConfig, LauncherDirs};
 use tracing::error;
 
@@ -68,6 +69,8 @@ pub struct AppModel {
 
     #[allow(dead_code)]
     config: Arc<SharedState<LauncherConfig>>,
+    #[allow(dead_code)]
+    accounts_store: Arc<SharedState<AccountStore>>,
 }
 
 #[derive(Debug)]
@@ -162,10 +165,28 @@ impl SimpleComponent for AppModel {
         let config_state = Arc::new(SharedState::<LauncherConfig>::new());
         *config_state.write() = config;
 
+        let accounts_path = dirs.accounts_file();
+        let store = match AccountStore::load_or_default(&accounts_path) {
+            Ok(s) => s,
+            Err(err) => {
+                let err_msg = format!("Failed to load accounts, using defaults: {err}");
+                error!("{err_msg}");
+                sender.input(AppMsg::ShowToast(err_msg));
+                AccountStore::default()
+            }
+        };
+        let accounts_state = Arc::new(SharedState::<AccountStore>::new());
+        *accounts_state.write() = store;
+
         // Initialize ui widgets
         let home = HomePage::builder().launch(()).detach();
         let instances = InstancesPage::builder().launch(()).detach();
-        let accounts = AccountsPage::builder().launch(()).detach();
+
+        let accounts = AccountsPage::builder()
+            .launch((Arc::clone(&accounts_state), accounts_path))
+            .forward(sender.input_sender(), |msg| match msg {
+                AccountsMsg::ShowToast(message) => AppMsg::ShowToast(message),
+            });
 
         let settings = SettingsPage::builder()
             .launch((Arc::clone(&config_state), dirs.config_file()))
@@ -182,6 +203,7 @@ impl SimpleComponent for AppModel {
             accounts,
             settings,
             config: config_state,
+            accounts_store: accounts_state,
         };
 
         let toast_overlay = &model.toast_overlay;
