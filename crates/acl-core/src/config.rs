@@ -46,7 +46,11 @@ impl LauncherConfig {
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if !path.exists() {
             info!("Configuration file not found, using default settings");
-            let config: LauncherConfig = Self::default();
+            let mut config: LauncherConfig = Self::default();
+
+            // Search for Java once during initialization.
+            config.search_java();
+
             config.save(path)?;
             return Ok(config);
         }
@@ -75,6 +79,7 @@ impl LauncherConfig {
         Ok(())
     }
 
+    /// Search for Java installations on the system; this updates the java list and modifies the default Java.
     pub fn search_java(&mut self) {
         let java_list = java::discover_java_installations();
 

@@ -149,7 +149,7 @@ impl SimpleComponent for AppModel {
     ) -> relm4::prelude::ComponentParts<Self> {
         // Initialize luancher core
 
-        let mut config = match LauncherConfig::load_or_default(&dirs.config_file()) {
+        let config = match LauncherConfig::load_or_default(&dirs.config_file()) {
             Ok(cfg) => cfg,
             Err(err) => {
                 let err = format!("Failed to load ￹config, using defaults: {err}");
@@ -158,8 +158,6 @@ impl SimpleComponent for AppModel {
                 LauncherConfig::default()
             }
         };
-
-        config.search_java();
 
         let config_state = Arc::new(SharedState::<LauncherConfig>::new());
         *config_state.write() = config;
