@@ -91,6 +91,11 @@ impl LauncherDirs {
     pub fn versions_dir(&self) -> PathBuf {
         self.data_dir.join("versions")
     }
+
+    /// Path to the accounts storage file (`accounts.toml`).
+    pub fn accounts_file(&self) -> PathBuf {
+        self.config_dir.join("accounts.toml")
+    }
 }
 
 #[cfg(test)]
