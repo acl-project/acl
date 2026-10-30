@@ -32,7 +32,7 @@ pub struct LauncherConfig {
 impl Default for LauncherConfig {
     fn default() -> Self {
         Self {
-            min_memory_mb: 1024,
+            min_memory_mb: 512,
             max_memory_mb: 4096,
             default_java: None,
             java_list: Vec::new(),
@@ -46,7 +46,11 @@ impl LauncherConfig {
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if !path.exists() {
             info!("Configuration file not found, using default settings");
-            let config: LauncherConfig = Self::default();
+            let mut config: LauncherConfig = Self::default();
+
+            // Search for Java once during initialization.
+            config.search_java();
+
             config.save(path)?;
             return Ok(config);
         }
@@ -75,6 +79,7 @@ impl LauncherConfig {
         Ok(())
     }
 
+    /// Search for Java installations on the system; this updates the java list and modifies the default Java.
     pub fn search_java(&mut self) {
         let java_list = java::discover_java_installations();
 
@@ -141,7 +146,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = LauncherConfig::default();
-        assert_eq!(config.min_memory_mb, 1024);
+        assert_eq!(config.min_memory_mb, 512);
         assert_eq!(config.max_memory_mb, 4096);
         assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
@@ -185,7 +190,7 @@ mod tests {
             toml::from_str(partial_toml).expect("failed to parse partial toml");
         assert_eq!(config.max_memory_mb, 8192);
         assert!(config.close_launcher_on_launch);
-        assert_eq!(config.min_memory_mb, 1024);
+        assert_eq!(config.min_memory_mb, 512);
         assert_eq!(config.max_concurrent_downloads, 16);
         assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
@@ -199,13 +204,16 @@ mod tests {
 
         let loaded =
             LauncherConfig::load_or_default(&config_path).expect("failed to load or default");
-        assert_eq!(loaded, LauncherConfig::default());
         assert!(config_path.exists());
+        assert_eq!(loaded.min_memory_mb, 512);
+        assert_eq!(loaded.max_memory_mb, 4096);
+        assert_eq!(loaded.max_concurrent_downloads, 16);
+        assert!(!loaded.close_launcher_on_launch);
 
         let content = fs::read_to_string(&config_path).expect("failed to read created config");
         let parsed: LauncherConfig =
             toml::from_str(&content).expect("failed to parse config from disk");
-        assert_eq!(parsed, LauncherConfig::default());
+        assert_eq!(parsed, loaded);
     }
 
     #[test]

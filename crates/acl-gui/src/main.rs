@@ -1,8 +1,10 @@
 pub mod app;
 pub mod pages;
+mod system;
 
 use std::process::ExitCode;
 
+use acl_core::LauncherDirs;
 use relm4::adw;
 
 use tracing::{error, info};
@@ -25,8 +27,16 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    let dirs = match LauncherDirs::new() {
+        Ok(dirs) => dirs,
+        Err(err) => {
+            error!("Failed to resolve launcher directories: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let app = relm4::RelmApp::new("com.acl-project.adwaita-craft-launcher");
-    app.run::<AppModel>(());
+    app.run::<AppModel>(dirs);
 
     ExitCode::SUCCESS
 }

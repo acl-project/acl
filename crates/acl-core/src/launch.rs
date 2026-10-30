@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(cmd.main_class, "net.minecraft.client.main.Main");
 
         // Memory arguments
-        assert_eq!(cmd.jvm_args[0], "-Xms1024M");
+        assert_eq!(cmd.jvm_args[0], "-Xms512M");
         assert_eq!(cmd.jvm_args[1], "-Xmx4096M");
 
         // JVM arguments placeholder replacement
@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(cmd.main_class, "net.minecraft.client.main.Main");
 
         // Legacy JVM arguments automatically provided
-        assert_eq!(cmd.jvm_args[0], "-Xms1024M");
+        assert_eq!(cmd.jvm_args[0], "-Xms512M");
         assert_eq!(cmd.jvm_args[1], "-Xmx4096M");
         assert!(
             cmd.jvm_args
