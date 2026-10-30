@@ -45,11 +45,12 @@ impl FactoryComponent for AccountRow {
 
     view! {
         #[root]
+        #[name = "row"]
         adw::ActionRow {
             #[watch]
             set_title: &self.account.username,
             #[watch]
-            set_subtitle: &self.account_type_label(),
+            set_subtitle: self.account_type_label(),
 
             set_selectable: false,
             set_focus_on_click: false,
@@ -82,12 +83,35 @@ impl FactoryComponent for AccountRow {
                 set_valign: gtk::Align::Center,
                 add_css_class: "flat",
                 set_tooltip_text: Some("Remove account"),
-                connect_clicked[sender, uuid = self.account.uuid] => move |_| {
-                    let _ = sender.output(AccountRowOutput::Remove(uuid));
+                connect_clicked[delete_dialog, row] => move |_| {
+                    delete_dialog.present(Some(&row));
                 },
             },
 
+        },
+
+        #[name = "delete_dialog"]
+        adw::AlertDialog {
+            set_heading: Some("Delete Account"),
+            #[watch]
+            set_body: &format!("Are you sure you want to delete account \"{}\"?", self.account.username),
+
+            add_response: ("cancel", "Cancel"),
+            add_response: ("delete", "Delete"),
+            set_response_appearance: ("delete", adw::ResponseAppearance::Destructive),
+            set_default_response: Some("cancel"),
+            set_close_response: "cancel",
+
+            connect_response: (Some("delete"), {
+                let sender = sender.clone();
+                let uuid = self.account.uuid;
+                move |_, _| {
+                    let _ = sender.output(AccountRowOutput::Remove(uuid));
+                }
+            }),
+
         }
+
     }
 
     fn init_model(
