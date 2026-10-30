@@ -27,8 +27,6 @@ pub struct LauncherConfig {
     pub max_concurrent_downloads: usize,
     /// Whether to close the launcher window when the game starts.
     pub close_launcher_on_launch: bool,
-    /// Currently selected instance ID.
-    pub active_instance: Option<String>,
 }
 
 impl Default for LauncherConfig {
@@ -40,7 +38,6 @@ impl Default for LauncherConfig {
             java_list: Vec::new(),
             max_concurrent_downloads: 16,
             close_launcher_on_launch: false,
-            active_instance: None,
         }
     }
 }
@@ -78,7 +75,7 @@ impl LauncherConfig {
             source,
         })?;
 
-        info!("Configuration saved to {}", path.display());
+        info!("Luancher configuration saved to {}", path.display());
         Ok(())
     }
 
@@ -175,7 +172,6 @@ mod tests {
             java_list: vec![java],
             max_concurrent_downloads: 8,
             close_launcher_on_launch: true,
-            active_instance: None,
         };
 
         let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");

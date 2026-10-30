@@ -1,9 +1,9 @@
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::pages::{
     accounts::{AccountsMsg, AccountsPage},
     home::HomePage,
-    instances::InstancesPage,
+    instances::{InstancesPage, InstancesPageMsg},
     settings::{SettingsMsg, SettingsPage},
 };
 use adw::prelude::*;
@@ -12,10 +12,14 @@ use libadwaita::NavigationPage;
 use relm4::{SharedState, prelude::*};
 
 use acl_auth::AccountStore;
-use acl_core::{Instance, LauncherConfig, LauncherDirs};
+use acl_core::{LauncherConfig, LauncherDirs, manager::InstanceManager};
 use tracing::error;
 
-pub type InstancesVec = Arc<SharedState<Vec<Instance>>>;
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (X11; Linux x86_64) AdwaitaCraftLauncher/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/acl-project/acl)"
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NavPage {
@@ -74,7 +78,9 @@ pub struct AppModel {
     #[allow(dead_code)]
     accounts: Arc<SharedState<AccountStore>>,
     #[allow(dead_code)]
-    instances: InstancesVec,
+    instances: Arc<SharedState<InstanceManager>>,
+    #[allow(dead_code)]
+    client: reqwest::Client,
 }
 
 #[derive(Debug)]
@@ -182,26 +188,37 @@ impl SimpleComponent for AppModel {
         let accounts_state = Arc::new(SharedState::<AccountStore>::new());
         *accounts_state.write() = store;
 
-        let instances = Instance::discover_all(&dirs.versions_dir()).unwrap_or_default();
+        let instances_mgr =
+            match InstanceManager::load(dirs.versions_dir(), dirs.config_dir().to_path_buf()) {
+                Ok(s) => s,
+                Err(err) => {
+                    let err_msg = format!("Failed to load accounts, using defaults: {err}");
+                    error!("{err_msg}");
+                    sender.input(AppMsg::ShowToast(err_msg));
+                    InstanceManager::default()
+                }
+            };
 
-        // Check whether the current instance exists.
-        if let Some(active_id) = &config_state.read().active_instance {
-            let alive = instances
-                .iter()
-                .find(|ins| ins.id() == active_id)
-                .map(|ins| ins.exist())
-                .unwrap_or(false);
-            if !alive {
-                config_state.write().active_instance =
-                    instances.first().map(|ins| ins.id().to_string());
-            }
-        }
-        let instances_state = Arc::new(SharedState::<Vec<Instance>>::new());
-        *instances_state.write() = instances;
+        let instances_state = Arc::new(SharedState::<InstanceManager>::new());
+        *instances_state.write() = instances_mgr;
+
+        // Network client
+        let client = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|err| {
+                error!("Failed to build custom HTTP client, using default: {err}");
+                reqwest::Client::new()
+            });
 
         // Initialize ui widgets
         let home_page = HomePage::builder().launch(()).detach();
-        let instances_page = InstancesPage::builder().launch(()).detach();
+        let instances_page = InstancesPage::builder()
+            .launch(Arc::clone(&instances_state))
+            .forward(sender.input_sender(), |msg| match msg {
+                InstancesPageMsg::ShowToast(message) => AppMsg::ShowToast(message),
+            });
 
         let accounts_page = AccountsPage::builder()
             .launch((Arc::clone(&accounts_state), accounts_path))
@@ -226,6 +243,7 @@ impl SimpleComponent for AppModel {
             config: config_state,
             accounts: accounts_state,
             instances: instances_state,
+            client,
         };
 
         let toast_overlay = &model.toast_overlay;

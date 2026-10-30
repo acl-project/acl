@@ -22,6 +22,18 @@ pub enum ModLoader {
     NeoForge,
 }
 
+impl ModLoader {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ModLoader::Vanilla => "Vanilla",
+            ModLoader::Fabric => "Fabric",
+            ModLoader::Quilt => "Quilt",
+            ModLoader::Forge => "Forge",
+            ModLoader::NeoForge => "NeoForge",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct InstanceConfig {
     /// Unique directory identifier for the instance (prevent path traversal)
@@ -244,21 +256,21 @@ impl Instance {
         Ok(instance)
     }
 
-    pub fn discover_all(version_dir: &Path) -> Result<Vec<Self>> {
+    pub fn discover_all(versions_dir: &Path) -> Result<Vec<Self>> {
         let mut instances = Vec::new();
 
-        if !version_dir.exists() {
+        if !versions_dir.exists() {
             return Ok(instances);
         }
 
-        let read_dir = fs::read_dir(version_dir).map_err(|source| CoreError::Io {
-            path: version_dir.to_path_buf(),
+        let read_dir = fs::read_dir(versions_dir).map_err(|source| CoreError::Io {
+            path: versions_dir.to_path_buf(),
             source,
         })?;
 
         for entry in read_dir {
             let entry = entry.map_err(|source| CoreError::Io {
-                path: version_dir.to_path_buf(),
+                path: versions_dir.to_path_buf(),
                 source,
             })?;
 
