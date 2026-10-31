@@ -217,8 +217,9 @@ impl SimpleComponent for AppModel {
         let instances_page = InstancesPage::builder()
             .launch(InstancesInit {
                 mgr: Arc::clone(&instances_state),
+                config: Arc::clone(&config_state),
                 client: client.clone(),
-                cache_dir: dirs.cache_dir().to_path_buf(),
+                dirs: dirs.clone(),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 InstancesPageOutput::ShowToast(message) => AppMsg::ShowToast(message),

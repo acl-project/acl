@@ -1,21 +1,75 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use acl_core::{Instance, manager::InstanceManager};
+use acl_core::{Instance, LauncherConfig, LauncherDirs, manager::InstanceManager};
 
-use gtk::prelude::*;
+use acl_minecraft::{AssetIndex, VersionEntry, download::DownloadProgress};
 use libadwaita::prelude::*;
-use relm4::{SharedState, prelude::*};
+use relm4::{SharedState, gtk, prelude::*, tokio};
 use tracing::error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InstallStage {
+    /// Normal and usable
+    #[default]
+    Idle,
+    /// Stage 1: Fetch the version JSON
+    FetchingMetadata,
+    /// Stage 2: Fetch the asset index JSON
+    FetchingAssetIndex,
+    /// Stage 3: Concurrently download the Jar / libraries / assets
+    Downloading(DownloadProgress),
+    /// Stage 4: Extract Natives and map legacy assets
+    PreparingRuntime,
+}
+
+impl InstallStage {
+    fn is_installing(&self) -> bool {
+        *self != InstallStage::Idle
+    }
+
+    fn fraction(&self) -> f64 {
+        match self {
+            InstallStage::Idle => 0.0,
+            InstallStage::FetchingMetadata => 0.02,
+            InstallStage::FetchingAssetIndex => 0.05,
+            InstallStage::Downloading(p) => {
+                let ratio = if p.total_bytes > 0 {
+                    (p.completed_bytes as f64 / p.total_bytes as f64).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+
+                0.05 + ratio * 0.9
+            }
+
+            InstallStage::PreparingRuntime => 0.98,
+        }
+    }
+    fn status_text(&self) -> Option<String> {
+        match self {
+            InstallStage::Idle => None,
+            InstallStage::FetchingMetadata => Some("Fetching metadata...".to_owned()),
+            InstallStage::FetchingAssetIndex => Some("Fetching asset index...".to_owned()),
+            InstallStage::Downloading(p) => Some(format!(
+                "Downloading ({}/{})",
+                p.completed_files, p.total_files
+            )),
+            InstallStage::PreparingRuntime => Some("Preparing runtime...".to_owned()),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct InstanceRow {
     instance: Instance,
     is_active: bool,
+    stage: InstallStage,
 }
 
 #[derive(Debug)]
 pub enum InstanceRowInput {
     SetActive(bool),
+    SetStage(InstallStage),
 }
 
 #[derive(Debug)]
@@ -26,11 +80,17 @@ pub enum InstanceRowOutput {
 
 impl InstanceRow {
     fn subtitle(&self) -> String {
-        format!(
+        let base = format!(
             "{} • {}",
             self.instance.config.game_version,
             self.instance.config.mod_loader.label()
-        )
+        );
+
+        if let Some(status) = self.stage.status_text() {
+            format!("{base} • {status}")
+        } else {
+            base
+        }
     }
 }
 
@@ -47,18 +107,39 @@ impl FactoryComponent for InstanceRow {
         #[name = "row"]
         adw::ActionRow {
             set_title: &self.instance.config.name,
+            #[watch]
             set_subtitle: &self.subtitle(),
 
             set_selectable: false,
             set_focus_on_click: false,
 
-            set_activatable: true,
+            // Cannot be clicked during installation.
+            #[watch]
+            set_activatable: !self.stage.is_installing(),
+
+            #[watch]
+            set_class_active: ("dim-label", self.stage.is_installing()),
+
             connect_activated[sender, id = self.instance.id().to_owned()] => move |_| {
                 let _ = sender.output(InstanceRowOutput::Select(id.clone()));
             },
 
+            add_suffix = &gtk::ProgressBar {
+                set_valign: gtk::Align::Center,
+                set_width_request: 120,
+
+                #[watch]
+                set_visible: self.stage.is_installing(),
+
+                #[watch]
+                set_fraction: self.stage.fraction(),
+            },
+
             #[name = "select_check"]
             add_suffix = &gtk::CheckButton {
+                #[watch]
+                set_visible: !self.stage.is_installing(),
+
                 set_valign: gtk::Align::Center,
                 add_css_class: "selection-mode",
                 set_can_focus: false,
@@ -68,6 +149,9 @@ impl FactoryComponent for InstanceRow {
             },
 
             add_suffix = &gtk::Button {
+                #[watch]
+                set_visible: !self.stage.is_installing(),
+
                 set_icon_name: "user-trash-symbolic",
                 set_valign: gtk::Align::Center,
                 add_css_class: "flat",
@@ -112,6 +196,7 @@ impl FactoryComponent for InstanceRow {
         Self {
             instance,
             is_active,
+            stage: InstallStage::Idle,
         }
     }
 
@@ -119,6 +204,9 @@ impl FactoryComponent for InstanceRow {
         match msg {
             InstanceRowInput::SetActive(active) => {
                 self.is_active = active;
+            }
+            InstanceRowInput::SetStage(stage) => {
+                self.stage = stage;
             }
         }
     }
@@ -128,13 +216,19 @@ impl FactoryComponent for InstanceRow {
 pub enum ListInput {
     SelectInstance(String),
     RemoveInstance(String),
+    StartDownload(String, VersionEntry),
     Refresh,
 }
 
 /// Management page for installed instances.
 pub struct ListPage {
     mgr: Arc<SharedState<InstanceManager>>,
+    config: Arc<SharedState<LauncherConfig>>,
+    client: reqwest::Client,
+    dirs: LauncherDirs,
     instance_rows: FactoryVecDeque<InstanceRow>,
+    /// Record the state of each instance to prevent it from being lost when rebuilding rows.
+    install_stages: HashMap<String, InstallStage>,
 }
 
 #[derive(Debug, Clone)]
@@ -161,14 +255,163 @@ impl ListPage {
             let is_active = Some(instance.id().to_string()) == active_id;
             guard.push_back((instance.clone(), is_active));
         }
+
+        drop(guard);
+        // Synchronize existing stages.
+        for (i, row) in self.instance_rows.iter().enumerate() {
+            if let Some(&stage) = self.install_stages.get(row.instance.id()) {
+                self.instance_rows
+                    .send(i, InstanceRowInput::SetStage(stage));
+            }
+        }
+    }
+
+    fn update_row_stage(&mut self, id: &str, stage: InstallStage) {
+        if stage == InstallStage::Idle {
+            self.install_stages.remove(id);
+        } else {
+            self.install_stages.insert(id.to_string(), stage);
+        }
+
+        if let Some(index) = self
+            .instance_rows
+            .iter()
+            .position(|r| r.instance.id() == id)
+        {
+            self.instance_rows
+                .send(index, InstanceRowInput::SetStage(stage));
+        }
+    }
+
+    fn spawn_install(&mut self, id: String, entry: VersionEntry, sender: &ComponentSender<Self>) {
+        let instance = self
+            .mgr
+            .read()
+            .instances
+            .iter()
+            .find(|i| i.id() == id)
+            .cloned();
+        let Some(instance) = instance else {
+            return;
+        };
+
+        self.update_row_stage(&id, InstallStage::FetchingMetadata);
+
+        let client = self.client.clone();
+        let dirs = self.dirs.clone();
+        let max_concurrent = self.config.read().max_concurrent_downloads;
+
+        sender.command(move |out, shutdown| {
+            shutdown
+                .register(async move {
+                    let result: Result<(), String> = async {
+                        let _ = out.send(ListCmdOutput::StageChanged {
+                            id: id.clone(),
+                            stage: InstallStage::FetchingMetadata,
+                        });
+                        let metadata = instance
+                            .fetch_metadata(&client, &entry, &dirs)
+                            .await
+                            .map_err(|e| e.to_string())?;
+
+                        let _ = out.send(ListCmdOutput::StageChanged {
+                            id: id.clone(),
+                            stage: InstallStage::FetchingAssetIndex,
+                        });
+                        let asset_index = AssetIndex::fetch_and_verify(
+                            &client,
+                            &metadata.asset_index,
+                            &dirs.assets_dir(),
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+
+                        let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
+                        let total_files = tasks.len();
+                        let total_bytes = tasks.iter().map(|t| t.size).sum();
+
+                        let _ = out.send(ListCmdOutput::StageChanged {
+                            id: id.clone(),
+                            stage: InstallStage::Downloading(DownloadProgress {
+                                completed_files: 0,
+                                total_files,
+                                completed_bytes: 0,
+                                total_bytes,
+                            }),
+                        });
+
+                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                        let out_prog = out.clone();
+                        let id_prog = id.clone();
+                        let forward_handle = tokio::spawn(async move {
+                            while let Some(prog) = rx.recv().await {
+                                let _ = out_prog.send(ListCmdOutput::StageChanged {
+                                    id: id_prog.clone(),
+                                    stage: InstallStage::Downloading(prog),
+                                });
+                            }
+                        });
+
+                        acl_minecraft::download::download_all(
+                            &client,
+                            tasks,
+                            max_concurrent,
+                            Some(tx),
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                        let _ = forward_handle.await;
+
+                        let _ = out.send(ListCmdOutput::StageChanged {
+                            id: id.clone(),
+                            stage: InstallStage::PreparingRuntime,
+                        });
+                        let inst_c = instance.clone();
+                        let dirs_c = dirs.clone();
+
+                        tokio::task::spawn_blocking(move || {
+                            inst_c.prepare_runtime(&metadata, &asset_index, &dirs_c)
+                        })
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .map_err(|e| e.to_string())?;
+
+                        Ok(())
+                    }
+                    .await;
+
+                    let _ = out.send(ListCmdOutput::InstallFinished { id, result });
+                })
+                .drop_on_shutdown()
+        });
     }
 }
 
+pub struct ListPageInit {
+    pub mgr: Arc<SharedState<InstanceManager>>,
+    pub config: Arc<SharedState<LauncherConfig>>,
+    pub client: reqwest::Client,
+    pub dirs: LauncherDirs,
+}
+
+#[derive(Debug)]
+pub enum ListCmdOutput {
+    StageChanged {
+        id: String,
+        stage: InstallStage,
+    },
+    InstallFinished {
+        id: String,
+        result: Result<(), String>,
+    },
+}
+
 #[relm4::component(pub)]
-impl SimpleComponent for ListPage {
-    type Init = Arc<SharedState<InstanceManager>>;
+impl Component for ListPage {
+    type Init = ListPageInit;
     type Input = ListInput;
     type Output = ListOutput;
+    type CommandOutput = ListCmdOutput;
 
     view! {
         #[root]
@@ -205,7 +448,7 @@ impl SimpleComponent for ListPage {
     }
 
     fn init(
-        mgr: Self::Init,
+        init: Self::Init,
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
@@ -216,7 +459,14 @@ impl SimpleComponent for ListPage {
                 InstanceRowOutput::Remove(id) => ListInput::RemoveInstance(id),
             });
 
-        let mut model = Self { mgr, instance_rows };
+        let mut model = Self {
+            mgr: init.mgr,
+            client: init.client,
+            config: init.config,
+            dirs: init.dirs,
+            instance_rows,
+            install_stages: HashMap::new(),
+        };
 
         model.rebuild_rows();
 
@@ -226,9 +476,12 @@ impl SimpleComponent for ListPage {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             ListInput::SelectInstance(id) => {
+                if self.install_stages.contains_key(&id) {
+                    return; // Selection is disabled while downloading.
+                }
                 let res = self.mgr.write().set_active_instance(&id).map(|_| ());
 
                 if let Err(err) = res {
@@ -257,6 +510,42 @@ impl SimpleComponent for ListPage {
             }
             ListInput::Refresh => {
                 self.rebuild_rows();
+            }
+            ListInput::StartDownload(id, entry) => {
+                self.spawn_install(id, entry, &sender);
+            }
+        }
+    }
+
+    fn update_cmd(
+        &mut self,
+        msg: Self::CommandOutput,
+        sender: ComponentSender<Self>,
+        _root: &Self::Root,
+    ) {
+        match msg {
+            ListCmdOutput::StageChanged { id, stage } => {
+                self.update_row_stage(&id, stage);
+            }
+
+            ListCmdOutput::InstallFinished { id, result } => {
+                self.update_row_stage(&id, InstallStage::Idle);
+
+                match result {
+                    Ok(()) => {
+                        let _ = sender.output(ListOutput::ShowToast(format!(
+                            "Instance \"{id}\" is ready to play"
+                        )));
+                    }
+                    Err(err) => {
+                        error!("Instance '{id}' installation failed: {err}");
+                        let _ = sender.output(ListOutput::ShowToast(err));
+                        // Automatically clean up incomplete instances when the download fails.
+                        let _ = self.mgr.write().remove_instance(&id);
+                        self.save_config(&sender);
+                        self.rebuild_rows();
+                    }
+                }
             }
         }
     }
