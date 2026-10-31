@@ -6,7 +6,7 @@ use gtk::prelude::*;
 use libadwaita::prelude::*;
 
 use relm4::{
-    Component, ComponentParts, ComponentSender, FactorySender, RelmWidgetExt, SharedState, adw,
+    Component, ComponentParts, ComponentSender, FactorySender, SharedState, adw,
     factory::{FactoryComponent, FactoryVecDeque},
 };
 use tracing::{error, info};
@@ -240,20 +240,14 @@ impl Component for CreatePage {
 
     view! {
         #[root]
-        adw::Clamp {
-            set_maximum_size: 720,
-            set_vexpand: true,
-            set_margin_all: 24,
+        adw::PreferencesPage {
 
-            gtk::Box {
-            set_orientation: gtk::Orientation::Vertical,
-            set_spacing: 16,
+            // Top action bar
+            adw::PreferencesGroup {
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Horizontal,
 
-            // Top Action Bar
-            gtk::Box {
-                set_orientation: gtk::Orientation::Horizontal,
-
-                gtk::Button {
+                    gtk::Button {
                         connect_clicked => CreateInput::CancelClicked,
 
                         adw::ButtonContent {
@@ -262,17 +256,18 @@ impl Component for CreatePage {
                         },
                     },
 
-                gtk::Button {
-                    set_hexpand: true,
-                    set_halign: gtk::Align::End,
-                    add_css_class: "suggested-action",
-                    #[watch]
-                    set_sensitive: model.can_create(),
-                    connect_clicked => CreateInput::CreateClicked,
+                    gtk::Button {
+                        set_hexpand: true,
+                        set_halign: gtk::Align::End,
+                        add_css_class: "suggested-action",
+                        #[watch]
+                        set_sensitive: model.can_create(),
+                        connect_clicked => CreateInput::CreateClicked,
 
-                    adw::ButtonContent {
-                        set_icon_name: "list-add-symbolic",
-                        set_label: "Create",
+                        adw::ButtonContent {
+                            set_icon_name: "list-add-symbolic",
+                            set_label: "Create",
+                            },
                     },
                 },
             },
@@ -310,7 +305,7 @@ impl Component for CreatePage {
                     },
 
                     adw::ToggleGroup {
-                        set_active_name: Some("release"),
+
                         connect_active_name_notify[sender] => move |group| {
                             let filter =  VersionFilter::from_toggle_name(group.active_name().as_deref());
                             sender.input(CreateInput::FilterChanged(filter));
@@ -331,6 +326,8 @@ impl Component for CreatePage {
                             set_label: Some(VersionFilter::Old.title())
                         },
 
+                        set_active_name: Some(VersionFilter::Release.as_str()),
+
                     },
 
                     gtk::Button {
@@ -341,10 +338,7 @@ impl Component for CreatePage {
                     },
 
                 }
-
             }
-
-        }
 
         },
 

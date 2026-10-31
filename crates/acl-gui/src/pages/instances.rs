@@ -80,7 +80,7 @@ impl SimpleComponent for InstancesPage {
             sender.input_sender(),
             |msg| match msg {
                 ListOutput::ShowToast(message) => InstancesPageInput::ShowToast(message),
-                ListOutput::OpenCreate => InstancesPageInput::ChangeView(InstancesView::List),
+                ListOutput::OpenCreate => InstancesPageInput::ChangeView(InstancesView::Create),
             },
         );
 
