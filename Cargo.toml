@@ -30,7 +30,7 @@ relm4-macros = "0.11.0"
 
 #Async & HTTP
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "process", "io-util"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2"] }
 
 # Serialization & Config
 serde = { version = "1", features = ["derive"] }

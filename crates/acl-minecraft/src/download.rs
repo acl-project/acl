@@ -57,12 +57,13 @@ pub async fn download_and_verify_file(client: &reqwest::Client, task: &DownloadT
 
     verify_sha1(&bytes, &task.sha1, &task.name)?;
 
-    acl_common::fs::write_atomic(&task.destination, &bytes).map_err(|source| {
-        MinecraftError::Io {
+    // Write directly to disk.
+    tokio::fs::write(&task.destination, bytes)
+        .await
+        .map_err(|source| MinecraftError::Io {
             path: task.destination.clone(),
             source,
-        }
-    })?;
+        })?;
 
     Ok(())
 }
