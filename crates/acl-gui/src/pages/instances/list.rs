@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use acl_core::{Instance, manager::InstanceManager};
+
 use gtk::prelude::*;
 use libadwaita::prelude::*;
 use relm4::{SharedState, prelude::*};

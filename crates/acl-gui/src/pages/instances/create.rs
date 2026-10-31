@@ -1,77 +1,57 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{cell::RefCell, path::PathBuf, rc::Rc, sync::Arc};
 
 use acl_core::{Instance, InstanceConfig, manager::InstanceManager};
 use acl_minecraft::{VERSION_MANIFEST_URL, VersionEntry, VersionManifest, VersionType};
-use gtk::prelude::*;
+use gtk::{glib::BoxedAnyObject, prelude::*};
 use libadwaita::prelude::*;
 
 use relm4::{
-    Component, ComponentParts, ComponentSender, FactorySender, SharedState, adw,
-    factory::{FactoryComponent, FactoryVecDeque},
+    Component, ComponentParts, ComponentSender, RelmWidgetExt, SharedState, adw,
+    typed_view::list::{RelmListItem, TypedListView},
 };
 use tracing::{error, info};
 
+/// A single Minecraft version shown in the virtualized version list.
 #[derive(Debug, Clone)]
-pub struct VersionRow {
+pub struct VersionItem {
     entry: VersionEntry,
-    is_selected: bool,
 }
 
-#[derive(Debug)]
-pub enum VersionRowInput {
-    SetSelected(bool),
+pub struct VersionItemWidgets {
+    title: gtk::Label,
+    subtitle: gtk::Label,
 }
 
-#[derive(Debug)]
-pub enum VersionRowOutput {
-    Select(String),
-}
+impl RelmListItem for VersionItem {
+    type Root = gtk::Box;
+    type Widgets = VersionItemWidgets;
 
-#[relm4::factory(pub)]
-impl FactoryComponent for VersionRow {
-    type Init = (VersionEntry, bool);
-    type Input = VersionRowInput;
-    type Output = VersionRowOutput;
-    type CommandOutput = ();
-    type ParentWidget = adw::PreferencesGroup;
+    fn setup(_list_item: &gtk::ListItem) -> (Self::Root, Self::Widgets) {
+        relm4::view! {
+            root = gtk::Box {
+                set_orientation: gtk::Orientation::Vertical,
+                set_spacing: 2,
+                set_margin_all: 6,
 
-    view! {
-        #[root]
-        adw::ActionRow {
-            set_title: &self.entry.id,
-            set_subtitle: &self.entry.version_type.label(),
-            set_activatable: true,
+                #[name = "title"]
+                gtk::Label {
+                    set_halign: gtk::Align::Start,
+                },
 
-            connect_activated[sender, id = self.entry.id.clone()] => move |_| {
-                    let _ = sender.output(VersionRowOutput::Select(id.clone()));
-            },
-
-            #[name = "check"]
-            add_suffix = &gtk::CheckButton {
-                set_valign: gtk::Align::Center,
-                add_css_class: "selection-mode",
-                set_can_focus: false,
-                set_can_target: false,
-                #[watch]
-                set_active: self.is_selected,
-            },
-        }
-    }
-
-    fn init_model(
-        (entry, is_selected): Self::Init,
-        _index: &Self::Index,
-        _sender: FactorySender<Self>,
-    ) -> Self {
-        Self { entry, is_selected }
-    }
-
-    fn update(&mut self, msg: Self::Input, _sender: FactorySender<Self>) {
-        match msg {
-            VersionRowInput::SetSelected(selected) => {
-                self.is_selected = selected;
+                #[name = "subtitle"]
+                gtk::Label {
+                    set_halign: gtk::Align::Start,
+                    add_css_class: "dim-label",
+                    add_css_class: "caption",
+                },
             }
         }
+
+        (root, VersionItemWidgets { title, subtitle })
+    }
+    fn bind(&mut self, widgets: &mut Self::Widgets, _root: &mut Self::Root) {
+        widgets.title.set_label(&self.entry.id);
+        widgets.subtitle.set_label(self.entry.version_type.label());
     }
 }
 
@@ -140,6 +120,13 @@ pub fn matches_version_entry(
         .contains(&query.to_ascii_lowercase())
 }
 
+/// Search and type filter shared with the list view's filter closure.
+#[derive(Debug, Default)]
+struct FilterState {
+    query: String,
+    type_filter: VersionFilter,
+}
+
 pub struct CreatePageInit {
     pub mgr: Arc<SharedState<InstanceManager>>,
     pub client: reqwest::Client,
@@ -175,12 +162,10 @@ pub struct CreatePage {
     cache_dir: PathBuf,
 
     instance_name: String,
-    search_query: String,
-    type_filter: VersionFilter,
     selected_version: Option<String>,
 
-    all_versions: Vec<VersionEntry>,
-    version_rows: FactoryVecDeque<VersionRow>,
+    filter_state: Rc<RefCell<FilterState>>,
+    version_list: TypedListView<VersionItem, gtk::SingleSelection>,
     is_loading: bool,
 }
 
@@ -193,16 +178,32 @@ impl CreatePage {
             && !self.is_loading
     }
 
-    fn rebuild_rows(&mut self) {
-        let mut guard = self.version_rows.guard();
-        guard.clear();
+    fn selected_version_label(&self) -> &str {
+        self.selected_version.as_deref().unwrap_or("None")
+    }
 
-        for entry in &self.all_versions {
-            if matches_version_entry(entry, &self.search_query, self.type_filter) {
-                let is_selected = Some(&entry.id) == self.selected_version.as_ref();
-                guard.push_back((entry.clone(), is_selected));
-            }
-        }
+    /// Highlight `selected_version` in the list if it is currently visible.
+    fn sync_selection(&self) {
+        let selection = &self.version_list.selection_model;
+        let position = self.selected_version.as_deref().and_then(|id| {
+            (0..selection.n_items()).find(|&i| {
+                selection
+                    .item(i)
+                    .and_then(|obj| obj.downcast::<BoxedAnyObject>().ok())
+                    .is_some_and(|boxed| {
+                        boxed
+                            .try_borrow::<VersionItem>()
+                            .is_ok_and(|item| item.entry.id == id)
+                    })
+            })
+        });
+        selection.set_selected(position.unwrap_or(gtk::INVALID_LIST_POSITION));
+    }
+
+    /// Re-evaluate the list filter without recreating any row widgets.
+    fn refilter(&self) {
+        self.version_list.notify_filter_changed(0);
+        self.sync_selection();
     }
 
     fn spawn_fetch_manifest(&mut self, sender: &ComponentSender<Self>, force_refresh: bool) {
@@ -240,104 +241,125 @@ impl Component for CreatePage {
 
     view! {
         #[root]
-        adw::PreferencesPage {
+        gtk::Box {
+            set_orientation: gtk::Orientation::Vertical,
 
-            // Top action bar
-            adw::PreferencesGroup {
+            adw::Clamp {
+                set_maximum_size: 720,
+                set_margin_top: 24,
+                set_margin_start: 12,
+                set_margin_end: 12,
+
                 gtk::Box {
-                    set_orientation: gtk::Orientation::Horizontal,
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_spacing: 12,
+                     // Top action bar
+                    gtk::Box {
 
-                    gtk::Button {
-                        connect_clicked => CreateInput::CancelClicked,
+                        set_orientation: gtk::Orientation::Horizontal,
 
-                        adw::ButtonContent {
-                            set_icon_name: "go-previous-symbolic",
-                            set_label: "Back",
+                        gtk::Button {
+                            connect_clicked => CreateInput::CancelClicked,
+
+                            adw::ButtonContent {
+                                set_icon_name: "go-previous-symbolic",
+                                set_label: "Back",
+                            },
+                        },
+
+                        gtk::Button {
+                            set_hexpand: true,
+                            set_halign: gtk::Align::End,
+                            add_css_class: "suggested-action",
+                            #[watch]
+                            set_sensitive: model.can_create(),
+                            connect_clicked => CreateInput::CreateClicked,
+
+                            adw::ButtonContent {
+                                set_icon_name: "list-add-symbolic",
+                                set_label: "Create",
+                            },
                         },
                     },
 
-                    gtk::Button {
-                        set_hexpand: true,
-                        set_halign: gtk::Align::End,
-                        add_css_class: "suggested-action",
-                        #[watch]
-                        set_sensitive: model.can_create(),
-                        connect_clicked => CreateInput::CreateClicked,
+                    // Instance settings section
 
-                        adw::ButtonContent {
-                            set_icon_name: "list-add-symbolic",
-                            set_label: "Create",
-                            },
-                    },
-                },
-            },
+                    adw::PreferencesGroup {
+                        set_title: "Instance Settings",
 
-
-            // Instance settings section
-
-            adw::PreferencesGroup {
-                set_title: "Instance Settings",
-
-                adw::EntryRow {
+                        adw::EntryRow {
                             set_title: "Instance Name",
                             connect_changed[sender] => move |entry| {
                                 sender.input(CreateInput::NameChanged(entry.text().to_string()));
                             },
+                        },
+
+                        adw::ActionRow {
+                            set_title: "Game Version",
+                            #[watch]
+                            set_subtitle: model.selected_version_label(),
+                        },
+
+                    },
+
+                    // Version browser toolbar
+                    gtk::Box {
+                        set_spacing: 8,
+                        gtk::SearchEntry {
+                            set_hexpand: true,
+                            set_placeholder_text: Some("Search versions..."),
+                            connect_search_changed[sender] => move |entry| {
+                                sender.input(CreateInput::SearchChanged(entry.text().to_string()));
+                            },
+                        },
+
+                        adw::ToggleGroup {
+                            connect_active_name_notify[sender] => move |group| {
+                                let filter = VersionFilter::from_toggle_name(group.active_name().as_deref());
+                                sender.input(CreateInput::FilterChanged(filter));
+                            },
+
+                            add = adw::Toggle {
+                                set_name: Some(VersionFilter::Release.as_str()),
+                                set_label: Some(VersionFilter::Release.title()),
+                            },
+                            add = adw::Toggle {
+                                set_name: Some(VersionFilter::Snapshot.as_str()),
+                                set_label: Some(VersionFilter::Snapshot.title()),
+                            },
+                            add = adw::Toggle {
+                                set_name: Some(VersionFilter::Old.as_str()),
+                                set_label: Some(VersionFilter::Old.title()),
+                            },
+
+                            set_active_name: Some(VersionFilter::Release.as_str()),
+                        },
+
+                        gtk::Button {
+                            set_icon_name: "view-refresh-symbolic",
+                            set_tooltip_text: Some("Refresh version list"),
+                            #[watch]
+                            set_sensitive: !model.is_loading,
+                            connect_clicked => CreateInput::RefreshVersions,
+                        },
+                    },
                 },
             },
 
+            // Virtualized version list: only visible rows are instantiated
+            gtk::ScrolledWindow {
+                set_vexpand: true,
+                set_hscrollbar_policy: gtk::PolicyType::Never,
+                set_margin_top: 12,
+                set_margin_bottom: 24,
 
-            // Game version browser
+                #[name = "list_clamp"]
+                adw::ClampScrollable {
+                    set_maximum_size: 720,
+                    set_margin_start: 12,
+                    set_margin_end: 12,
+                },
 
-            #[local_ref]
-            versions_group -> adw::PreferencesGroup {
-                set_title: "Game Version",
-                set_description: Some("Select the Minecraft version you want to install"),
-
-                #[wrap(Some)]
-                set_header_suffix = &gtk::Box {
-                    set_spacing: 8,
-                    gtk::SearchEntry {
-                        set_placeholder_text: Some("Search versions..."),
-                        connect_search_changed[sender] => move |entry| {
-                            sender.input(CreateInput::SearchChanged(entry.text().to_string()));
-                        },
-                    },
-
-                    adw::ToggleGroup {
-
-                        connect_active_name_notify[sender] => move |group| {
-                            let filter =  VersionFilter::from_toggle_name(group.active_name().as_deref());
-                            sender.input(CreateInput::FilterChanged(filter));
-                        },
-
-                        add = adw::Toggle {
-                            set_name: Some(VersionFilter::Release.as_str()),
-                            set_label: Some(VersionFilter::Release.title())
-                        },
-
-                        add = adw::Toggle {
-                            set_name: Some(VersionFilter::Snapshot.as_str()),
-                            set_label: Some(VersionFilter::Snapshot.title())
-                        },
-
-                        add = adw::Toggle {
-                            set_name: Some(VersionFilter::Old.as_str()),
-                            set_label: Some(VersionFilter::Old.title())
-                        },
-
-                        set_active_name: Some(VersionFilter::Release.as_str()),
-
-                    },
-
-                    gtk::Button {
-                        set_icon_name: "view-refresh-symbolic",
-                        #[watch]
-                        set_sensitive: !model.is_loading,
-                        connect_clicked => CreateInput::RefreshVersions,
-                    },
-
-                }
             }
 
         },
@@ -349,29 +371,58 @@ impl Component for CreatePage {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let version_rows = FactoryVecDeque::builder()
-            .launch(adw::PreferencesGroup::default())
-            .forward(sender.input_sender(), |output| match output {
-                VersionRowOutput::Select(id) => CreateInput::SelectVersion(id),
-            });
+        let filter_state = Rc::new(RefCell::new(FilterState::default()));
+
+        let mut version_list: TypedListView<VersionItem, gtk::SingleSelection> =
+            TypedListView::new();
+        version_list.selection_model.set_autoselect(false);
+        version_list.selection_model.set_can_unselect(true);
+        version_list.view.add_css_class("navigation-sidebar");
+
+        version_list.add_filter({
+            let state = Rc::clone(&filter_state);
+            move |item| match state.try_borrow() {
+                Ok(state) => matches_version_entry(&item.entry, &state.query, state.type_filter),
+                Err(_) => true,
+            }
+        });
+
+        // Read the selected version id synchronously so filtering can't race with it.
+        version_list.selection_model.connect_selected_item_notify({
+            let sender = sender.clone();
+            move |selection| {
+                let id = selection
+                    .selected_item()
+                    .and_then(|obj| obj.downcast::<BoxedAnyObject>().ok())
+                    .and_then(|boxed| {
+                        boxed
+                            .try_borrow::<VersionItem>()
+                            .ok()
+                            .map(|item| item.entry.id.clone())
+                    });
+
+                // `None` means the selected row was filtered out; keep the previous choice.
+                if let Some(id) = id {
+                    sender.input(CreateInput::SelectVersion(id));
+                }
+            }
+        });
 
         let mut model = Self {
             mgr: init.mgr,
             client: init.client,
             cache_dir: init.cache_dir,
             instance_name: String::new(),
-            search_query: String::new(),
-            type_filter: VersionFilter::Release,
             selected_version: None,
-            all_versions: Vec::new(),
-            version_rows,
+            filter_state,
+            version_list,
             is_loading: false,
         };
 
         model.spawn_fetch_manifest(&sender, false);
 
-        let versions_group = model.version_rows.widget();
         let widgets = view_output!();
+        widgets.list_clamp.set_child(Some(&model.version_list.view));
 
         ComponentParts { model, widgets }
     }
@@ -382,23 +433,20 @@ impl Component for CreatePage {
                 self.instance_name = name;
             }
             CreateInput::SearchChanged(query) => {
-                self.search_query = query;
-                self.rebuild_rows();
+                if let Ok(mut state) = self.filter_state.try_borrow_mut() {
+                    state.query = query;
+                }
+                self.refilter();
             }
             CreateInput::FilterChanged(filter) => {
-                self.type_filter = filter;
-                self.rebuild_rows();
+                if let Ok(mut state) = self.filter_state.try_borrow_mut() {
+                    state.type_filter = filter;
+                }
+                self.refilter();
             }
 
             CreateInput::SelectVersion(id) => {
                 self.selected_version = Some(id.clone());
-
-                // Update row checkbox states cleanly without recreating widgets
-                for (i, row) in self.version_rows.iter().enumerate() {
-                    let is_selected = row.entry.id == id;
-                    self.version_rows
-                        .send(i, VersionRowInput::SetSelected(is_selected));
-                }
             }
 
             CreateInput::RefreshVersions => {
@@ -450,12 +498,18 @@ impl Component for CreatePage {
                 self.is_loading = false;
                 match result {
                     Ok(manifest) => {
-                        self.all_versions = manifest.versions;
+                        self.version_list.clear();
+                        self.version_list.extend_from_iter(
+                            manifest
+                                .versions
+                                .into_iter()
+                                .map(|entry| VersionItem { entry }),
+                        );
                         // Auto-select latest release version
                         if self.selected_version.is_none() {
                             self.selected_version = Some(manifest.latest.release);
                         }
-                        self.rebuild_rows();
+                        self.sync_selection();
                     }
 
                     Err(err) => {
