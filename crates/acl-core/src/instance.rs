@@ -369,6 +369,14 @@ impl Instance {
 
         true
     }
+
+    /// Load the cached version metadata from `<id>.json`.
+    pub fn load_metadata(&self) -> Result<VersionMetadata> {
+        let path = self.version_json();
+        let content = fs::read_to_string(&path).map_err(|source| CoreError::Io { path, source })?;
+        let metadata = serde_json::from_str(&content)?;
+        Ok(metadata)
+    }
 }
 
 #[cfg(test)]

@@ -1,8 +1,8 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::pages::{
-    accounts::{AccountsMsg, AccountsPage},
-    home::HomePage,
+    accounts::{AccountsOutput, AccountsPage},
+    home::{HomeInit, HomeOutput, HomePage},
     instances::{InstancesInit, InstancesPage, InstancesPageOutput},
     settings::{SettingsMsg, SettingsPage},
 };
@@ -86,7 +86,6 @@ pub struct AppModel {
 #[derive(Debug)]
 pub enum AppMsg {
     Navigate(NavPage),
-    LaunchGame,
     ShowToast(String),
 }
 
@@ -213,7 +212,17 @@ impl SimpleComponent for AppModel {
             });
 
         // Initialize ui widgets
-        let home_page = HomePage::builder().launch(()).detach();
+        let home_page = HomePage::builder()
+            .launch(HomeInit {
+                mgr: Arc::clone(&instances_state),
+                accounts: Arc::clone(&accounts_state),
+                config: Arc::clone(&config_state),
+                client: client.clone(),
+                dirs: dirs.clone(),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                HomeOutput::ShowToast(message) => AppMsg::ShowToast(message),
+            });
         let instances_page = InstancesPage::builder()
             .launch(InstancesInit {
                 mgr: Arc::clone(&instances_state),
@@ -228,7 +237,7 @@ impl SimpleComponent for AppModel {
         let accounts_page = AccountsPage::builder()
             .launch((Arc::clone(&accounts_state), accounts_path))
             .forward(sender.input_sender(), |msg| match msg {
-                AccountsMsg::ShowToast(message) => AppMsg::ShowToast(message),
+                AccountsOutput::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
         let settings_page = SettingsPage::builder()
@@ -275,7 +284,6 @@ impl SimpleComponent for AppModel {
             AppMsg::Navigate(page) => {
                 self.current_page = page;
             }
-            AppMsg::LaunchGame => {}
             AppMsg::ShowToast(msg) => {
                 let toast = adw::Toast::builder().title(msg).timeout(3).build();
                 self.toast_overlay.add_toast(toast);

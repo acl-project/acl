@@ -142,7 +142,7 @@ impl AccountsPage {
         if let Err(err) = self.accounts.read().save(&self.accounts_path) {
             let msg = format!("Failed to save accounts: {err}");
             error!("{msg}");
-            let _ = sender.output(AccountsMsg::ShowToast(msg));
+            let _ = sender.output(AccountsOutput::ShowToast(msg));
         }
     }
 
@@ -159,7 +159,7 @@ impl AccountsPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AccountsMsg {
+pub enum AccountsOutput {
     ShowToast(String),
 }
 
@@ -173,7 +173,7 @@ pub enum AccountsInput {
 #[relm4::component(pub)]
 impl SimpleComponent for AccountsPage {
     type Init = (Arc<SharedState<AccountStore>>, PathBuf);
-    type Output = AccountsMsg;
+    type Output = AccountsOutput;
     type Input = AccountsInput;
 
     view! {
@@ -278,7 +278,7 @@ impl SimpleComponent for AccountsPage {
                 Err(err) => {
                     let msg = format!("Invalid username: {err}");
                     error!("{msg}");
-                    let _ = sender.output(AccountsMsg::ShowToast(msg));
+                    let _ = sender.output(AccountsOutput::ShowToast(msg));
                 }
             },
 
@@ -288,7 +288,7 @@ impl SimpleComponent for AccountsPage {
                 if let Err(err) = res {
                     let msg = format!("Failed to select account: {err}");
                     error!("{msg}");
-                    let _ = sender.output(AccountsMsg::ShowToast(msg));
+                    let _ = sender.output(AccountsOutput::ShowToast(msg));
                     return;
                 }
                 self.save_accounts(&sender);
@@ -305,7 +305,7 @@ impl SimpleComponent for AccountsPage {
                 if let Err(err) = self.accounts.write().remove_account(uuid) {
                     let msg = format!("Failed to remove account: {err}");
                     error!("{msg}");
-                    let _ = sender.output(AccountsMsg::ShowToast(msg));
+                    let _ = sender.output(AccountsOutput::ShowToast(msg));
                     return;
                 }
                 self.save_accounts(&sender);
@@ -344,9 +344,9 @@ mod tests {
 
     #[test]
     fn test_accounts_msg_equality() {
-        let msg1 = AccountsMsg::ShowToast("Test".to_string());
-        let msg2 = AccountsMsg::ShowToast("Test".to_string());
-        let msg3 = AccountsMsg::ShowToast("Other".to_string());
+        let msg1 = AccountsOutput::ShowToast("Test".to_string());
+        let msg2 = AccountsOutput::ShowToast("Test".to_string());
+        let msg3 = AccountsOutput::ShowToast("Other".to_string());
         assert_eq!(msg1, msg2);
         assert_ne!(msg1, msg3);
     }

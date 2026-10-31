@@ -124,6 +124,16 @@ impl InstanceManager {
         }
         instance.delete()
     }
+
+    pub fn active_instance(&self) -> Option<&Instance> {
+        let active_id = self.config.active_id.as_deref()?;
+        self.instances.iter().find(|ins| ins.id() == active_id)
+    }
+
+    pub fn active_instance_mut(&mut self) -> Option<&mut Instance> {
+        let active_id = self.config.active_id.as_deref()?;
+        self.instances.iter_mut().find(|ins| ins.id() == active_id)
+    }
 }
 
 #[cfg(test)]

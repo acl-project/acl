@@ -61,6 +61,9 @@ pub enum CoreError {
 
     #[error("Minecraft error: {0}")]
     Minecraft(#[from] acl_minecraft::MinecraftError),
+
+    #[error("Failed to parse JSON: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
