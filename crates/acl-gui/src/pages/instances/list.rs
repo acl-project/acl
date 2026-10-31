@@ -555,3 +555,90 @@ impl Component for ListPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acl_minecraft::download::DownloadProgress;
+
+    #[test]
+    fn test_install_stage_default_and_is_installing() {
+        assert_eq!(InstallStage::default(), InstallStage::Idle);
+        assert!(!InstallStage::Idle.is_installing());
+        assert!(InstallStage::FetchingMetadata.is_installing());
+        assert!(InstallStage::FetchingAssetIndex.is_installing());
+        assert!(
+            InstallStage::Downloading(DownloadProgress {
+                completed_files: 0,
+                total_files: 10,
+                completed_bytes: 0,
+                total_bytes: 100,
+            })
+            .is_installing()
+        );
+        assert!(InstallStage::PreparingRuntime.is_installing());
+    }
+
+    #[test]
+    fn test_install_stage_fraction() {
+        assert_eq!(InstallStage::Idle.fraction(), 0.0);
+        assert_eq!(InstallStage::FetchingMetadata.fraction(), 0.02);
+        assert_eq!(InstallStage::FetchingAssetIndex.fraction(), 0.05);
+        assert_eq!(InstallStage::PreparingRuntime.fraction(), 0.98);
+
+        // When total_bytes is 0
+        let zero_progress = InstallStage::Downloading(DownloadProgress {
+            completed_files: 0,
+            total_files: 0,
+            completed_bytes: 0,
+            total_bytes: 0,
+        });
+        assert_eq!(zero_progress.fraction(), 0.05);
+
+        // 50% completed: 0.05 + 0.5 * 0.9 = 0.50
+        let half_progress = InstallStage::Downloading(DownloadProgress {
+            completed_files: 5,
+            total_files: 10,
+            completed_bytes: 50,
+            total_bytes: 100,
+        });
+        assert!((half_progress.fraction() - 0.50).abs() < f64::EPSILON);
+
+        // Clamped at 100% when completed_bytes exceeds total_bytes
+        let overflow_progress = InstallStage::Downloading(DownloadProgress {
+            completed_files: 11,
+            total_files: 10,
+            completed_bytes: 120,
+            total_bytes: 100,
+        });
+        assert!((overflow_progress.fraction() - 0.95).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_install_stage_status_text() {
+        assert_eq!(InstallStage::Idle.status_text(), None);
+        assert_eq!(
+            InstallStage::FetchingMetadata.status_text(),
+            Some("Fetching metadata...".to_string())
+        );
+        assert_eq!(
+            InstallStage::FetchingAssetIndex.status_text(),
+            Some("Fetching asset index...".to_string())
+        );
+        assert_eq!(
+            InstallStage::PreparingRuntime.status_text(),
+            Some("Preparing runtime...".to_string())
+        );
+
+        let downloading = InstallStage::Downloading(DownloadProgress {
+            completed_files: 3,
+            total_files: 10,
+            completed_bytes: 300,
+            total_bytes: 1000,
+        });
+        assert_eq!(
+            downloading.status_text(),
+            Some("Downloading (3/10)".to_string())
+        );
+    }
+}

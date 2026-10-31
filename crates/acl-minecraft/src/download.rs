@@ -265,6 +265,42 @@ mod tests {
         (format!("http://{local_addr}"), handle)
     }
 
+    async fn spawn_failing_mock_server(
+        failures_before_success: usize,
+        payload: Vec<u8>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind mock server");
+        let local_addr = listener.local_addr().expect("failed to get local addr");
+        let req_count = Arc::new(AtomicUsize::new(0));
+
+        let handle = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let count = req_count.fetch_add(1, Ordering::SeqCst);
+                let payload = payload.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf).await;
+                    if count < failures_before_success {
+                        let header = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                        let _ = stream.write_all(header.as_bytes()).await;
+                    } else {
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            payload.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes()).await;
+                        let _ = stream.write_all(&payload).await;
+                    }
+                    let _ = stream.flush().await;
+                });
+            }
+        });
+
+        (format!("http://{local_addr}"), handle)
+    }
+
     #[tokio::test]
     async fn test_download_all_empty_tasks() {
         let client = reqwest::Client::new();
@@ -417,6 +453,60 @@ mod tests {
         assert!(temp.path().join("file1.bin").exists());
         assert!(temp.path().join("file2.bin").exists());
         assert!(temp.path().join("file3.bin").exists());
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_download_and_verify_file_retry_success() {
+        let temp = TempDirGuard::new("retry_success");
+        let dest = temp.path().join("retry.bin");
+        let payload = b"retry payload content".to_vec();
+        let sha1 = calculate_sha1(&payload);
+
+        let (server_url, server_handle) = spawn_failing_mock_server(1, payload.clone()).await;
+        let client = test_client();
+
+        let task = DownloadTask {
+            name: "retry.bin".to_string(),
+            url: format!("{server_url}/retry.bin"),
+            destination: dest.clone(),
+            sha1,
+            size: payload.len() as u64,
+        };
+
+        let result = download_and_verify_file(&client, &task).await;
+        assert!(result.is_ok());
+
+        assert!(dest.exists());
+        let read_bytes = std::fs::read(&dest).expect("failed to read downloaded file");
+        assert_eq!(read_bytes, payload);
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_download_and_verify_file_retry_exhausted() {
+        let temp = TempDirGuard::new("retry_exhausted");
+        let dest = temp.path().join("exhausted.bin");
+        let payload = b"unreachable content".to_vec();
+        let sha1 = calculate_sha1(&payload);
+
+        // Fail 5 times (exceeding MAX_RETRIES = 3)
+        let (server_url, server_handle) = spawn_failing_mock_server(5, payload).await;
+        let client = test_client();
+
+        let task = DownloadTask {
+            name: "exhausted.bin".to_string(),
+            url: format!("{server_url}/exhausted.bin"),
+            destination: dest.clone(),
+            sha1,
+            size: 10,
+        };
+
+        let result = download_and_verify_file(&client, &task).await;
+        assert!(result.is_err());
+        assert!(!dest.exists());
 
         server_handle.abort();
     }
