@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 acl-core = { workspace = true }
 acl-auth = { workspace = true }
-
+acl-minecraft = { workspace = true }
 
 gtk = { workspace = true }
 libadwaita = { workspace = true }
@@ -22,3 +22,5 @@ tracing-subscriber = { workspace = true }
 
 sysinfo = { workspace = true }
 uuid = { workspace = true }
+
+reqwest = { workspace = true }

@@ -1,9 +1,9 @@
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::pages::{
     accounts::{AccountsMsg, AccountsPage},
     home::HomePage,
-    instances::InstancesPage,
+    instances::{InstancesPage, InstancesPageMsg},
     settings::{SettingsMsg, SettingsPage},
 };
 use adw::prelude::*;
@@ -12,8 +12,14 @@ use libadwaita::NavigationPage;
 use relm4::{SharedState, prelude::*};
 
 use acl_auth::AccountStore;
-use acl_core::{LauncherConfig, LauncherDirs};
+use acl_core::{LauncherConfig, LauncherDirs, manager::InstanceManager};
 use tracing::error;
+
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (X11; Linux x86_64) AdwaitaCraftLauncher/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/acl-project/acl)"
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NavPage {
@@ -62,15 +68,19 @@ pub struct AppModel {
     current_page: NavPage,
     /// Used to pop up hint messages or errors below.
     toast_overlay: adw::ToastOverlay,
-    home: Controller<HomePage>,
-    instances: Controller<InstancesPage>,
-    accounts: Controller<AccountsPage>,
-    settings: Controller<SettingsPage>,
+    home_page: Controller<HomePage>,
+    instances_page: Controller<InstancesPage>,
+    accounts_page: Controller<AccountsPage>,
+    settings_page: Controller<SettingsPage>,
 
     #[allow(dead_code)]
     config: Arc<SharedState<LauncherConfig>>,
     #[allow(dead_code)]
-    accounts_store: Arc<SharedState<AccountStore>>,
+    accounts: Arc<SharedState<AccountStore>>,
+    #[allow(dead_code)]
+    instances: Arc<SharedState<InstanceManager>>,
+    #[allow(dead_code)]
+    client: reqwest::Client,
 }
 
 #[derive(Debug)]
@@ -129,10 +139,10 @@ impl SimpleComponent for AppModel {
                             #[wrap(Some)]
                             set_content = &adw::ViewStack {
 
-                                add_titled_with_icon: (model.home.widget(), Some(NavPage::Home.as_str()), NavPage::Home.title(), "go-home-symbolic"),
-                                add_titled_with_icon: (model.instances.widget(), Some(NavPage::Instances.as_str()), NavPage::Instances.title(), "view-grid-symbolic"),
-                                add_titled_with_icon: (model.accounts.widget(), Some(NavPage::Accounts.as_str()), NavPage::Accounts.title(), "avatar-default-symbolic"),
-                                add_titled_with_icon: (model.settings.widget(), Some(NavPage::Settings.as_str()), NavPage::Settings.title(), "emblem-system-symbolic"),
+                                add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), NavPage::Home.title(), "go-home-symbolic"),
+                                add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), NavPage::Instances.title(), "view-grid-symbolic"),
+                                add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), NavPage::Accounts.title(), "avatar-default-symbolic"),
+                                add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), NavPage::Settings.title(), "emblem-system-symbolic"),
 
                                 #[watch]
                                 set_visible_child_name: model.current_page.as_str(),
@@ -178,17 +188,45 @@ impl SimpleComponent for AppModel {
         let accounts_state = Arc::new(SharedState::<AccountStore>::new());
         *accounts_state.write() = store;
 
-        // Initialize ui widgets
-        let home = HomePage::builder().launch(()).detach();
-        let instances = InstancesPage::builder().launch(()).detach();
+        let instances_mgr =
+            match InstanceManager::load(dirs.versions_dir(), dirs.config_dir().to_path_buf()) {
+                Ok(s) => s,
+                Err(err) => {
+                    let err_msg = format!("Failed to load instances, using defaults: {err}");
+                    error!("{err_msg}");
+                    sender.input(AppMsg::ShowToast(err_msg));
+                    InstanceManager::default()
+                }
+            };
 
-        let accounts = AccountsPage::builder()
+        let instances_state = Arc::new(SharedState::<InstanceManager>::new());
+        *instances_state.write() = instances_mgr;
+
+        // Network client
+        let client = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|err| {
+                error!("Failed to build custom HTTP client, using default: {err}");
+                reqwest::Client::new()
+            });
+
+        // Initialize ui widgets
+        let home_page = HomePage::builder().launch(()).detach();
+        let instances_page = InstancesPage::builder()
+            .launch(Arc::clone(&instances_state))
+            .forward(sender.input_sender(), |msg| match msg {
+                InstancesPageMsg::ShowToast(message) => AppMsg::ShowToast(message),
+            });
+
+        let accounts_page = AccountsPage::builder()
             .launch((Arc::clone(&accounts_state), accounts_path))
             .forward(sender.input_sender(), |msg| match msg {
                 AccountsMsg::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
-        let settings = SettingsPage::builder()
+        let settings_page = SettingsPage::builder()
             .launch((Arc::clone(&config_state), dirs.config_file()))
             .forward(sender.input_sender(), |msg| match msg {
                 SettingsMsg::ShowToast(message) => AppMsg::ShowToast(message),
@@ -198,12 +236,14 @@ impl SimpleComponent for AppModel {
         let model = AppModel {
             current_page: NavPage::Home,
             toast_overlay,
-            home,
-            instances,
-            accounts,
-            settings,
+            home_page,
+            instances_page,
+            accounts_page,
+            settings_page,
             config: config_state,
-            accounts_store: accounts_state,
+            accounts: accounts_state,
+            instances: instances_state,
+            client,
         };
 
         let toast_overlay = &model.toast_overlay;
