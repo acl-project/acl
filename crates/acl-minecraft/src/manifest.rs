@@ -24,6 +24,17 @@ pub enum VersionType {
     OldAlpha,
 }
 
+impl VersionType {
+    pub fn label(&self) -> &'static str {
+        match self {
+            VersionType::Release => "Release",
+            VersionType::Snapshot => "Snapshot",
+            VersionType::OldBeta => "Old Beta",
+            VersionType::OldAlpha => "Old Alpha",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionEntry {
     // Minecraft version number, not instance id
@@ -91,11 +102,7 @@ impl VersionManifest {
 
         match Self::fetch_from_url(client, url).await {
             Ok(manifest) => {
-                if let Err(err) = Cached::new(manifest.clone(), ttl)
-                    .and_then(|entry| entry.save_to_file(&cache_path))
-                {
-                    warn!("Failed to save version manifest cache: {err}");
-                }
+                manifest.save_cache(cache_dir, url, ttl);
                 Ok(manifest)
             }
 
@@ -111,6 +118,22 @@ impl VersionManifest {
                     Err(err)
                 }
             }
+        }
+    }
+
+    /// Cache the manifest at the default address.
+    pub fn cache(&self, cache_dir: &Path) {
+        self.save_cache(cache_dir, VERSION_MANIFEST_URL, DEFAULT_MANIFEST_TTL);
+    }
+
+    /// Manually cache the manifest.
+    pub fn save_cache(&self, cache_dir: &Path, url: &str, ttl: Duration) {
+        let file_name = cache_key_for_url(url);
+        let cache_path = cache_dir.join(file_name);
+        if let Err(err) =
+            Cached::new(self.clone(), ttl).and_then(|entry| entry.save_to_file(&cache_path))
+        {
+            warn!("Failed to save version manifest cache: {err}");
         }
     }
 
@@ -302,5 +325,42 @@ mod tests {
         .expect("should load from fresh cache without network");
 
         assert_eq!(loaded, manifest);
+    }
+
+    #[test]
+    fn test_version_type_label() {
+        assert_eq!(VersionType::Release.label(), "Release");
+        assert_eq!(VersionType::Snapshot.label(), "Snapshot");
+        assert_eq!(VersionType::OldBeta.label(), "Old Beta");
+        assert_eq!(VersionType::OldAlpha.label(), "Old Alpha");
+    }
+
+    #[test]
+    fn test_version_manifest_save_cache_and_cache() {
+        let temp = TempDirGuard::new("save_cache");
+        let manifest = sample_manifest();
+        let dummy_url = "https://example.com/custom_manifest.json";
+
+        let custom_cache_key = cache_key_for_url(dummy_url);
+        let custom_cache_path = temp.path().join(custom_cache_key);
+        assert!(!custom_cache_path.exists());
+
+        manifest.save_cache(temp.path(), dummy_url, Duration::from_secs(3600));
+        assert!(custom_cache_path.exists());
+
+        let cached = Cached::<VersionManifest>::load_from_file(&custom_cache_path)
+            .expect("should load saved cache");
+        assert_eq!(cached.data, manifest);
+
+        let default_cache_key = cache_key_for_url(VERSION_MANIFEST_URL);
+        let default_cache_path = temp.path().join(default_cache_key);
+        assert!(!default_cache_path.exists());
+
+        manifest.cache(temp.path());
+        assert!(default_cache_path.exists());
+
+        let default_cached = Cached::<VersionManifest>::load_from_file(&default_cache_path)
+            .expect("should load default saved cache");
+        assert_eq!(default_cached.data, manifest);
     }
 }
