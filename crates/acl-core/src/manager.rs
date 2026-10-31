@@ -59,13 +59,15 @@ impl InstanceManager {
 
         let path = mgr.config_file();
 
-        info!("Loading instances configuration from {}", path.display());
+        if path.exists() {
+            info!("Loading instances configuration from {}", path.display());
 
-        let content =
-            fs::read_to_string(path.clone()).map_err(|source| CoreError::Io { path, source })?;
+            let content = fs::read_to_string(path.clone())
+                .map_err(|source| CoreError::Io { path, source })?;
 
-        if let Ok(config) = toml::from_str(&content) {
-            mgr.config = config;
+            if let Ok(config) = toml::from_str(&content) {
+                mgr.config = config;
+            }
         }
 
         mgr.refresh()?;

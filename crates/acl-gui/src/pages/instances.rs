@@ -45,10 +45,11 @@ impl SimpleComponent for InstancesPage {
         #[root]
         gtk::Stack {
             set_transition_type: gtk::StackTransitionType::SlideLeftRight,
-            #[watch]
-            set_visible_child_name: model.current_view.as_str(),
 
             add_named[Some(InstancesView::List.as_str())] = model.list_page.widget(),
+
+            #[watch]
+            set_visible_child_name: model.current_view.as_str(),
 
         }
     }

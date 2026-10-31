@@ -192,7 +192,7 @@ impl SimpleComponent for AppModel {
             match InstanceManager::load(dirs.versions_dir(), dirs.config_dir().to_path_buf()) {
                 Ok(s) => s,
                 Err(err) => {
-                    let err_msg = format!("Failed to load accounts, using defaults: {err}");
+                    let err_msg = format!("Failed to load instances, using defaults: {err}");
                     error!("{err_msg}");
                     sender.input(AppMsg::ShowToast(err_msg));
                     InstanceManager::default()
