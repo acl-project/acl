@@ -305,6 +305,7 @@ impl ListPage {
             shutdown
                 .register(async move {
                     let result: Result<(), String> = async {
+                        // Fetch metadata
                         let _ = out.send(ListCmdOutput::StageChanged {
                             id: id.clone(),
                             stage: InstallStage::FetchingMetadata,
@@ -314,6 +315,7 @@ impl ListPage {
                             .await
                             .map_err(|e| e.to_string())?;
 
+                        // Fetch asset index
                         let _ = out.send(ListCmdOutput::StageChanged {
                             id: id.clone(),
                             stage: InstallStage::FetchingAssetIndex,
@@ -326,6 +328,7 @@ impl ListPage {
                         .await
                         .map_err(|e| e.to_string())?;
 
+                        // Collect download tasks
                         let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
                         let total_files = tasks.len();
                         let total_bytes = tasks.iter().map(|t| t.size).sum();
@@ -340,6 +343,7 @@ impl ListPage {
                             }),
                         });
 
+                        // Create a channel to obtain and asynchronously send download progress.
                         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                         let out_prog = out.clone();
                         let id_prog = id.clone();
@@ -360,7 +364,7 @@ impl ListPage {
                         )
                         .await
                         .map_err(|e| e.to_string())?;
-                        let _ = forward_handle.await;
+                        let _ = forward_handle.await; // Ownership of tx has already been moved; tx will be dropped once the download completes.
 
                         let _ = out.send(ListCmdOutput::StageChanged {
                             id: id.clone(),
@@ -369,6 +373,7 @@ impl ListPage {
                         let inst_c = instance.clone();
                         let dirs_c = dirs.clone();
 
+                        // Prepare runtime
                         tokio::task::spawn_blocking(move || {
                             inst_c.prepare_runtime(&metadata, &asset_index, &dirs_c)
                         })

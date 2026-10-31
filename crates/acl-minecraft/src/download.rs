@@ -2,10 +2,10 @@ use tokio::{
     sync::{Semaphore, mpsc::UnboundedSender},
     task::JoinSet,
 };
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use crate::{MinecraftError, Result, cache::verify_sha1};
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadTask {
     /// Label name used for logging.
@@ -52,10 +52,58 @@ pub async fn download_and_verify_file(client: &reqwest::Client, task: &DownloadT
         }
     }
 
-    let response = client.get(&task.url).send().await?.error_for_status()?;
-    let bytes = response.bytes().await?;
+    let mut last_error = None;
+    let mut downloaded_bytes = None;
 
-    verify_sha1(&bytes, &task.sha1, &task.name)?;
+    const MAX_RETRIES: usize = 3;
+
+    // Retry multiple times to prevent download failures caused by network fluctuations.
+    for attempt in 1..=MAX_RETRIES {
+        let result = async {
+            let response = client.get(&task.url).send().await?.error_for_status()?;
+            let bytes = response.bytes().await?;
+
+            verify_sha1(&bytes, &task.sha1, &task.name)?;
+            Ok(bytes)
+        }
+        .await;
+
+        match result {
+            Ok(bytes) => {
+                downloaded_bytes = Some(bytes);
+                break;
+            }
+            Err(err) => {
+                warn!(
+                    "Download attempt {attempt}/{MAX_RETRIES} failed for '{}': {err}",
+                    task.name
+                );
+                last_error = Some(err);
+                if attempt < MAX_RETRIES {
+                    // Backoff delay: wait 300 ms on the first attempt, 600 ms on the second.
+                    tokio::time::sleep(Duration::from_millis(300 * attempt as u64)).await;
+                }
+            }
+        }
+    }
+
+    let Some(bytes) = downloaded_bytes else {
+        error!("Failed to download {}", task.url);
+        let err = last_error.unwrap_or_else(|| MinecraftError::Io {
+            path: task.destination.clone(),
+            source: std::io::Error::other("Max retries exceeded without error"),
+        });
+        return Err(err);
+    };
+
+    if let Some(parent) = task.destination.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| MinecraftError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
 
     // Write directly to disk.
     tokio::fs::write(&task.destination, bytes)
