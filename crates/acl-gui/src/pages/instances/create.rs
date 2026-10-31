@@ -170,12 +170,21 @@ pub struct CreatePage {
 }
 
 impl CreatePage {
-    fn can_create(&self) -> bool {
+    fn effective_instance_name(&self) -> Option<&str> {
         let trimmed = self.instance_name.trim();
-        !trimmed.is_empty()
-            && InstanceConfig::validate_instance_id(trimmed).is_ok()
+        if !trimmed.is_empty() {
+            Some(trimmed)
+        } else {
+            self.selected_version.as_deref()
+        }
+    }
+
+    fn can_create(&self) -> bool {
+        !self.is_loading
             && self.selected_version.is_some()
-            && !self.is_loading
+            && self
+                .effective_instance_name()
+                .is_some_and(|name| InstanceConfig::validate_instance_id(name).is_ok())
     }
 
     fn selected_version_label(&self) -> &str {
@@ -458,7 +467,6 @@ impl Component for CreatePage {
 
             // Create version metadata without downloading resource files, file downloads are handled upstream.
             CreateInput::CreateClicked => {
-                let id = self.instance_name.trim().to_string();
                 let Some(version_id) = self.selected_version.as_ref() else {
                     let _ = sender.output(CreateOutput::ShowToast(
                         "Please select a Minecraft version".to_string(),
@@ -466,8 +474,15 @@ impl Component for CreatePage {
                     return;
                 };
 
+                let Some(id) = self.effective_instance_name() else {
+                    let _ = sender.output(CreateOutput::ShowToast(
+                        "Please enter an instance name or select a version".to_string(),
+                    ));
+                    return;
+                };
+
                 let versions_dir = self.mgr.read().versions_dir.clone();
-                match Instance::create(&id, &id, version_id, &versions_dir) {
+                match Instance::create(id, id, version_id, &versions_dir) {
                     Ok(_) => {
                         info!("Created instance '{}' with version '{}'", id, version_id);
                         if let Err(err) = self.mgr.write().refresh() {
@@ -475,7 +490,7 @@ impl Component for CreatePage {
                             error!("{msg}");
                             let _ = sender.output(CreateOutput::ShowToast(msg));
                         }
-                        let _ = sender.output(CreateOutput::Created(id));
+                        let _ = sender.output(CreateOutput::Created(id.to_string()));
                     }
                     Err(err) => {
                         let msg = format!("Failed to create instance: {err}");

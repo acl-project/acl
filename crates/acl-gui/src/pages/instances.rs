@@ -9,7 +9,7 @@ use relm4::{ComponentParts, SimpleComponent};
 use relm4::{SharedState, prelude::*};
 
 use crate::pages::instances::create::{CreateOutput, CreatePage, CreatePageInit};
-use crate::pages::instances::list::{ListOutput, ListPage};
+use crate::pages::instances::list::{ListInput, ListOutput, ListPage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstancesView {
@@ -115,7 +115,10 @@ impl SimpleComponent for InstancesPage {
             InstancesPageInput::ShowToast(message) => {
                 let _ = sender.output(InstancesPageOutput::ShowToast(message));
             }
-            InstancesPageInput::InstanceCreated(_) => {}
+            InstancesPageInput::InstanceCreated(_) => {
+                self.list_page.emit(ListInput::Refresh);
+                sender.input(InstancesPageInput::ChangeView(InstancesView::List));
+            }
         }
     }
 }

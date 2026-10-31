@@ -128,6 +128,7 @@ impl FactoryComponent for InstanceRow {
 pub enum ListInput {
     SelectInstance(String),
     RemoveInstance(String),
+    Refresh,
 }
 
 /// Management page for installed instances.
@@ -252,6 +253,9 @@ impl SimpleComponent for ListPage {
                     return;
                 }
                 self.save_config(&sender);
+                self.rebuild_rows();
+            }
+            ListInput::Refresh => {
                 self.rebuild_rows();
             }
         }
