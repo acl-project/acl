@@ -76,3 +76,15 @@ impl SimpleComponent for InstancesPage {
         ComponentParts { model, widgets }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_instances_view_as_str_and_default() {
+        assert_eq!(InstancesView::default(), InstancesView::List);
+        assert_eq!(InstancesView::List.as_str(), "list");
+        assert_eq!(InstancesView::Create.as_str(), "create");
+    }
+}

@@ -143,7 +143,7 @@ pub enum ListMsg {
 impl ListPage {
     fn save_config(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.mgr.read().save() {
-            let msg = format!("Failed to save accounts: {err}");
+            let msg = format!("Failed to save instances: {err}");
             error!("{msg}");
             let _ = sender.output(ListMsg::ShowToast(msg));
         }
@@ -176,7 +176,7 @@ impl SimpleComponent for ListPage {
             #[local_ref]
             instances_group -> adw::PreferencesGroup {
                 set_title: "Instances",
-                set_description: Some("Select an instances to launch Minecraft"),
+                set_description: Some("Select an instance to launch Minecraft"),
 
             }
 
