@@ -2,10 +2,10 @@ use tokio::{
     sync::{Semaphore, mpsc::UnboundedSender},
     task::JoinSet,
 };
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use crate::{MinecraftError, Result, cache::verify_sha1};
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadTask {
     /// Label name used for logging.
@@ -52,17 +52,66 @@ pub async fn download_and_verify_file(client: &reqwest::Client, task: &DownloadT
         }
     }
 
-    let response = client.get(&task.url).send().await?.error_for_status()?;
-    let bytes = response.bytes().await?;
+    let mut last_error = None;
+    let mut downloaded_bytes = None;
 
-    verify_sha1(&bytes, &task.sha1, &task.name)?;
+    const MAX_RETRIES: usize = 3;
 
-    acl_common::fs::write_atomic(&task.destination, &bytes).map_err(|source| {
-        MinecraftError::Io {
+    // Retry multiple times to prevent download failures caused by network fluctuations.
+    for attempt in 1..=MAX_RETRIES {
+        let result = async {
+            let response = client.get(&task.url).send().await?.error_for_status()?;
+            let bytes = response.bytes().await?;
+
+            verify_sha1(&bytes, &task.sha1, &task.name)?;
+            Ok(bytes)
+        }
+        .await;
+
+        match result {
+            Ok(bytes) => {
+                downloaded_bytes = Some(bytes);
+                break;
+            }
+            Err(err) => {
+                warn!(
+                    "Download attempt {attempt}/{MAX_RETRIES} failed for '{}': {err}",
+                    task.name
+                );
+                last_error = Some(err);
+                if attempt < MAX_RETRIES {
+                    // Backoff delay: wait 300 ms on the first attempt, 600 ms on the second.
+                    tokio::time::sleep(Duration::from_millis(300 * attempt as u64)).await;
+                }
+            }
+        }
+    }
+
+    let Some(bytes) = downloaded_bytes else {
+        error!("Failed to download {}", task.url);
+        let err = last_error.unwrap_or_else(|| MinecraftError::Io {
+            path: task.destination.clone(),
+            source: std::io::Error::other("Max retries exceeded without error"),
+        });
+        return Err(err);
+    };
+
+    if let Some(parent) = task.destination.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| MinecraftError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+
+    // Write directly to disk.
+    tokio::fs::write(&task.destination, bytes)
+        .await
+        .map_err(|source| MinecraftError::Io {
             path: task.destination.clone(),
             source,
-        }
-    })?;
+        })?;
 
     Ok(())
 }
@@ -208,6 +257,42 @@ mod tests {
                     );
                     let _ = stream.write_all(header.as_bytes()).await;
                     let _ = stream.write_all(&payload).await;
+                    let _ = stream.flush().await;
+                });
+            }
+        });
+
+        (format!("http://{local_addr}"), handle)
+    }
+
+    async fn spawn_failing_mock_server(
+        failures_before_success: usize,
+        payload: Vec<u8>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind mock server");
+        let local_addr = listener.local_addr().expect("failed to get local addr");
+        let req_count = Arc::new(AtomicUsize::new(0));
+
+        let handle = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let count = req_count.fetch_add(1, Ordering::SeqCst);
+                let payload = payload.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf).await;
+                    if count < failures_before_success {
+                        let header = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                        let _ = stream.write_all(header.as_bytes()).await;
+                    } else {
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            payload.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes()).await;
+                        let _ = stream.write_all(&payload).await;
+                    }
                     let _ = stream.flush().await;
                 });
             }
@@ -368,6 +453,60 @@ mod tests {
         assert!(temp.path().join("file1.bin").exists());
         assert!(temp.path().join("file2.bin").exists());
         assert!(temp.path().join("file3.bin").exists());
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_download_and_verify_file_retry_success() {
+        let temp = TempDirGuard::new("retry_success");
+        let dest = temp.path().join("retry.bin");
+        let payload = b"retry payload content".to_vec();
+        let sha1 = calculate_sha1(&payload);
+
+        let (server_url, server_handle) = spawn_failing_mock_server(1, payload.clone()).await;
+        let client = test_client();
+
+        let task = DownloadTask {
+            name: "retry.bin".to_string(),
+            url: format!("{server_url}/retry.bin"),
+            destination: dest.clone(),
+            sha1,
+            size: payload.len() as u64,
+        };
+
+        let result = download_and_verify_file(&client, &task).await;
+        assert!(result.is_ok());
+
+        assert!(dest.exists());
+        let read_bytes = std::fs::read(&dest).expect("failed to read downloaded file");
+        assert_eq!(read_bytes, payload);
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_download_and_verify_file_retry_exhausted() {
+        let temp = TempDirGuard::new("retry_exhausted");
+        let dest = temp.path().join("exhausted.bin");
+        let payload = b"unreachable content".to_vec();
+        let sha1 = calculate_sha1(&payload);
+
+        // Fail 5 times (exceeding MAX_RETRIES = 3)
+        let (server_url, server_handle) = spawn_failing_mock_server(5, payload).await;
+        let client = test_client();
+
+        let task = DownloadTask {
+            name: "exhausted.bin".to_string(),
+            url: format!("{server_url}/exhausted.bin"),
+            destination: dest.clone(),
+            sha1,
+            size: 10,
+        };
+
+        let result = download_and_verify_file(&client, &task).await;
+        assert!(result.is_err());
+        assert!(!dest.exists());
 
         server_handle.abort();
     }

@@ -138,7 +138,7 @@ pub enum CreateInput {
     NameChanged(String),
     SearchChanged(String),
     FilterChanged(VersionFilter),
-    SelectVersion(String),
+    SelectVersion(VersionEntry),
     RefreshVersions,
     CreateClicked,
     CancelClicked,
@@ -147,7 +147,7 @@ pub enum CreateInput {
 #[derive(Debug, Clone)]
 pub enum CreateOutput {
     Cancel,
-    Created(String),
+    Created(String, VersionEntry),
     ShowToast(String),
 }
 
@@ -162,7 +162,7 @@ pub struct CreatePage {
     cache_dir: PathBuf,
 
     instance_name: String,
-    selected_version: Option<String>,
+    selected_version: Option<VersionEntry>,
 
     filter_state: Rc<RefCell<FilterState>>,
     version_list: TypedListView<VersionItem, gtk::SingleSelection>,
@@ -175,7 +175,7 @@ impl CreatePage {
         if !trimmed.is_empty() {
             Some(trimmed)
         } else {
-            self.selected_version.as_deref()
+            self.selected_version.as_ref().map(|v| v.id.as_str())
         }
     }
 
@@ -188,13 +188,15 @@ impl CreatePage {
     }
 
     fn selected_version_label(&self) -> &str {
-        self.selected_version.as_deref().unwrap_or("None")
+        self.selected_version
+            .as_ref()
+            .map_or("None", |v| v.id.as_str())
     }
 
     /// Highlight `selected_version` in the list if it is currently visible.
     fn sync_selection(&self) {
         let selection = &self.version_list.selection_model;
-        let position = self.selected_version.as_deref().and_then(|id| {
+        let position = self.selected_version.as_ref().and_then(|selected| {
             (0..selection.n_items()).find(|&i| {
                 selection
                     .item(i)
@@ -202,7 +204,7 @@ impl CreatePage {
                     .is_some_and(|boxed| {
                         boxed
                             .try_borrow::<VersionItem>()
-                            .is_ok_and(|item| item.entry.id == id)
+                            .is_ok_and(|item| item.entry.id == selected.id)
                     })
             })
         });
@@ -407,12 +409,12 @@ impl Component for CreatePage {
                         boxed
                             .try_borrow::<VersionItem>()
                             .ok()
-                            .map(|item| item.entry.id.clone())
+                            .map(|item| item.entry.clone())
                     });
 
                 // `None` means the selected row was filtered out; keep the previous choice.
-                if let Some(id) = id {
-                    sender.input(CreateInput::SelectVersion(id));
+                if let Some(entry) = id {
+                    sender.input(CreateInput::SelectVersion(entry));
                 }
             }
         });
@@ -454,8 +456,8 @@ impl Component for CreatePage {
                 self.refilter();
             }
 
-            CreateInput::SelectVersion(id) => {
-                self.selected_version = Some(id.clone());
+            CreateInput::SelectVersion(entry) => {
+                self.selected_version = Some(entry);
             }
 
             CreateInput::RefreshVersions => {
@@ -467,7 +469,7 @@ impl Component for CreatePage {
 
             // Create version metadata without downloading resource files, file downloads are handled upstream.
             CreateInput::CreateClicked => {
-                let Some(version_id) = self.selected_version.as_ref() else {
+                let Some(version_entry) = self.selected_version.clone() else {
                     let _ = sender.output(CreateOutput::ShowToast(
                         "Please select a Minecraft version".to_string(),
                     ));
@@ -482,9 +484,12 @@ impl Component for CreatePage {
                 };
 
                 let versions_dir = self.mgr.read().versions_dir.clone();
-                match Instance::create(&id, &id, version_id, &versions_dir) {
+                match Instance::create(&id, &id, &version_entry.id, &versions_dir) {
                     Ok(_) => {
-                        info!("Created instance '{}' with version '{}'", id, version_id);
+                        info!(
+                            "Created instance '{}' with version '{}'",
+                            id, version_entry.id
+                        );
                         if let Err(err) = self.mgr.write().refresh() {
                             let msg = format!("Failed to refresh instances: {err}");
                             error!("{msg}");
@@ -492,7 +497,7 @@ impl Component for CreatePage {
                         } else {
                             self.selected_version = None;
                             self.instance_name.clear();
-                            let _ = sender.output(CreateOutput::Created(id));
+                            let _ = sender.output(CreateOutput::Created(id, version_entry));
                         }
                     }
                     Err(err) => {
@@ -516,6 +521,12 @@ impl Component for CreatePage {
                 self.is_loading = false;
                 match result {
                     Ok(manifest) => {
+                        // Auto-select latest release version
+                        if self.selected_version.is_none() {
+                            self.selected_version =
+                                manifest.find_version(&manifest.latest.release).cloned();
+                        }
+
                         self.version_list.clear();
                         self.version_list.extend_from_iter(
                             manifest
@@ -523,10 +534,7 @@ impl Component for CreatePage {
                                 .into_iter()
                                 .map(|entry| VersionItem { entry }),
                         );
-                        // Auto-select latest release version
-                        if self.selected_version.is_none() {
-                            self.selected_version = Some(manifest.latest.release);
-                        }
+
                         self.sync_selection();
                     }
 
