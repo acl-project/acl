@@ -12,6 +12,7 @@ use crate::error::Result;
 pub struct LauncherDirs {
     config_dir: PathBuf,
     data_dir: PathBuf,
+    cache_dir: PathBuf,
 }
 
 impl LauncherDirs {
@@ -23,14 +24,16 @@ impl LauncherDirs {
         Ok(Self {
             config_dir: project_dirs.config_dir().to_path_buf(),
             data_dir: project_dirs.data_dir().to_path_buf(),
+            cache_dir: project_dirs.cache_dir().to_path_buf(),
         })
     }
 
     /// Creates a `LauncherDirs` with custom paths (useful for testing).
-    pub fn with_paths(config_dir: PathBuf, data_dir: PathBuf) -> Self {
+    pub fn with_paths(config_dir: PathBuf, data_dir: PathBuf, cache_dir: PathBuf) -> Self {
         Self {
             config_dir,
             data_dir,
+            cache_dir,
         }
     }
 
@@ -65,6 +68,11 @@ impl LauncherDirs {
     /// Path to the root data directory.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    /// Path to the cache directory.
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
     }
 
     /// Path to the main configuration file (`config.toml`).
@@ -137,10 +145,13 @@ mod tests {
     fn test_with_paths_and_getters() {
         let config_dir = PathBuf::from("/custom/config");
         let data_dir = PathBuf::from("/custom/data");
+        let cache_dir = PathBuf::from("/custom/cache");
 
-        let dirs = LauncherDirs::with_paths(config_dir.clone(), data_dir.clone());
+        let dirs =
+            LauncherDirs::with_paths(config_dir.clone(), data_dir.clone(), cache_dir.clone());
         assert_eq!(dirs.config_dir(), config_dir.as_path());
         assert_eq!(dirs.data_dir(), data_dir.as_path());
+        assert_eq!(dirs.cache_dir(), cache_dir.as_path());
         assert_eq!(dirs.config_file(), config_dir.join("config.toml"));
         assert_eq!(dirs.instances_dir(), data_dir.join("instances"));
         assert_eq!(dirs.assets_dir(), data_dir.join("assets"));
@@ -154,8 +165,10 @@ mod tests {
         let temp = TempDirGuard::new("ensure_dirs");
         let config_dir = temp.path().join("config");
         let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
 
-        let dirs = LauncherDirs::with_paths(config_dir.clone(), data_dir.clone());
+        let dirs =
+            LauncherDirs::with_paths(config_dir.clone(), data_dir.clone(), cache_dir.clone());
 
         assert!(!config_dir.exists());
         assert!(!data_dir.exists());

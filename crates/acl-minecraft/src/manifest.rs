@@ -24,6 +24,17 @@ pub enum VersionType {
     OldAlpha,
 }
 
+impl VersionType {
+    pub fn label(&self) -> &'static str {
+        match self {
+            VersionType::Release => "Release",
+            VersionType::Snapshot => "Snapshot",
+            VersionType::OldBeta => "Old Beta",
+            VersionType::OldAlpha => "Old Alpha",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionEntry {
     // Minecraft version number, not instance id
@@ -91,11 +102,7 @@ impl VersionManifest {
 
         match Self::fetch_from_url(client, url).await {
             Ok(manifest) => {
-                if let Err(err) = Cached::new(manifest.clone(), ttl)
-                    .and_then(|entry| entry.save_to_file(&cache_path))
-                {
-                    warn!("Failed to save version manifest cache: {err}");
-                }
+                manifest.save_cache(cache_dir, url, ttl);
                 Ok(manifest)
             }
 
@@ -111,6 +118,20 @@ impl VersionManifest {
                     Err(err)
                 }
             }
+        }
+    }
+
+    pub fn cache(&self, cache_dir: &Path) {
+        self.save_cache(cache_dir, VERSION_MANIFEST_URL, DEFAULT_MANIFEST_TTL);
+    }
+
+    pub fn save_cache(&self, cache_dir: &Path, url: &str, ttl: Duration) {
+        let file_name = cache_key_for_url(url);
+        let cache_path = cache_dir.join(file_name);
+        if let Err(err) =
+            Cached::new(self.clone(), ttl).and_then(|entry| entry.save_to_file(&cache_path))
+        {
+            warn!("Failed to save version manifest cache: {err}");
         }
     }
 

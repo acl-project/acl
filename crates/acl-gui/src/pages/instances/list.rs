@@ -136,8 +136,9 @@ pub struct ListPage {
 }
 
 #[derive(Debug, Clone)]
-pub enum ListMsg {
+pub enum ListOutput {
     ShowToast(String),
+    OpenCreate,
 }
 
 impl ListPage {
@@ -145,7 +146,7 @@ impl ListPage {
         if let Err(err) = self.mgr.read().save() {
             let msg = format!("Failed to save instances: {err}");
             error!("{msg}");
-            let _ = sender.output(ListMsg::ShowToast(msg));
+            let _ = sender.output(ListOutput::ShowToast(msg));
         }
     }
 
@@ -165,7 +166,7 @@ impl ListPage {
 impl SimpleComponent for ListPage {
     type Init = Arc<SharedState<InstanceManager>>;
     type Input = ListInput;
-    type Output = ListMsg;
+    type Output = ListOutput;
 
     view! {
         #[root]
@@ -178,8 +179,23 @@ impl SimpleComponent for ListPage {
                 set_title: "Instances",
                 set_description: Some("Select an instance to launch Minecraft"),
 
-            }
+                #[wrap(Some)]
+                set_header_suffix = &gtk::Button {
+                    add_css_class: "flat",
+                    set_valign: gtk::Align::Center,
+                    set_tooltip_text: Some("Create an instance"),
 
+                    adw::ButtonContent {
+                        set_icon_name: "list-add-symbolic",
+                        set_label: "Create",
+                    },
+
+                    connect_clicked[sender] => move |_| {
+                        let _ = sender.output(ListOutput::OpenCreate);
+                    },
+                },
+
+            },
 
         },
 
@@ -216,7 +232,7 @@ impl SimpleComponent for ListPage {
                 if let Err(err) = res {
                     let msg = format!("Failed to select instance: {err}");
                     error!("{msg}");
-                    let _ = sender.output(ListMsg::ShowToast(msg));
+                    let _ = sender.output(ListOutput::ShowToast(msg));
                     return;
                 }
                 self.save_config(&sender);
@@ -231,7 +247,7 @@ impl SimpleComponent for ListPage {
                 if let Err(err) = self.mgr.write().remove_instance(&id) {
                     let msg = format!("Failed to remove instance: {err}");
                     error!("{msg}");
-                    let _ = sender.output(ListMsg::ShowToast(msg));
+                    let _ = sender.output(ListOutput::ShowToast(msg));
                     return;
                 }
                 self.save_config(&sender);

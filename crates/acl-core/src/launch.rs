@@ -383,8 +383,11 @@ mod tests {
     fn test_launch_command_build_modern() {
         let instance = mock_instance("modern_inst");
         let global_config = LauncherConfig::default();
-        let dirs =
-            LauncherDirs::with_paths(PathBuf::from("/mock/config"), PathBuf::from("/mock/data"));
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").expect("failed to create account");
         let java_path = PathBuf::from("/mock/java/bin/java");
@@ -447,8 +450,11 @@ mod tests {
     fn test_launch_command_build_legacy() {
         let instance = mock_instance("legacy_inst");
         let global_config = LauncherConfig::default();
-        let dirs =
-            LauncherDirs::with_paths(PathBuf::from("/mock/config"), PathBuf::from("/mock/data"));
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
         let metadata = mock_version_metadata("1.12.2", true, Some(8));
         let account = Account::new_offline("Alex").expect("failed to create account");
         let java_path = PathBuf::from("/mock/java8/bin/java");
@@ -497,8 +503,11 @@ mod tests {
         instance.config.max_memory_mb = Some(8192);
 
         let global_config = LauncherConfig::default();
-        let dirs =
-            LauncherDirs::with_paths(PathBuf::from("/mock/config"), PathBuf::from("/mock/data"));
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
@@ -546,8 +555,11 @@ mod tests {
             vec!["-XX:+UseG1GC".to_string(), "-Dcustom.prop=true".to_string()];
 
         let global_config = LauncherConfig::default();
-        let dirs =
-            LauncherDirs::with_paths(PathBuf::from("/mock/config"), PathBuf::from("/mock/data"));
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");

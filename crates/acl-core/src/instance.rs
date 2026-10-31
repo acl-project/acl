@@ -766,7 +766,11 @@ mod tests {
         use acl_minecraft::{VersionType, cache_key_for_url};
 
         let temp = TempDirGuard::new("instance_fetch_metadata");
-        let dirs = LauncherDirs::with_paths(temp.path().join("config"), temp.path().join("data"));
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
 
         let instance = Instance::create("cached_inst", "Cached", "1.21.1", &dirs.versions_dir())
             .expect("should create instance");
@@ -823,8 +827,11 @@ mod tests {
         use acl_minecraft::AssetObject;
         use std::collections::HashMap;
 
-        let dirs =
-            LauncherDirs::with_paths(PathBuf::from("/mock/config"), PathBuf::from("/mock/data"));
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
         let instance = Instance::new(
             "dl_inst",
             "Download Instance",
@@ -932,7 +939,11 @@ mod tests {
         use std::collections::HashMap;
 
         let temp = TempDirGuard::new("instance_prepare_runtime");
-        let dirs = LauncherDirs::with_paths(temp.path().join("config"), temp.path().join("data"));
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
 
         let instance = Instance::create("runtime_inst", "Runtime", "1.21.1", &dirs.versions_dir())
             .expect("should create instance");

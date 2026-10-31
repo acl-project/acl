@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use crate::pages::{
     accounts::{AccountsMsg, AccountsPage},
     home::HomePage,
-    instances::{InstancesPage, InstancesPageMsg},
+    instances::{InstancesInit, InstancesPage, InstancesPageOutput},
     settings::{SettingsMsg, SettingsPage},
 };
 use adw::prelude::*;
@@ -215,9 +215,13 @@ impl SimpleComponent for AppModel {
         // Initialize ui widgets
         let home_page = HomePage::builder().launch(()).detach();
         let instances_page = InstancesPage::builder()
-            .launch(Arc::clone(&instances_state))
+            .launch(InstancesInit {
+                mgr: Arc::clone(&instances_state),
+                client: client.clone(),
+                cache_dir: dirs.cache_dir().to_path_buf(),
+            })
             .forward(sender.input_sender(), |msg| match msg {
-                InstancesPageMsg::ShowToast(message) => AppMsg::ShowToast(message),
+                InstancesPageOutput::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
         let accounts_page = AccountsPage::builder()
