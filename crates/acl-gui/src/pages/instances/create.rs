@@ -474,7 +474,7 @@ impl Component for CreatePage {
                     return;
                 };
 
-                let Some(id) = self.effective_instance_name() else {
+                let Some(id) = self.effective_instance_name().map(str::to_string) else {
                     let _ = sender.output(CreateOutput::ShowToast(
                         "Please enter an instance name or select a version".to_string(),
                     ));
@@ -482,15 +482,18 @@ impl Component for CreatePage {
                 };
 
                 let versions_dir = self.mgr.read().versions_dir.clone();
-                match Instance::create(id, id, version_id, &versions_dir) {
+                match Instance::create(&id, &id, version_id, &versions_dir) {
                     Ok(_) => {
                         info!("Created instance '{}' with version '{}'", id, version_id);
                         if let Err(err) = self.mgr.write().refresh() {
                             let msg = format!("Failed to refresh instances: {err}");
                             error!("{msg}");
                             let _ = sender.output(CreateOutput::ShowToast(msg));
+                        } else {
+                            self.selected_version = None;
+                            self.instance_name.clear();
+                            let _ = sender.output(CreateOutput::Created(id));
                         }
-                        let _ = sender.output(CreateOutput::Created(id.to_string()));
                     }
                     Err(err) => {
                         let msg = format!("Failed to create instance: {err}");

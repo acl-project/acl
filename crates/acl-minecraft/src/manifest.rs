@@ -121,10 +121,12 @@ impl VersionManifest {
         }
     }
 
+    /// Cache the manifest at the default address.
     pub fn cache(&self, cache_dir: &Path) {
         self.save_cache(cache_dir, VERSION_MANIFEST_URL, DEFAULT_MANIFEST_TTL);
     }
 
+    /// Manually cache the manifest.
     pub fn save_cache(&self, cache_dir: &Path, url: &str, ttl: Duration) {
         let file_name = cache_key_for_url(url);
         let cache_path = cache_dir.join(file_name);
