@@ -540,3 +540,152 @@ impl Component for CreatePage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_entry(id: &str, version_type: VersionType) -> VersionEntry {
+        VersionEntry {
+            id: id.to_string(),
+            version_type,
+            url: String::new(),
+            time: String::new(),
+            release_time: String::new(),
+            sha1: String::new(),
+            compliance_level: 1,
+        }
+    }
+
+    #[test]
+    fn test_version_filter_from_toggle_name() {
+        assert_eq!(
+            VersionFilter::from_toggle_name(Some("snapshot")),
+            VersionFilter::Snapshot
+        );
+        assert_eq!(
+            VersionFilter::from_toggle_name(Some("old")),
+            VersionFilter::Old
+        );
+        assert_eq!(
+            VersionFilter::from_toggle_name(Some("release")),
+            VersionFilter::Release
+        );
+        assert_eq!(
+            VersionFilter::from_toggle_name(None),
+            VersionFilter::Release
+        );
+        assert_eq!(
+            VersionFilter::from_toggle_name(Some("unknown")),
+            VersionFilter::Release
+        );
+    }
+
+    #[test]
+    fn test_version_filter_as_str_and_title() {
+        assert_eq!(VersionFilter::default(), VersionFilter::Release);
+
+        assert_eq!(VersionFilter::Release.as_str(), "release");
+        assert_eq!(VersionFilter::Release.title(), "Release");
+
+        assert_eq!(VersionFilter::Snapshot.as_str(), "snapshot");
+        assert_eq!(VersionFilter::Snapshot.title(), "Snapshot");
+
+        assert_eq!(VersionFilter::Old.as_str(), "old");
+        assert_eq!(VersionFilter::Old.title(), "Old");
+    }
+
+    #[test]
+    fn test_version_filter_matches() {
+        let release = VersionFilter::Release;
+        assert!(release.matches(&VersionType::Release));
+        assert!(!release.matches(&VersionType::Snapshot));
+        assert!(!release.matches(&VersionType::OldBeta));
+        assert!(!release.matches(&VersionType::OldAlpha));
+
+        let snapshot = VersionFilter::Snapshot;
+        assert!(!snapshot.matches(&VersionType::Release));
+        assert!(snapshot.matches(&VersionType::Snapshot));
+        assert!(!snapshot.matches(&VersionType::OldBeta));
+        assert!(!snapshot.matches(&VersionType::OldAlpha));
+
+        let old = VersionFilter::Old;
+        assert!(!old.matches(&VersionType::Release));
+        assert!(!old.matches(&VersionType::Snapshot));
+        assert!(old.matches(&VersionType::OldBeta));
+        assert!(old.matches(&VersionType::OldAlpha));
+    }
+
+    #[test]
+    fn test_matches_version_entry() {
+        let entry_release = make_entry("1.21.1", VersionType::Release);
+        let entry_snapshot = make_entry("24w33a", VersionType::Snapshot);
+        let entry_old = make_entry("b1.7.3", VersionType::OldBeta);
+
+        // Matching with empty or whitespace search query
+        assert!(matches_version_entry(
+            &entry_release,
+            "",
+            VersionFilter::Release
+        ));
+        assert!(matches_version_entry(
+            &entry_release,
+            "   ",
+            VersionFilter::Release
+        ));
+        assert!(!matches_version_entry(
+            &entry_release,
+            "",
+            VersionFilter::Snapshot
+        ));
+
+        // Substring and case insensitivity
+        assert!(matches_version_entry(
+            &entry_release,
+            "21",
+            VersionFilter::Release
+        ));
+        assert!(matches_version_entry(
+            &entry_release,
+            "1.21.1",
+            VersionFilter::Release
+        ));
+        assert!(!matches_version_entry(
+            &entry_release,
+            "1.20",
+            VersionFilter::Release
+        ));
+
+        assert!(matches_version_entry(
+            &entry_snapshot,
+            "24w",
+            VersionFilter::Snapshot
+        ));
+        assert!(matches_version_entry(
+            &entry_snapshot,
+            "24W33A",
+            VersionFilter::Snapshot
+        ));
+        assert!(!matches_version_entry(
+            &entry_snapshot,
+            "24w",
+            VersionFilter::Release
+        ));
+
+        assert!(matches_version_entry(
+            &entry_old,
+            "b1.7",
+            VersionFilter::Old
+        ));
+        assert!(matches_version_entry(
+            &entry_old,
+            "B1.7",
+            VersionFilter::Old
+        ));
+        assert!(!matches_version_entry(
+            &entry_old,
+            "b1.7",
+            VersionFilter::Snapshot
+        ));
+    }
+}
