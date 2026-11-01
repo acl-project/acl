@@ -250,4 +250,35 @@ mod tests {
             LauncherConfig::load_or_default(&config_path).expect("failed to load saved config");
         assert_eq!(loaded.min_memory_mb, 2048);
     }
+
+    #[test]
+    fn test_search_java_preserves_default_java_none() {
+        let mut config = LauncherConfig {
+            default_java: None,
+            ..Default::default()
+        };
+
+        config.search_java();
+        assert_eq!(config.default_java, None);
+    }
+
+    #[test]
+    fn test_search_java_preserves_explicit_default_java() {
+        let mock_java = JavaInstallation {
+            path: PathBuf::from("/mock/custom/java"),
+            info: crate::java::JavaInfo {
+                version: "17.0.1".to_string(),
+                major_version: 17,
+                vendor: Some("CustomVendor".to_string()),
+                is_64bit: true,
+            },
+        };
+        let mut config = LauncherConfig {
+            default_java: Some(mock_java.clone()),
+            ..Default::default()
+        };
+
+        config.search_java();
+        assert_eq!(config.default_java, Some(mock_java));
+    }
 }

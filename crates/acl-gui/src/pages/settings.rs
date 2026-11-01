@@ -266,3 +266,107 @@ impl SimpleComponent for SettingsPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acl_core::java::{JavaInfo, JavaInstallation};
+
+    fn make_mock_java(path: &str, major_version: u32) -> JavaInstallation {
+        JavaInstallation {
+            path: PathBuf::from(path),
+            info: JavaInfo {
+                version: format!("{major_version}.0.1"),
+                major_version,
+                vendor: Some("MockVendor".to_string()),
+                is_64bit: true,
+            },
+        }
+    }
+
+    #[test]
+    fn test_settings_msg_equality() {
+        let msg1 = SettingsMsg::ShowToast("Success".to_string());
+        let msg2 = SettingsMsg::ShowToast("Success".to_string());
+        let msg3 = SettingsMsg::ShowToast("Error".to_string());
+        assert_eq!(msg1, msg2);
+        assert_ne!(msg1, msg3);
+    }
+
+    #[test]
+    fn test_default_java_index_mapping() {
+        let _ = gtk::init();
+
+        let java1 = make_mock_java("/path/java17", 17);
+        let java2 = make_mock_java("/path/java21", 21);
+
+        let shared_cfg = Arc::new(SharedState::<LauncherConfig>::new());
+        {
+            let mut cfg = shared_cfg.write();
+            cfg.java_list = vec![java1.clone(), java2.clone()];
+            cfg.default_java = None;
+        }
+
+        let page = SettingsPage {
+            config: shared_cfg.clone(),
+            config_path: PathBuf::from("/mock/config.toml"),
+            java_model: gtk::StringList::new(&[]),
+            max_memory_dirty: false,
+        };
+
+        // When default_java is None, index must be 0 (Auto-detect)
+        assert_eq!(page.default_java_index(), 0);
+
+        // When default_java is the first Java in list, index is 1
+        shared_cfg.write().default_java = Some(java1);
+        assert_eq!(page.default_java_index(), 1);
+
+        // When default_java is the second Java in list, index is 2
+        shared_cfg.write().default_java = Some(java2);
+        assert_eq!(page.default_java_index(), 2);
+
+        // When default_java is not in java_list, fallback to 0 (Auto-detect)
+        let unlisted_java = make_mock_java("/path/unlisted", 8);
+        shared_cfg.write().default_java = Some(unlisted_java);
+        assert_eq!(page.default_java_index(), 0);
+    }
+
+    #[test]
+    fn test_select_default_java_logic() {
+        let java1 = make_mock_java("/path/java17", 17);
+        let java2 = make_mock_java("/path/java21", 21);
+
+        let mut cfg = LauncherConfig {
+            java_list: vec![java1.clone(), java2.clone()],
+            default_java: Some(java1.clone()),
+            ..Default::default()
+        };
+
+        // Selecting index 0 sets default_java to None (Auto-detect)
+        let select_idx = 0;
+        if select_idx == 0 {
+            cfg.default_java = None;
+        } else if let Some(j) = cfg.java_list.get(select_idx - 1).cloned() {
+            cfg.default_java = Some(j);
+        }
+        assert_eq!(cfg.default_java, None);
+
+        // Selecting index 2 sets default_java to java2
+        let select_idx = 2;
+        if select_idx == 0 {
+            cfg.default_java = None;
+        } else if let Some(j) = cfg.java_list.get(select_idx - 1).cloned() {
+            cfg.default_java = Some(j);
+        }
+        assert_eq!(cfg.default_java, Some(java2));
+
+        // Selecting out-of-bounds index (e.g. 99) does not modify default_java
+        let select_idx = 99;
+        if select_idx == 0 {
+            cfg.default_java = None;
+        } else if let Some(j) = cfg.java_list.get(select_idx - 1).cloned() {
+            cfg.default_java = Some(j);
+        }
+        assert_eq!(cfg.default_java, Some(make_mock_java("/path/java21", 21)));
+    }
+}
