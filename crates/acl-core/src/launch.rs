@@ -56,6 +56,19 @@ impl LaunchCommand {
         let game_dir = instance.game_dir().to_string_lossy().into_owned();
         let assets_dir = dirs.assets_dir().to_string_lossy().into_owned();
 
+        let virtual_dir = dirs
+            .assets_dir()
+            .join("virtual")
+            .join(&metadata.asset_index.id);
+
+        // For legacy asset versions (e.g. 1.6.4), reconstructed assets reside under "assets/virtual/<index_id>"
+        // (such as "assets/virtual/legacy"). Point "${game_assets}" there so sounds and music load properly.
+        let game_assets = if virtual_dir.exists() || metadata.assets.as_deref() == Some("legacy") {
+            virtual_dir.to_string_lossy().into_owned()
+        } else {
+            assets_dir.clone()
+        };
+
         let version_type = match metadata.version_type {
             VersionType::Release => "release",
             VersionType::Snapshot => "snapshot",
@@ -73,8 +86,8 @@ impl LaunchCommand {
             ("${auth_player_name}", account.username.clone()),
             ("${version_name}", instance.config.id.clone()),
             ("${game_directory}", game_dir),
-            ("${assets_root}", assets_dir.clone()),
-            ("${game_assets}", assets_dir),
+            ("${assets_root}", assets_dir),
+            ("${game_assets}", game_assets),
             ("${assets_index_name}", metadata.asset_index.id.clone()),
             ("${auth_uuid}", account.uuid.simple().to_string()),
             ("${auth_access_token}", "0".to_string()),
