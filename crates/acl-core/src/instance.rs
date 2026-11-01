@@ -353,6 +353,11 @@ impl Instance {
             self.game_dir(),
         )?;
 
+        if self.natives_dir().exists() {
+            // Delete the previous natives folder to prevent dynamic library conflicts that could cause the game to crash.
+            let _ = fs::remove_dir_all(self.natives_dir());
+        }
+
         metadata.extract_natives(&dirs.libraries_dir(), &self.natives_dir())?;
 
         Ok(())
