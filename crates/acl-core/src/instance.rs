@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fs::{self, File},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 const CONFIG_NAME: &str = "aclcfg.toml";
+const ABNORMAL_MARK: &str = ".abnormal";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -358,7 +359,15 @@ impl Instance {
             let _ = fs::remove_dir_all(self.natives_dir());
         }
 
+        fs::create_dir_all(self.natives_dir()).map_err(|source| CoreError::Io {
+            path: self.natives_dir(),
+            source,
+        })?;
+
         metadata.extract_natives(&dirs.libraries_dir(), &self.natives_dir())?;
+
+        // Clear the abnormal mark.
+        self.clear_game_abnormal();
 
         Ok(())
     }
@@ -381,6 +390,36 @@ impl Instance {
         let content = fs::read_to_string(&path).map_err(|source| CoreError::Io { path, source })?;
         let metadata = serde_json::from_str(&content)?;
         Ok(metadata)
+    }
+
+    pub fn mark_game_abnormal(&self) {
+        let file_path = self.game_dir().join(ABNORMAL_MARK);
+        let _ = File::create(file_path);
+    }
+
+    pub fn clear_game_abnormal(&self) {
+        let file_path = self.game_dir().join(ABNORMAL_MARK);
+        if file_path.exists() {
+            let _ = fs::remove_file(file_path);
+        }
+    }
+
+    /// Check game integrity by filtering download tasks.
+    /// By default, only check whether files exist and whether their sizes match.
+    /// If the game crashes, perform a full SHA1 check.
+    pub fn check_integrity(&self, tasks: Vec<DownloadTask>) -> Vec<DownloadTask> {
+        let abnormal_mark = self.game_dir().join(ABNORMAL_MARK);
+        if abnormal_mark.exists() {
+            return tasks;
+        }
+
+        tasks
+            .into_iter()
+            .filter(|task| match fs::metadata(&task.destination) {
+                Ok(meta) => !(meta.is_file() && meta.len() == task.size),
+                Err(_) => true,
+            })
+            .collect()
     }
 }
 

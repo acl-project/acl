@@ -78,6 +78,7 @@ pub enum HomeCmdOutput {
     StageChanged(LaunchStage),
     LaunchFinished(Result<(), String>),
     GameExited {
+        id: String,
         name: String,
         status: std::io::Result<std::process::ExitStatus>,
     },
@@ -226,6 +227,7 @@ impl HomePage {
                         .map_err(|e| format!("Failed to verify asset index: {e}"))?;
 
                         let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
+                        let tasks = instance.check_integrity(tasks);
                         download::download_all(
                             &client,
                             tasks,
@@ -271,6 +273,7 @@ impl HomePage {
 
                         // A background standalone task monitors the process exit.
                         let inst_name = instance.config.name.clone();
+                        let inst_id = instance.id().to_owned();
                         let out_bg = out.clone();
 
                         let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<()>();
@@ -279,6 +282,7 @@ impl HomePage {
                             let status = process.wait().await;
                             let _ = exit_tx.send(());
                             let _ = out_bg.send(HomeCmdOutput::GameExited {
+                                id: inst_id,
                                 name: inst_name,
                                 status,
                             });
@@ -444,14 +448,36 @@ impl Component for HomePage {
                     let _ = sender.output(HomeOutput::ShowToast(err));
                 }
             }
-            HomeCmdOutput::GameExited { name, status } => match status {
+            HomeCmdOutput::GameExited { id, name, status } => match status {
                 Ok(s) => {
-                    let _ = sender.output(HomeOutput::ShowToast(format!(
-                        "Instance \"{name}\" exited with code {:?}",
-                        s.code()
-                    )));
+                    if !s.success() {
+                        if let Some(ins) = self
+                            .mgr
+                            .write()
+                            .instances
+                            .iter_mut()
+                            .find(|ins| ins.id() == id.as_str())
+                        {
+                            ins.mark_game_abnormal();
+                        }
+
+                        let _ = sender.output(HomeOutput::ShowToast(format!(
+                            "Instance \"{name}\" exited with code {:?}",
+                            s.code()
+                        )));
+                    }
                 }
                 Err(err) => {
+                    if let Some(ins) = self
+                        .mgr
+                        .write()
+                        .instances
+                        .iter_mut()
+                        .find(|ins| ins.id() == id.as_str())
+                    {
+                        ins.mark_game_abnormal()
+                    }
+
                     let _ = sender.output(HomeOutput::ShowToast(format!(
                         "Error waiting for instance \"{name}\": {err}"
                     )));
