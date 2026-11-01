@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn test_accounts_msg_equality() {
+    fn test_accounts_output_equality() {
         let msg1 = AccountsOutput::ShowToast("Test".to_string());
         let msg2 = AccountsOutput::ShowToast("Test".to_string());
         let msg3 = AccountsOutput::ShowToast("Other".to_string());

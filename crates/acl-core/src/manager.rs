@@ -347,4 +347,51 @@ mod tests {
         let parsed: InstancesConfig = toml::from_str(&loaded_content).unwrap();
         assert_eq!(parsed.active_id, Some("saved-instance".to_string()));
     }
+
+    #[test]
+    fn test_manager_active_instance_and_mut() {
+        let temp = TempDirGuard::new("active_instance");
+        let versions_dir = temp.path().join("versions");
+        let config_dir = temp.path().join("config");
+        fs::create_dir_all(&versions_dir).unwrap();
+        fs::create_dir_all(&config_dir).unwrap();
+
+        Instance::create("inst_a", "Instance A", "1.20.1", &versions_dir).unwrap();
+        Instance::create("inst_b", "Instance B", "1.21.1", &versions_dir).unwrap();
+
+        let mut mgr = InstanceManager::load(versions_dir, config_dir).unwrap();
+
+        // 1. Initial state has an active instance matching config.active_id
+        let initial_active_id = mgr.config.active_id.clone();
+        assert_eq!(
+            mgr.active_instance().map(|i| i.id().to_string()),
+            initial_active_id
+        );
+
+        // 2. Set active to inst_a and mutate via active_instance_mut
+        mgr.set_active_instance("inst_a").unwrap();
+        assert_eq!(mgr.active_instance().map(|i| i.id()), Some("inst_a"));
+
+        if let Some(active_mut) = mgr.active_instance_mut() {
+            active_mut.config.name = "Instance A Modified".to_string();
+        }
+        assert_eq!(
+            mgr.active_instance().map(|i| i.config.name.as_str()),
+            Some("Instance A Modified")
+        );
+
+        // 3. Switch active instance to inst_b
+        mgr.set_active_instance("inst_b").unwrap();
+        assert_eq!(mgr.active_instance().map(|i| i.id()), Some("inst_b"));
+
+        // 4. Nonexistent active_id returns None
+        mgr.config.active_id = Some("missing_id".to_string());
+        assert!(mgr.active_instance().is_none());
+        assert!(mgr.active_instance_mut().is_none());
+
+        // 5. None active_id returns None
+        mgr.config.active_id = None;
+        assert!(mgr.active_instance().is_none());
+        assert!(mgr.active_instance_mut().is_none());
+    }
 }

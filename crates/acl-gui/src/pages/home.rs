@@ -497,3 +497,73 @@ impl Component for HomePage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_launch_stage_default_and_is_launching() {
+        assert_eq!(LaunchStage::default(), LaunchStage::Idle);
+        assert!(!LaunchStage::Idle.is_launching());
+
+        let active_stages = [
+            LaunchStage::Authenticating,
+            LaunchStage::LoadingMetadata,
+            LaunchStage::CheckingJava,
+            LaunchStage::CheckingIntegrity,
+            LaunchStage::PreparingRuntime,
+            LaunchStage::Launching,
+            LaunchStage::WaitingWindow,
+        ];
+
+        for stage in active_stages {
+            assert!(stage.is_launching(), "{stage:?} should be launching");
+        }
+    }
+
+    #[test]
+    fn test_launch_stage_fraction() {
+        assert_eq!(LaunchStage::Idle.fraction(), 0.0);
+        assert!((LaunchStage::Authenticating.fraction() - 0.1).abs() < f64::EPSILON);
+        assert!((LaunchStage::LoadingMetadata.fraction() - 0.2).abs() < f64::EPSILON);
+        assert!((LaunchStage::CheckingJava.fraction() - 0.3).abs() < f64::EPSILON);
+        assert!((LaunchStage::CheckingIntegrity.fraction() - 0.6).abs() < f64::EPSILON);
+        assert!((LaunchStage::PreparingRuntime.fraction() - 0.8).abs() < f64::EPSILON);
+        assert!((LaunchStage::Launching.fraction() - 0.9).abs() < f64::EPSILON);
+        assert!((LaunchStage::WaitingWindow.fraction() - 0.99).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_launch_stage_status_text() {
+        assert_eq!(LaunchStage::Idle.status_text(), None);
+        assert_eq!(
+            LaunchStage::Authenticating.status_text(),
+            Some("Authenticating account...".to_string())
+        );
+        assert_eq!(
+            LaunchStage::LoadingMetadata.status_text(),
+            Some("Loading version metadata...".to_string())
+        );
+        assert_eq!(
+            LaunchStage::CheckingJava.status_text(),
+            Some("Checking Java runtime...".to_string())
+        );
+        assert_eq!(
+            LaunchStage::CheckingIntegrity.status_text(),
+            Some("Verifying game files...".to_string())
+        );
+        assert_eq!(
+            LaunchStage::PreparingRuntime.status_text(),
+            Some("Preparing runtime...".to_string())
+        );
+        assert_eq!(
+            LaunchStage::Launching.status_text(),
+            Some("Launching Minecraft...".to_string())
+        );
+        assert_eq!(
+            LaunchStage::WaitingWindow.status_text(),
+            Some("Waiting for game window...".to_string())
+        );
+    }
+}

@@ -1054,6 +1054,13 @@ mod tests {
             extract: None,
         }];
 
+        // Pre-create an old native file and abnormal mark to verify cleanup
+        fs::create_dir_all(instance.natives_dir()).expect("failed to create natives dir");
+        let stale_lib = instance.natives_dir().join("stale_lib.so");
+        fs::write(&stale_lib, b"stale").expect("failed to write stale native");
+        instance.mark_game_abnormal();
+        assert!(instance.game_dir().join(".abnormal").exists());
+
         instance
             .prepare_runtime(&metadata, &asset_index, &dirs)
             .expect("prepare_runtime should succeed");
@@ -1067,5 +1074,144 @@ mod tests {
 
         let extracted_so = instance.natives_dir().join("liblwjgl.so");
         assert!(extracted_so.exists());
+        assert!(!stale_lib.exists());
+        assert!(!instance.game_dir().join(".abnormal").exists());
+    }
+
+    #[test]
+    fn test_instance_load_metadata() {
+        let temp = TempDirGuard::new("instance_load_metadata");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+
+        let instance = Instance::create("test_meta", "Meta Test", "1.21.1", &dirs.versions_dir())
+            .expect("should create instance");
+
+        // 1. Missing metadata file returns CoreError::Io
+        let err_missing = instance.load_metadata().unwrap_err();
+        assert!(matches!(err_missing, CoreError::Io { .. }));
+
+        // 2. Corrupted metadata file returns CoreError::Json
+        fs::write(instance.version_json(), b"invalid json content")
+            .expect("failed to write corrupted json");
+        let err_json = instance.load_metadata().unwrap_err();
+        assert!(matches!(err_json, CoreError::Json(_)));
+
+        // 3. Valid metadata file succeeds
+        let sample_meta = sample_version_metadata();
+        let valid_json =
+            serde_json::to_string(&sample_meta).expect("should serialize sample metadata");
+        fs::write(instance.version_json(), valid_json).expect("failed to write valid json");
+
+        let loaded = instance
+            .load_metadata()
+            .expect("should load valid metadata");
+        assert_eq!(loaded.id, sample_meta.id);
+        assert_eq!(loaded.main_class, sample_meta.main_class);
+    }
+
+    #[test]
+    fn test_instance_abnormal_mark_lifecycle() {
+        let temp = TempDirGuard::new("instance_abnormal");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+
+        let instance = Instance::create(
+            "test_abnormal",
+            "Abnormal Test",
+            "1.21.1",
+            &dirs.versions_dir(),
+        )
+        .expect("should create instance");
+        let mark_path = instance.game_dir().join(ABNORMAL_MARK);
+
+        assert!(!mark_path.exists());
+
+        // Mark abnormal
+        instance.mark_game_abnormal();
+        assert!(mark_path.exists());
+
+        // Clear abnormal
+        instance.clear_game_abnormal();
+        assert!(!mark_path.exists());
+
+        // Clearing again when not present should be a no-op
+        instance.clear_game_abnormal();
+        assert!(!mark_path.exists());
+    }
+
+    #[test]
+    fn test_instance_check_integrity() {
+        let temp = TempDirGuard::new("instance_integrity");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+
+        let instance = Instance::create(
+            "test_integrity",
+            "Integrity Test",
+            "1.21.1",
+            &dirs.versions_dir(),
+        )
+        .expect("should create instance");
+
+        let files_dir = temp.path().join("files");
+        fs::create_dir_all(&files_dir).expect("failed to create files dir");
+
+        let path_matching = files_dir.join("matching.jar");
+        fs::write(&path_matching, b"12345").expect("failed to write matching file");
+
+        let path_mismatch = files_dir.join("mismatch.jar");
+        fs::write(&path_mismatch, b"abc").expect("failed to write mismatch file");
+
+        let path_missing = files_dir.join("missing.jar");
+
+        let task_matching = DownloadTask {
+            name: "matching.jar".to_string(),
+            url: "https://example.com/matching.jar".to_string(),
+            destination: path_matching,
+            sha1: "dummy".to_string(),
+            size: 5,
+        };
+        let task_mismatch = DownloadTask {
+            name: "mismatch.jar".to_string(),
+            url: "https://example.com/mismatch.jar".to_string(),
+            destination: path_mismatch,
+            sha1: "dummy".to_string(),
+            size: 100, // Size differs from actual (3)
+        };
+        let task_missing = DownloadTask {
+            name: "missing.jar".to_string(),
+            url: "https://example.com/missing.jar".to_string(),
+            destination: path_missing,
+            sha1: "dummy".to_string(),
+            size: 10,
+        };
+
+        let tasks = vec![
+            task_matching.clone(),
+            task_mismatch.clone(),
+            task_missing.clone(),
+        ];
+
+        // 1. Without abnormal mark: only missing or mismatched files are kept
+        let filtered = instance.check_integrity(tasks.clone());
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|t| t.name == "mismatch.jar"));
+        assert!(filtered.iter().any(|t| t.name == "missing.jar"));
+        assert!(!filtered.iter().any(|t| t.name == "matching.jar"));
+
+        // 2. With abnormal mark: all tasks are returned for SHA1 verification
+        instance.mark_game_abnormal();
+        let filtered_abnormal = instance.check_integrity(tasks);
+        assert_eq!(filtered_abnormal.len(), 3);
     }
 }
