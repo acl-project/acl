@@ -338,6 +338,36 @@ mod tests {
         assert_eq!(loaded, manifest);
     }
 
+    #[tokio::test]
+    async fn test_fetch_with_cache_from_url_cache_neutral_to_download_source() {
+        let temp = TempDirGuard::new("cached_fetch_neutral");
+        let manifest = sample_manifest();
+        let official_url = VERSION_MANIFEST_URL;
+
+        let cache_key = cache_key_for_url(official_url);
+        let cache_path = temp.path().join(cache_key);
+
+        let cached = Cached::new(manifest.clone(), Duration::from_secs(3600))
+            .expect("failed to create cached");
+        cached
+            .save_to_file(&cache_path)
+            .expect("failed to save cache");
+
+        let client = reqwest::Client::new();
+        // Fetching with Bmclapi download source should hit the cache saved under the official URL key without network
+        let loaded = VersionManifest::fetch_with_cache_from_url(
+            &client,
+            official_url,
+            temp.path(),
+            Duration::from_secs(3600),
+            DownloadSource::Bmclapi,
+        )
+        .await
+        .expect("should load from cache regardless of download source");
+
+        assert_eq!(loaded, manifest);
+    }
+
     #[test]
     fn test_version_type_label() {
         assert_eq!(VersionType::Release.label(), "Release");

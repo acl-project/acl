@@ -400,4 +400,30 @@ mod tests {
         }
         assert_eq!(cfg.default_java, Some(make_mock_java("/path/java21", 21)));
     }
+
+    #[test]
+    fn test_select_download_source_logic() {
+        let mut cfg = LauncherConfig::default();
+        assert_eq!(cfg.download_source, DownloadSource::Official);
+
+        // Selecting Bmclapi updates download_source to Bmclapi
+        cfg.download_source = DownloadSource::Bmclapi;
+        assert_eq!(cfg.download_source, DownloadSource::Bmclapi);
+
+        // Selecting Official updates download_source back to Official
+        cfg.download_source = DownloadSource::Official;
+        assert_eq!(cfg.download_source, DownloadSource::Official);
+    }
+
+    #[test]
+    fn test_download_source_combo_row_mapping() {
+        let labels: Vec<&'static str> = DownloadSource::ALL.iter().map(|s| s.label()).collect();
+        assert_eq!(labels, vec!["Official (Mojang)", "BMCLAPI (Mirror)"]);
+
+        // Verify index-to-source mapping matching combo row selection
+        assert_eq!(DownloadSource::from_index(0), DownloadSource::Official);
+        assert_eq!(DownloadSource::from_index(1), DownloadSource::Bmclapi);
+        assert_eq!(DownloadSource::Official.to_index(), 0);
+        assert_eq!(DownloadSource::Bmclapi.to_index(), 1);
+    }
 }

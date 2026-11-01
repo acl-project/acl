@@ -227,4 +227,30 @@ mod tests {
             serde_json::from_str(&bmclapi_json).expect("deserialize");
         assert_eq!(parsed_bmclapi, DownloadSource::Bmclapi);
     }
+
+    #[test]
+    fn test_download_source_indices_and_all() {
+        assert_eq!(
+            DownloadSource::ALL,
+            &[DownloadSource::Official, DownloadSource::Bmclapi]
+        );
+
+        assert_eq!(DownloadSource::Official.to_index(), 0);
+        assert_eq!(DownloadSource::Bmclapi.to_index(), 1);
+
+        assert_eq!(DownloadSource::from_index(0), DownloadSource::Official);
+        assert_eq!(DownloadSource::from_index(1), DownloadSource::Bmclapi);
+
+        for &source in DownloadSource::ALL {
+            assert_eq!(DownloadSource::from_index(source.to_index()), source);
+        }
+
+        // Out-of-bounds indices should fall back to Official
+        assert_eq!(DownloadSource::from_index(2), DownloadSource::Official);
+        assert_eq!(DownloadSource::from_index(99), DownloadSource::Official);
+        assert_eq!(
+            DownloadSource::from_index(u32::MAX),
+            DownloadSource::Official
+        );
+    }
 }
