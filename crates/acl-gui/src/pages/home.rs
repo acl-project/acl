@@ -11,6 +11,7 @@ use gtk::prelude::*;
 use relm4::tokio::time::MissedTickBehavior;
 use relm4::{Component, ComponentParts, ComponentSender, RelmWidgetExt, tokio};
 use relm4::{SharedState, adw};
+use tracing::{error, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LaunchStage {
@@ -76,7 +77,7 @@ pub enum HomeInput {
 #[derive(Debug)]
 pub enum HomeCmdOutput {
     StageChanged(LaunchStage),
-    LaunchFinished(Result<(), String>),
+    LaunchFinished(Result<String, String>),
     GameExited {
         id: String,
         name: String,
@@ -200,7 +201,7 @@ impl HomePage {
         sender.command(move |out, shutdown| {
             shutdown
                 .register(async move {
-                    let result: Result<(), String> = async {
+                    let result: Result<String, String> = async {
                         // Log in to obtain an access token (not yet implemented).
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Authenticating));
 
@@ -262,14 +263,12 @@ impl HomePage {
                         )
                         .map_err(|e| format!("Failed to build launch command: {e}"))?;
 
+                        let spawn_time = SystemTime::now();
+
                         let process = cmd
                             .spawn()
                             .await
                             .map_err(|e| format!("Failed to spawn game process: {e}"))?;
-
-                        // Update the last played time.
-                        let mut inst_mut = instance.clone();
-                        let _ = inst_mut.update_last_play();
 
                         // A background standalone task monitors the process exit.
                         let inst_name = instance.config.name.clone();
@@ -290,9 +289,9 @@ impl HomePage {
 
                         // Wait for the game window to appear.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::WaitingWindow));
-                        Self::wait_window(instance.game_dir(), SystemTime::now(), exit_rx).await;
+                        Self::wait_window(instance.game_dir(), spawn_time, exit_rx).await;
 
-                        Ok(())
+                        Ok(instance.id().to_string())
                     }
                     .await;
 
@@ -444,8 +443,23 @@ impl Component for HomePage {
             HomeCmdOutput::StageChanged(stage) => self.stage = stage,
             HomeCmdOutput::LaunchFinished(result) => {
                 self.stage = LaunchStage::Idle;
-                if let Err(err) = result {
-                    let _ = sender.output(HomeOutput::ShowToast(err));
+                match result {
+                    Err(err) => {
+                        error!("Failed to launch game: {err}");
+                        let _ = sender.output(HomeOutput::ShowToast(err));
+                    }
+                    Ok(id) => {
+                        if let Some(ins) = self
+                            .mgr
+                            .write()
+                            .instances
+                            .iter_mut()
+                            .find(|ins| ins.id() == id.as_str())
+                            && let Err(err) = ins.update_last_play()
+                        {
+                            warn!("Failed to update instance last play time: {err}");
+                        }
+                    }
                 }
             }
             HomeCmdOutput::GameExited { id, name, status } => match status {
@@ -460,11 +474,9 @@ impl Component for HomePage {
                         {
                             ins.mark_game_abnormal();
                         }
-
-                        let _ = sender.output(HomeOutput::ShowToast(format!(
-                            "Instance \"{name}\" exited with code {:?}",
-                            s.code()
-                        )));
+                        let msg = format!("Instance \"{name}\" exited with code {:?}", s.code());
+                        error!("{msg}");
+                        let _ = sender.output(HomeOutput::ShowToast(msg));
                     }
                 }
                 Err(err) => {
@@ -475,12 +487,11 @@ impl Component for HomePage {
                         .iter_mut()
                         .find(|ins| ins.id() == id.as_str())
                     {
-                        ins.mark_game_abnormal()
+                        ins.mark_game_abnormal();
                     }
-
-                    let _ = sender.output(HomeOutput::ShowToast(format!(
-                        "Error waiting for instance \"{name}\": {err}"
-                    )));
+                    let msg = format!("Error waiting for instance \"{name}\": {err}");
+                    error!("{msg}");
+                    let _ = sender.output(HomeOutput::ShowToast(msg));
                 }
             },
         }

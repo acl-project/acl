@@ -7,7 +7,7 @@ use std::{
 use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
 use acl_minecraft::{AssetIndex, VersionEntry, VersionMetadata, download::DownloadTask};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 
 const CONFIG_NAME: &str = "aclcfg.toml";
 const ABNORMAL_MARK: &str = ".abnormal";
@@ -394,13 +394,17 @@ impl Instance {
 
     pub fn mark_game_abnormal(&self) {
         let file_path = self.game_dir().join(ABNORMAL_MARK);
-        let _ = File::create(file_path);
+        if let Err(err) = File::create(file_path) {
+            warn!("Failed to mark game as abnormal: {err}");
+        }
     }
 
     pub fn clear_game_abnormal(&self) {
         let file_path = self.game_dir().join(ABNORMAL_MARK);
-        if file_path.exists() {
-            let _ = fs::remove_file(file_path);
+        if file_path.exists()
+            && let Err(err) = fs::remove_file(file_path)
+        {
+            warn!("Failed to clear abnormal mark: {err}");
         }
     }
 
