@@ -72,6 +72,8 @@ pub enum HomeOutput {
 #[derive(Debug)]
 pub enum HomeInput {
     LaunchClicked,
+    /// Trigger a watch update.
+    Refresh,
 }
 
 #[derive(Debug)]
@@ -411,8 +413,14 @@ impl Component for HomePage {
     fn init(
         init: Self::Init,
         root: Self::Root,
-        _sender: ComponentSender<Self>,
+        sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        // Subscribe to update events.
+        init.mgr
+            .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
+        init.accounts
+            .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
+
         let model = HomePage {
             mgr: init.mgr,
             accounts: init.accounts,
@@ -430,6 +438,7 @@ impl Component for HomePage {
             HomeInput::LaunchClicked => {
                 self.launch(sender);
             }
+            HomeInput::Refresh => {}
         }
     }
 

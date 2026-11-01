@@ -79,29 +79,16 @@ impl LauncherConfig {
         Ok(())
     }
 
-    /// Search for Java installations on the system; this updates the java list and modifies the default Java.
+    /// Search for Java installations on the system.
     pub fn search_java(&mut self) {
         let java_list = java::discover_java_installations();
-
         info!("Discovered {} Java installation(s)", java_list.len());
 
-        let default_java = java_list
-            .iter()
-            .max_by_key(|j| j.info.major_version)
-            .cloned();
-
-        if let Some(ref default) = default_java {
-            info!(
-                "Selected default Java runtime {} at {}",
-                default.info.major_version,
-                default.path.display()
-            );
-        } else {
+        if java_list.is_empty() {
             warn!("No valid Java installation found during discovery");
         }
 
         self.java_list = java_list;
-        self.default_java = default_java;
     }
 }
 
@@ -262,5 +249,36 @@ mod tests {
         let loaded =
             LauncherConfig::load_or_default(&config_path).expect("failed to load saved config");
         assert_eq!(loaded.min_memory_mb, 2048);
+    }
+
+    #[test]
+    fn test_search_java_preserves_default_java_none() {
+        let mut config = LauncherConfig {
+            default_java: None,
+            ..Default::default()
+        };
+
+        config.search_java();
+        assert_eq!(config.default_java, None);
+    }
+
+    #[test]
+    fn test_search_java_preserves_explicit_default_java() {
+        let mock_java = JavaInstallation {
+            path: PathBuf::from("/mock/custom/java"),
+            info: crate::java::JavaInfo {
+                version: "17.0.1".to_string(),
+                major_version: 17,
+                vendor: Some("CustomVendor".to_string()),
+                is_64bit: true,
+            },
+        };
+        let mut config = LauncherConfig {
+            default_java: Some(mock_java.clone()),
+            ..Default::default()
+        };
+
+        config.search_java();
+        assert_eq!(config.default_java, Some(mock_java));
     }
 }
