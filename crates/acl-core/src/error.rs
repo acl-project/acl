@@ -61,6 +61,9 @@ pub enum CoreError {
 
     #[error("Minecraft error: {0}")]
     Minecraft(#[from] acl_minecraft::MinecraftError),
+
+    #[error("Failed to parse JSON: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
@@ -177,6 +180,15 @@ mod tests {
         assert_eq!(
             core_mc_err.to_string(),
             "Minecraft error: Minecraft version '1.99' not found in manifest"
+        );
+
+        let json_err = serde_json::from_str::<serde_json::Value>("{invalid")
+            .expect_err("invalid json should error");
+        let core_json_err = CoreError::from(json_err);
+        assert!(
+            core_json_err
+                .to_string()
+                .starts_with("Failed to parse JSON:")
         );
     }
 }
