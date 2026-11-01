@@ -69,7 +69,6 @@ impl VersionManifest {
     }
 
     /// Fetch version manifest with caching using default TTL.
-    /// Switching the download source does not invalidate the cache.
     pub async fn fetch_with_cache(
         client: &reqwest::Client,
         cache_dir: &Path,
