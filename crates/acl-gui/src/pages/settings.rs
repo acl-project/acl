@@ -45,14 +45,13 @@ impl SettingsPage {
 
     fn refresh_java_model(&mut self) {
         let cfg = self.config.read();
-        let java_names: Vec<String> = cfg
-            .java_list
-            .iter()
-            .map(|j| {
-                let vendor = j.info.vendor.as_deref().unwrap_or("Java");
-                format!("{} {}", vendor, j.info.version)
-            })
-            .collect();
+
+        let mut java_names: Vec<String> = Vec::with_capacity(cfg.java_list.len() + 1);
+        java_names.push("Auto-detect (Recommended)".to_string());
+        java_names.extend(cfg.java_list.iter().map(|j| {
+            let vendor = j.info.vendor.as_deref().unwrap_or("Java");
+            format!("{} {}", vendor, j.info.version)
+        }));
 
         let name_refs: Vec<&str> = java_names.iter().map(|s| s.as_str()).collect();
 
@@ -63,10 +62,16 @@ impl SettingsPage {
     /// Calculate the index of the default-selected Java.
     fn default_java_index(&self) -> u32 {
         let cfg = self.config.read();
-        cfg.default_java
-            .as_ref()
-            .and_then(|def| cfg.java_list.iter().position(|j| j.path == def.path))
-            .unwrap_or(gtk::INVALID_LIST_POSITION as usize) as u32
+
+        match &cfg.default_java {
+            None => 0,
+            Some(def) => cfg
+                .java_list
+                .iter()
+                .position(|j| j.path == def.path)
+                .map(|pos| (pos + 1) as u32)
+                .unwrap_or(0),
+        }
     }
 }
 
@@ -142,7 +147,7 @@ impl SimpleComponent for SettingsPage {
                     set_title: "Java Runtime",
                    #[watch]
                     set_subtitle: &model.config.read().default_java.as_ref().map_or_else(
-                        || "No Java runtime selected".to_string(),
+                        || "Automatically match based on game version".to_string(),
                         |j| j.path.display().to_string(),
                     ),
                     set_model: Some(&java_model),
@@ -241,7 +246,9 @@ impl SimpleComponent for SettingsPage {
             }
             SettingsInput::SelectDefaultJava(index) => {
                 let mut cfg = self.config.write();
-                if let Some(java) = cfg.java_list.get(index).cloned() {
+                if index == 0 {
+                    cfg.default_java = None;
+                } else if let Some(java) = cfg.java_list.get(index - 1).cloned() {
                     cfg.default_java = Some(java);
                 }
                 drop(cfg);

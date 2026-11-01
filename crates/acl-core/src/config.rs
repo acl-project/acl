@@ -83,25 +83,12 @@ impl LauncherConfig {
     pub fn search_java(&mut self) {
         let java_list = java::discover_java_installations();
 
-        info!("Discovered {} Java installation(s)", java_list.len());
-
-        let default_java = java_list
-            .iter()
-            .max_by_key(|j| j.info.major_version)
-            .cloned();
-
-        if let Some(ref default) = default_java {
-            info!(
-                "Selected default Java runtime {} at {}",
-                default.info.major_version,
-                default.path.display()
-            );
-        } else {
+        if java_list.is_empty() {
             warn!("No valid Java installation found during discovery");
+            return;
         }
 
         self.java_list = java_list;
-        self.default_java = default_java;
     }
 }
 
