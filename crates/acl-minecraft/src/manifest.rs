@@ -340,23 +340,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_with_cache_from_url_cache_neutral_to_download_source() {
-        let temp = TempDirGuard::new("cached_fetch_neutral");
-        let manifest = sample_manifest();
+    async fn test_fetch_with_cache_from_url_isolated_per_download_source() {
+        let temp = TempDirGuard::new("cached_fetch_isolated");
+        let mut manifest_official = sample_manifest();
+        manifest_official.latest.release = "1.20.4".to_string();
+
+        let mut manifest_bmclapi = sample_manifest();
+        manifest_bmclapi.latest.release = "1.20.2".to_string();
+
         let official_url = VERSION_MANIFEST_URL;
+        let bmclapi_url = DownloadSource::Bmclapi.rewrite_url(official_url);
 
-        let cache_key = cache_key_for_url(official_url);
-        let cache_path = temp.path().join(cache_key);
+        let official_cache_key = cache_key_for_url(official_url);
+        let official_cache_path = temp.path().join(official_cache_key);
+        let cached_official = Cached::new(manifest_official.clone(), Duration::from_secs(3600))
+            .expect("failed to create official cached");
+        cached_official
+            .save_to_file(&official_cache_path)
+            .expect("failed to save official cache");
 
-        let cached = Cached::new(manifest.clone(), Duration::from_secs(3600))
-            .expect("failed to create cached");
-        cached
-            .save_to_file(&cache_path)
-            .expect("failed to save cache");
+        let bmclapi_cache_key = cache_key_for_url(&bmclapi_url);
+        let bmclapi_cache_path = temp.path().join(bmclapi_cache_key);
+        let cached_bmclapi = Cached::new(manifest_bmclapi.clone(), Duration::from_secs(3600))
+            .expect("failed to create bmclapi cached");
+        cached_bmclapi
+            .save_to_file(&bmclapi_cache_path)
+            .expect("failed to save bmclapi cache");
 
         let client = reqwest::Client::new();
-        // Fetching with Bmclapi download source should hit the cache saved under the official URL key without network
-        let loaded = VersionManifest::fetch_with_cache_from_url(
+        let loaded_official = VersionManifest::fetch_with_cache_from_url(
+            &client,
+            official_url,
+            temp.path(),
+            Duration::from_secs(3600),
+            DownloadSource::Official,
+        )
+        .await
+        .expect("should load from official cache");
+
+        let loaded_bmclapi = VersionManifest::fetch_with_cache_from_url(
             &client,
             official_url,
             temp.path(),
@@ -364,9 +386,11 @@ mod tests {
             DownloadSource::Bmclapi,
         )
         .await
-        .expect("should load from cache regardless of download source");
+        .expect("should load from bmclapi cache");
 
-        assert_eq!(loaded, manifest);
+        assert_eq!(loaded_official, manifest_official);
+        assert_eq!(loaded_bmclapi, manifest_bmclapi);
+        assert_ne!(loaded_official, loaded_bmclapi);
     }
 
     #[test]
