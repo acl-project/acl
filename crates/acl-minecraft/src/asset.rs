@@ -5,7 +5,9 @@ use std::{
     path::Path,
 };
 
-use crate::{AssetIndexInfo, MinecraftError, Result, download::DownloadTask};
+use crate::{
+    AssetIndexInfo, MinecraftError, Result, download::DownloadTask, mirror::DownloadSource,
+};
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -64,9 +66,17 @@ impl AssetIndex {
         client: &reqwest::Client,
         info: &AssetIndexInfo,
         assets_dir: &Path,
+        download_source: DownloadSource,
     ) -> Result<Self> {
         let path = assets_dir.join("indexes").join(format!("{}.json", info.id));
-        crate::cache::fetch_verified_json(client, &info.url, &info.sha1, &info.id, &path).await
+        crate::cache::fetch_verified_json(
+            client,
+            &download_source.rewrite_url(&info.url),
+            &info.sha1,
+            &info.id,
+            &path,
+        )
+        .await
     }
 
     /// Reconstruct virtual or resource-mapped assets for legacy Minecraft versions using links.
@@ -291,7 +301,9 @@ mod tests {
         };
 
         let client = reqwest::Client::new();
-        let result = AssetIndex::fetch_and_verify(&client, &info, temp.path()).await;
+        let result =
+            AssetIndex::fetch_and_verify(&client, &info, temp.path(), DownloadSource::Official)
+                .await;
 
         let index = result.expect("fetch_and_verify should read from cached file");
         assert!(index.objects.is_empty());

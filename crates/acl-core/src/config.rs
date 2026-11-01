@@ -3,6 +3,7 @@ use std::{
     path::Path,
 };
 
+use acl_minecraft::mirror::DownloadSource;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -27,6 +28,8 @@ pub struct LauncherConfig {
     pub max_concurrent_downloads: usize,
     /// Whether to close the launcher window when the game starts.
     pub close_launcher_on_launch: bool,
+    /// The launcher's download source.
+    pub download_source: DownloadSource,
 }
 
 impl Default for LauncherConfig {
@@ -38,6 +41,7 @@ impl Default for LauncherConfig {
             java_list: Vec::new(),
             max_concurrent_downloads: 16,
             close_launcher_on_launch: false,
+            download_source: DownloadSource::Official,
         }
     }
 }
@@ -139,6 +143,7 @@ mod tests {
         assert!(config.java_list.is_empty());
         assert_eq!(config.max_concurrent_downloads, 16);
         assert!(!config.close_launcher_on_launch);
+        assert_eq!(config.download_source, DownloadSource::Official);
     }
 
     #[test]
@@ -159,6 +164,7 @@ mod tests {
             java_list: vec![java],
             max_concurrent_downloads: 8,
             close_launcher_on_launch: true,
+            download_source: DownloadSource::Official,
         };
 
         let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");
@@ -181,6 +187,7 @@ mod tests {
         assert_eq!(config.max_concurrent_downloads, 16);
         assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
+        assert_eq!(config.download_source, DownloadSource::Official);
     }
 
     #[test]
@@ -196,6 +203,7 @@ mod tests {
         assert_eq!(loaded.max_memory_mb, 4096);
         assert_eq!(loaded.max_concurrent_downloads, 16);
         assert!(!loaded.close_launcher_on_launch);
+        assert_eq!(loaded.download_source, DownloadSource::Official);
 
         let content = fs::read_to_string(&config_path).expect("failed to read created config");
         let parsed: LauncherConfig =

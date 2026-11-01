@@ -99,3 +99,116 @@ impl DownloadSource {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_download_source_default() {
+        assert_eq!(DownloadSource::default(), DownloadSource::Official);
+    }
+
+    #[test]
+    fn test_download_source_label() {
+        assert_eq!(DownloadSource::Official.label(), "Official (Mojang)");
+        assert_eq!(DownloadSource::Bmclapi.label(), "BMCLAPI (Mirror)");
+    }
+
+    #[test]
+    fn test_rewrite_url_official() {
+        let url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+        assert_eq!(DownloadSource::Official.rewrite_url(url), url);
+    }
+
+    #[test]
+    fn test_rewrite_url_bmclapi_rules() {
+        let cases = [
+            (
+                "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+                "https://bmclapi2.bangbang93.com/mc/game/version_manifest_v2.json",
+            ),
+            (
+                "https://launchermeta.mojang.com/mc/game/version_manifest.json",
+                "https://bmclapi2.bangbang93.com/mc/game/version_manifest.json",
+            ),
+            (
+                "https://piston-data.mojang.com/v1/objects/client.jar",
+                "https://bmclapi2.bangbang93.com/v1/objects/client.jar",
+            ),
+            (
+                "https://launcher.mojang.com/v1/objects/client.jar",
+                "https://bmclapi2.bangbang93.com/v1/objects/client.jar",
+            ),
+            (
+                "https://resources.download.minecraft.net/bd/hash123",
+                "https://bmclapi2.bangbang93.com/assets/bd/hash123",
+            ),
+            (
+                "https://libraries.minecraft.net/com/mojang/authlib/1.0/authlib-1.0.jar",
+                "https://bmclapi2.bangbang93.com/maven/com/mojang/authlib/1.0/authlib-1.0.jar",
+            ),
+            (
+                "https://files.minecraftforge.net/maven/net/minecraftforge/forge/test.jar",
+                "https://bmclapi2.bangbang93.com/maven/net/minecraftforge/forge/test.jar",
+            ),
+            (
+                "https://maven.neoforged.net/releases/net/neoforged/forge/1.20.4/forge.jar",
+                "https://bmclapi2.bangbang93.com/maven/net/neoforged/forge/1.20.4/forge.jar",
+            ),
+            (
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/20.4.0/neoforge.jar",
+                "https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/20.4.0/neoforge.jar",
+            ),
+            (
+                "https://meta.fabricmc.net/v2/versions/loader",
+                "https://bmclapi2.bangbang93.com/fabric-meta/v2/versions/loader",
+            ),
+            (
+                "https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.15.0/loader.jar",
+                "https://bmclapi2.bangbang93.com/maven/net/fabricmc/fabric-loader/0.15.0/loader.jar",
+            ),
+            (
+                "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/test.jar",
+                "https://bmclapi2.bangbang93.com/maven/org/quiltmc/quilt-loader/test.jar",
+            ),
+            (
+                "https://meta.quiltmc.org/v3/versions",
+                "https://bmclapi2.bangbang93.com/quilt-meta/v3/versions",
+            ),
+            (
+                "https://authlib-injector.yushi.moe/artifact/latest.json",
+                "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/latest.json",
+            ),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(
+                DownloadSource::Bmclapi.rewrite_url(input),
+                expected,
+                "Failed to rewrite {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rewrite_url_unmatched() {
+        let external = "https://custom.repo.org/maven/test.jar";
+        assert_eq!(DownloadSource::Bmclapi.rewrite_url(external), external);
+    }
+
+    #[test]
+    fn test_download_source_serde() {
+        let official_json = serde_json::to_string(&DownloadSource::Official).expect("serialize");
+        assert_eq!(official_json, "\"official\"");
+        let parsed_official: DownloadSource =
+            serde_json::from_str(&official_json).expect("deserialize");
+        assert_eq!(parsed_official, DownloadSource::Official);
+
+        let bmclapi_json = serde_json::to_string(&DownloadSource::Bmclapi).expect("serialize");
+        assert_eq!(bmclapi_json, "\"bmclapi\"");
+        let parsed_bmclapi: DownloadSource =
+            serde_json::from_str(&bmclapi_json).expect("deserialize");
+        assert_eq!(parsed_bmclapi, DownloadSource::Bmclapi);
+    }
+}

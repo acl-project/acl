@@ -3,6 +3,7 @@ use std::{path::Path, time::Duration};
 use crate::{
     cache::{Cached, DEFAULT_MANIFEST_TTL, cache_key_for_url},
     error::Result,
+    mirror::DownloadSource,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -68,12 +69,18 @@ impl VersionManifest {
     }
 
     /// Fetch version manifest with caching using default TTL.
-    pub async fn fetch_with_cache(client: &reqwest::Client, cache_dir: &Path) -> Result<Self> {
+    /// Switching the download source does not invalidate the cache.
+    pub async fn fetch_with_cache(
+        client: &reqwest::Client,
+        cache_dir: &Path,
+        download_source: DownloadSource,
+    ) -> Result<Self> {
         Self::fetch_with_cache_from_url(
             client,
             VERSION_MANIFEST_URL,
             cache_dir,
             DEFAULT_MANIFEST_TTL,
+            download_source,
         )
         .await
     }
@@ -83,8 +90,11 @@ impl VersionManifest {
         url: &str,
         cache_dir: &Path,
         ttl: Duration,
+        download_source: DownloadSource,
     ) -> Result<Self> {
+        // Use the official URL to ensure the cache remains valid.
         let file_name = cache_key_for_url(url);
+
         let cache_path = cache_dir.join(file_name);
 
         let cached = Cached::<Self>::load_from_file(&cache_path).ok();
@@ -99,8 +109,8 @@ impl VersionManifest {
             );
             return Ok(entry.data.clone());
         }
-
-        match Self::fetch_from_url(client, url).await {
+        let target_url = &download_source.rewrite_url(url);
+        match Self::fetch_from_url(client, target_url).await {
             Ok(manifest) => {
                 manifest.save_cache(cache_dir, url, ttl);
                 Ok(manifest)
@@ -320,6 +330,7 @@ mod tests {
             dummy_url,
             temp.path(),
             Duration::from_secs(3600),
+            DownloadSource::Official,
         )
         .await
         .expect("should load from fresh cache without network");

@@ -81,7 +81,7 @@ impl SimpleComponent for InstancesPage {
         let list_page = ListPage::builder()
             .launch(ListPageInit {
                 mgr: Arc::clone(&init.mgr),
-                config: init.config,
+                config: Arc::clone(&init.config),
                 client: init.client.clone(),
                 dirs: init.dirs.clone(),
             })
@@ -93,6 +93,7 @@ impl SimpleComponent for InstancesPage {
         let create_page = CreatePage::builder()
             .launch(CreatePageInit {
                 mgr: init.mgr,
+                config: init.config,
                 client: init.client,
                 cache_dir: init.dirs.cache_dir().to_path_buf(),
             })

@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::{
-    Result, Rule, VersionEntry, VersionType, download::DownloadTask, native::NativeArchive,
+    Result, Rule, VersionEntry, VersionType, download::DownloadTask, mirror::DownloadSource,
+    native::NativeArchive,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,12 +191,20 @@ impl VersionMetadata {
         entry: &VersionEntry,
         instance_id: &str,
         versions_dir: &Path,
+        download_source: DownloadSource,
     ) -> Result<Self> {
         let path = versions_dir
             .join(instance_id)
             .join(format!("{instance_id}.json"));
 
-        crate::cache::fetch_verified_json(client, &entry.url, &entry.sha1, &entry.id, &path).await
+        crate::cache::fetch_verified_json(
+            client,
+            &download_source.rewrite_url(&entry.url),
+            &entry.sha1,
+            &entry.id,
+            &path,
+        )
+        .await
     }
 
     /// Return all libraries that are enabled on Linux.

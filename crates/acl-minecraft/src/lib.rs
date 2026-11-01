@@ -14,6 +14,7 @@ pub use error::{MinecraftError, Result};
 pub use manifest::{
     LatestVersions, VERSION_MANIFEST_URL, VersionEntry, VersionManifest, VersionType,
 };
+pub use mirror::DownloadSource;
 pub use native::{
     DEFAULT_NATIVE_EXCLUDE, NativeArchive, extract_all_natives, extract_native_archive,
 };
