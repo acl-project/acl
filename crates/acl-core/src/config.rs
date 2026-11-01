@@ -79,13 +79,13 @@ impl LauncherConfig {
         Ok(())
     }
 
-    /// Search for Java installations on the system; this updates the java list and modifies the default Java.
+    /// Search for Java installations on the system.
     pub fn search_java(&mut self) {
         let java_list = java::discover_java_installations();
+        info!("Discovered {} Java installation(s)", java_list.len());
 
         if java_list.is_empty() {
             warn!("No valid Java installation found during discovery");
-            return;
         }
 
         self.java_list = java_list;
