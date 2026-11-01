@@ -4,7 +4,7 @@ use tokio::{
 };
 use tracing::{debug, error, warn};
 
-use crate::{MinecraftError, Result, cache::verify_sha1};
+use crate::{MinecraftError, Result, cache::verify_sha1, mirror::DownloadSource};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadTask {
@@ -25,7 +25,11 @@ pub struct DownloadProgress {
     pub total_bytes: u64,
 }
 
-pub async fn download_and_verify_file(client: &reqwest::Client, task: &DownloadTask) -> Result<()> {
+pub async fn download_and_verify_file(
+    client: &reqwest::Client,
+    task: &DownloadTask,
+    download_source: DownloadSource,
+) -> Result<()> {
     if task.destination.exists() {
         match tokio::fs::read(&task.destination).await {
             Ok(bytes) => {
@@ -57,10 +61,12 @@ pub async fn download_and_verify_file(client: &reqwest::Client, task: &DownloadT
 
     const MAX_RETRIES: usize = 3;
 
+    let url = download_source.rewrite_url(&task.url);
+
     // Retry multiple times to prevent download failures caused by network fluctuations.
     for attempt in 1..=MAX_RETRIES {
         let result = async {
-            let response = client.get(&task.url).send().await?.error_for_status()?;
+            let response = client.get(&url).send().await?.error_for_status()?;
             let bytes = response.bytes().await?;
 
             verify_sha1(&bytes, &task.sha1, &task.name)?;
@@ -88,7 +94,7 @@ pub async fn download_and_verify_file(client: &reqwest::Client, task: &DownloadT
     }
 
     let Some(bytes) = downloaded_bytes else {
-        error!("Failed to download {}", task.url);
+        error!("Failed to download {}", url);
         let err = last_error.unwrap_or_else(|| MinecraftError::Io {
             path: task.destination.clone(),
             source: std::io::Error::other("Max retries exceeded without error"),
@@ -119,6 +125,7 @@ pub async fn download_and_verify_file(client: &reqwest::Client, task: &DownloadT
 pub async fn download_all(
     client: &reqwest::Client,
     tasks: Vec<DownloadTask>,
+    download_source: DownloadSource,
     max_concurrent: usize,
     progress_tx: Option<UnboundedSender<DownloadProgress>>,
 ) -> Result<()> {
@@ -154,7 +161,7 @@ pub async fn download_all(
                     path: task.destination.clone(),
                     source: std::io::Error::other(err),
                 })?;
-            download_and_verify_file(&client, &task).await?;
+            download_and_verify_file(&client, &task, download_source).await?;
             Ok::<u64, MinecraftError>(task.size)
         });
     }
@@ -306,7 +313,7 @@ mod tests {
         let client = reqwest::Client::new();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let result = download_all(&client, Vec::new(), 4, Some(tx)).await;
+        let result = download_all(&client, Vec::new(), DownloadSource::Official, 4, Some(tx)).await;
         assert!(result.is_ok());
 
         let progress = rx.recv().await.expect("should receive initial progress");
@@ -338,7 +345,7 @@ mod tests {
         };
 
         let client = reqwest::Client::new();
-        let result = download_and_verify_file(&client, &task).await;
+        let result = download_and_verify_file(&client, &task, DownloadSource::Official).await;
         assert!(result.is_ok());
     }
 
@@ -360,7 +367,7 @@ mod tests {
         };
 
         let client = test_client();
-        let result = download_and_verify_file(&client, &task).await;
+        let result = download_and_verify_file(&client, &task, DownloadSource::Official).await;
         assert!(result.is_ok());
 
         assert!(dest.exists());
@@ -387,7 +394,7 @@ mod tests {
         };
 
         let client = test_client();
-        let result = download_and_verify_file(&client, &task).await;
+        let result = download_and_verify_file(&client, &task, DownloadSource::Official).await;
         match result {
             Err(MinecraftError::HashMismatch {
                 target, expected, ..
@@ -436,7 +443,7 @@ mod tests {
         ];
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let res = download_all(&client, tasks, 2, Some(tx)).await;
+        let res = download_all(&client, tasks, DownloadSource::Official, 2, Some(tx)).await;
         assert!(res.is_ok());
 
         let mut final_progress = None;
@@ -475,7 +482,7 @@ mod tests {
             size: payload.len() as u64,
         };
 
-        let result = download_and_verify_file(&client, &task).await;
+        let result = download_and_verify_file(&client, &task, DownloadSource::Official).await;
         assert!(result.is_ok());
 
         assert!(dest.exists());
@@ -504,7 +511,7 @@ mod tests {
             size: 10,
         };
 
-        let result = download_and_verify_file(&client, &task).await;
+        let result = download_and_verify_file(&client, &task, DownloadSource::Official).await;
         assert!(result.is_err());
         assert!(!dest.exists());
 

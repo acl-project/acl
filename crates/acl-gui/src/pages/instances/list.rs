@@ -300,6 +300,7 @@ impl ListPage {
         let client = self.client.clone();
         let dirs = self.dirs.clone();
         let max_concurrent = self.config.read().max_concurrent_downloads;
+        let download_source = self.config.read().download_source;
 
         sender.command(move |out, shutdown| {
             shutdown
@@ -311,7 +312,7 @@ impl ListPage {
                             stage: InstallStage::FetchingMetadata,
                         });
                         let metadata = instance
-                            .fetch_metadata(&client, &entry, &dirs)
+                            .fetch_metadata(&client, &entry, &dirs, download_source)
                             .await
                             .map_err(|e| e.to_string())?;
 
@@ -324,6 +325,7 @@ impl ListPage {
                             &client,
                             &metadata.asset_index,
                             &dirs.assets_dir(),
+                            download_source,
                         )
                         .await
                         .map_err(|e| e.to_string())?;
@@ -359,6 +361,7 @@ impl ListPage {
                         acl_minecraft::download::download_all(
                             &client,
                             tasks,
+                            download_source,
                             max_concurrent,
                             Some(tx),
                         )

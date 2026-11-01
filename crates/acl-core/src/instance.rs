@@ -5,7 +5,9 @@ use std::{
 };
 
 use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
-use acl_minecraft::{AssetIndex, VersionEntry, VersionMetadata, download::DownloadTask};
+use acl_minecraft::{
+    AssetIndex, DownloadSource, VersionEntry, VersionMetadata, download::DownloadTask,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -320,11 +322,16 @@ impl Instance {
         client: &reqwest::Client,
         entry: &VersionEntry,
         dirs: &LauncherDirs,
+        download_source: DownloadSource,
     ) -> Result<VersionMetadata> {
-        Ok(
-            VersionMetadata::fetch_and_verify(client, entry, self.id(), &dirs.versions_dir())
-                .await?,
+        Ok(VersionMetadata::fetch_and_verify(
+            client,
+            entry,
+            self.id(),
+            &dirs.versions_dir(),
+            download_source,
         )
+        .await?)
     }
 
     /// Get the download tasks required for the current instance version.
@@ -869,7 +876,7 @@ mod tests {
 
         let client = reqwest::Client::new();
         let metadata = instance
-            .fetch_metadata(&client, &entry, &dirs)
+            .fetch_metadata(&client, &entry, &dirs, DownloadSource::Official)
             .await
             .expect("should load metadata from local cache");
 

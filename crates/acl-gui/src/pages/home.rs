@@ -225,6 +225,7 @@ impl HomePage {
                             &client,
                             &metadata.asset_index,
                             &dirs.assets_dir(),
+                            global_config.download_source,
                         )
                         .await
                         .map_err(|e| format!("Failed to verify asset index: {e}"))?;
@@ -234,6 +235,7 @@ impl HomePage {
                         download::download_all(
                             &client,
                             tasks,
+                            global_config.download_source,
                             global_config.max_concurrent_downloads,
                             None,
                         )

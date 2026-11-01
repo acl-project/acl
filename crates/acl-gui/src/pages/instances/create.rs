@@ -1,6 +1,6 @@
 use std::{cell::RefCell, path::PathBuf, rc::Rc, sync::Arc};
 
-use acl_core::{Instance, InstanceConfig, manager::InstanceManager};
+use acl_core::{Instance, InstanceConfig, LauncherConfig, manager::InstanceManager};
 use acl_minecraft::{VERSION_MANIFEST_URL, VersionEntry, VersionManifest, VersionType};
 use gtk::{glib::BoxedAnyObject, prelude::*};
 use libadwaita::prelude::*;
@@ -129,6 +129,7 @@ struct FilterState {
 
 pub struct CreatePageInit {
     pub mgr: Arc<SharedState<InstanceManager>>,
+    pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
     pub cache_dir: PathBuf,
 }
@@ -158,6 +159,7 @@ pub enum CreateCmdOutput {
 
 pub struct CreatePage {
     mgr: Arc<SharedState<InstanceManager>>,
+    config: Arc<SharedState<LauncherConfig>>,
     client: reqwest::Client,
     cache_dir: PathBuf,
 
@@ -221,10 +223,15 @@ impl CreatePage {
         self.is_loading = true;
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
-
+        let download_source = self.config.read().download_source;
         sender.oneshot_command(async move {
             let result = if force_refresh {
-                match VersionManifest::fetch_from_url(&client, VERSION_MANIFEST_URL).await {
+                match VersionManifest::fetch_from_url(
+                    &client,
+                    &download_source.rewrite_url(VERSION_MANIFEST_URL),
+                )
+                .await
+                {
                     Ok(manifest) => {
                         manifest.cache(&cache_dir);
                         Ok(manifest)
@@ -233,7 +240,7 @@ impl CreatePage {
                     Err(err) => Err(err.to_string()),
                 }
             } else {
-                VersionManifest::fetch_with_cache(&client, &cache_dir)
+                VersionManifest::fetch_with_cache(&client, &cache_dir, download_source)
                     .await
                     .map_err(|err| err.to_string())
             };
@@ -421,6 +428,7 @@ impl Component for CreatePage {
 
         let mut model = Self {
             mgr: init.mgr,
+            config: init.config,
             client: init.client,
             cache_dir: init.cache_dir,
             instance_name: String::new(),
