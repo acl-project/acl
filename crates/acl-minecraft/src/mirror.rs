@@ -98,6 +98,22 @@ impl DownloadSource {
             }
         }
     }
+
+    pub const ALL: &[Self] = &[Self::Official, Self::Bmclapi];
+
+    pub fn to_index(self) -> u32 {
+        match self {
+            Self::Official => 0,
+            Self::Bmclapi => 1,
+        }
+    }
+
+    pub fn from_index(index: u32) -> Self {
+        match index {
+            1 => Self::Bmclapi,
+            _ => Self::Official,
+        }
+    }
 }
 
 #[cfg(test)]

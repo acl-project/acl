@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use acl_core::LauncherConfig;
+use acl_minecraft::DownloadSource;
 use libadwaita::prelude::*;
 use relm4::{ComponentParts, SimpleComponent};
 use relm4::{SharedState, prelude::*};
@@ -32,6 +33,7 @@ pub enum SettingsInput {
     SelectDefaultJava(usize),
     ScanJava,
     SaveConfig, // Trigger a save when the mouse is released or focus is lost.
+    SelectDownloadSource(DownloadSource),
 }
 
 impl SettingsPage {
@@ -95,6 +97,7 @@ impl SimpleComponent for SettingsPage {
 
                     connect_clicked[sender] => move |_| {
                         sender.input(SettingsInput::ScanJava);
+                        sender.input(SettingsInput::SaveConfig);
                     },
                 },
 
@@ -165,6 +168,23 @@ impl SimpleComponent for SettingsPage {
 
             adw::PreferencesGroup {
                 set_title: "Downloads",
+
+                add = &adw::ComboRow {
+                    set_title: "Download Source",
+                    #[watch]
+                    set_subtitle: model.config.read().download_source.label(),
+                    set_model: Some(&download_source_model),
+                    #[watch]
+                    set_selected: model.config.read().download_source.to_index(),
+                    connect_selected_notify[sender] => move |row|{
+                        let idx = row.selected();
+                        if idx != gtk::INVALID_LIST_POSITION {
+                            sender.input(SettingsInput::SelectDownloadSource(DownloadSource::from_index(idx)));
+                            sender.input(SettingsInput::SaveConfig);
+                        }
+                    }
+                },
+
                 add = &adw::SpinRow {
                     set_title: "Max Concurrent Downloads",
                     set_subtitle: "How many files can be downloaded at the same time",
@@ -209,6 +229,12 @@ impl SimpleComponent for SettingsPage {
         sender: relm4::prelude::ComponentSender<Self>,
     ) -> relm4::prelude::ComponentParts<Self> {
         let java_model = gtk::StringList::new(&[]);
+        let download_source_model = gtk::StringList::new(
+            &DownloadSource::ALL
+                .iter()
+                .map(|s| s.label())
+                .collect::<Vec<_>>(),
+        );
         let mut model = SettingsPage {
             config,
             config_path,
@@ -256,13 +282,15 @@ impl SimpleComponent for SettingsPage {
             SettingsInput::ScanJava => {
                 self.config.write().search_java();
                 self.refresh_java_model();
-                self.save_config(&sender);
                 let _ = sender.output(SettingsMsg::ShowToast(
                     "Successfully refreshed the Java list.".to_owned(),
                 ));
             }
             SettingsInput::SaveConfig => {
                 self.save_config(&sender);
+            }
+            SettingsInput::SelectDownloadSource(source) => {
+                self.config.write().download_source = source;
             }
         }
     }
