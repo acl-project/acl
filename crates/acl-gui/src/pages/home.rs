@@ -1,4 +1,6 @@
+use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use acl_auth::AccountStore;
 use acl_core::launch::LaunchCommand;
@@ -6,6 +8,7 @@ use acl_core::manager::InstanceManager;
 use acl_core::{LauncherConfig, LauncherDirs, launch};
 use acl_minecraft::{AssetIndex, download};
 use gtk::prelude::*;
+use relm4::tokio::time::MissedTickBehavior;
 use relm4::{Component, ComponentParts, ComponentSender, RelmWidgetExt, tokio};
 use relm4::{SharedState, adw};
 
@@ -25,6 +28,8 @@ pub enum LaunchStage {
     PreparingRuntime,
 
     Launching,
+
+    WaitingWindow,
 }
 
 impl LaunchStage {
@@ -39,8 +44,9 @@ impl LaunchStage {
             LaunchStage::LoadingMetadata => 0.2,
             LaunchStage::CheckingJava => 0.3,
             LaunchStage::CheckingIntegrity => 0.6,
-            LaunchStage::PreparingRuntime => 0.85,
-            LaunchStage::Launching => 0.95,
+            LaunchStage::PreparingRuntime => 0.8,
+            LaunchStage::Launching => 0.9,
+            LaunchStage::WaitingWindow => 0.99,
         }
     }
     fn status_text(&self) -> Option<String> {
@@ -52,6 +58,7 @@ impl LaunchStage {
             LaunchStage::CheckingIntegrity => Some("Verifying game files...".to_string()),
             LaunchStage::PreparingRuntime => Some("Preparing runtime...".to_string()),
             LaunchStage::Launching => Some("Launching Minecraft...".to_string()),
+            LaunchStage::WaitingWindow => Some("Waiting for game window...".to_string()),
         }
     }
 }
@@ -112,6 +119,56 @@ impl HomePage {
 }
 
 impl HomePage {
+    /// Check whether the latest log contains "lwjgl version" or "lwjgl openal"
+    /// Returning true means the window has already appeared.
+    async fn check_window_appear(log_path: &Path, spawn_time: SystemTime) -> bool {
+        let is_new_log = tokio::fs::metadata(log_path)
+            .await
+            .and_then(|m| m.modified())
+            .is_ok_and(|mtime| mtime >= spawn_time);
+
+        if !is_new_log {
+            return false;
+        }
+
+        if let Ok(content) = tokio::fs::read_to_string(log_path).await {
+            let content = content.to_lowercase();
+            if content.contains("lwjgl version") || content.contains("lwjgl openal") {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    async fn wait_window(
+        game_dir: &Path,
+        spawn_time: SystemTime,
+        mut exit_rx: tokio::sync::oneshot::Receiver<()>,
+    ) {
+        let log_path = game_dir.join("logs").join("latest.log");
+
+        let time_out = tokio::time::sleep(Duration::from_secs(30));
+        tokio::pin!(time_out);
+
+        let mut ticker = tokio::time::interval(Duration::from_millis(200));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        ticker.tick().await;
+
+        loop {
+            tokio::select! {
+                _ = &mut time_out => break,
+                _ = &mut exit_rx => break, // The process has exited; end the wait immediately!
+                _ = ticker.tick() => {
+                    if Self::check_window_appear(&log_path, spawn_time).await {
+                        break;
+                    }
+
+                }
+            }
+        }
+    }
+
     fn launch(&mut self, sender: ComponentSender<Self>) {
         // Check whether an account is selected.
         let account = match self.accounts.read().active_account().cloned() {
@@ -215,13 +272,21 @@ impl HomePage {
                         // A background standalone task monitors the process exit.
                         let inst_name = instance.config.name.clone();
                         let out_bg = out.clone();
+
+                        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<()>();
+
                         tokio::spawn(async move {
                             let status = process.wait().await;
+                            let _ = exit_tx.send(());
                             let _ = out_bg.send(HomeCmdOutput::GameExited {
                                 name: inst_name,
                                 status,
                             });
                         });
+
+                        // Wait for the game window to appear.
+                        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::WaitingWindow));
+                        Self::wait_window(instance.game_dir(), SystemTime::now(), exit_rx).await;
 
                         Ok(())
                     }
