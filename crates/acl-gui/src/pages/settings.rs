@@ -256,6 +256,7 @@ impl SimpleComponent for SettingsPage {
             SettingsInput::ScanJava => {
                 self.config.write().search_java();
                 self.refresh_java_model();
+                self.save_config(&sender);
                 let _ = sender.output(SettingsMsg::ShowToast(
                     "Successfully refreshed the Java list.".to_owned(),
                 ));
