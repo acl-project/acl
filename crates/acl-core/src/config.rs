@@ -35,6 +35,21 @@ pub struct LauncherConfig {
 
 impl Default for LauncherConfig {
     fn default() -> Self {
+        Self {
+            min_memory_mb: 512,
+            max_memory_mb: 4096,
+            default_java: None,
+            java_list: Vec::new(),
+            max_concurrent_downloads: 16,
+            close_launcher_on_launch: false,
+            download_source: DownloadSource::Official,
+        }
+    }
+}
+
+impl LauncherConfig {
+    /// Recommended launcher configuration.
+    pub fn recommended() -> Self {
         let download_source = if is_mainland_china() {
             DownloadSource::Bmclapi
         } else {
@@ -49,7 +64,7 @@ impl Default for LauncherConfig {
             }
         };
 
-        let max_concurrent_downloads = 64.min(threads * 4);
+        let max_concurrent_downloads = threads.saturating_mul(4).clamp(16, 64);
 
         info!("Set max concurrent downloads {max_concurrent_downloads}");
 
@@ -63,13 +78,11 @@ impl Default for LauncherConfig {
             download_source,
         }
     }
-}
 
-impl LauncherConfig {
-    pub fn load_or_default(path: &Path) -> Result<Self> {
+    pub fn load_or_recommended(path: &Path) -> Result<Self> {
         if !path.exists() {
-            info!("Configuration file not found, using default settings");
-            let mut config: LauncherConfig = Self::default();
+            info!("Configuration file not found, using recommended settings");
+            let mut config: LauncherConfig = Self::recommended();
 
             // Search for Java once during initialization.
             config.search_java();
@@ -216,7 +229,7 @@ mod tests {
         assert!(!config_path.exists());
 
         let loaded =
-            LauncherConfig::load_or_default(&config_path).expect("failed to load or default");
+            LauncherConfig::load_or_recommended(&config_path).expect("failed to load or default");
         assert!(config_path.exists());
         assert_eq!(loaded.min_memory_mb, 512);
         assert_eq!(loaded.max_memory_mb, 4096);
@@ -241,7 +254,8 @@ mod tests {
         };
         initial.save(&config_path).expect("failed to save config");
 
-        let loaded = LauncherConfig::load_or_default(&config_path).expect("failed to load config");
+        let loaded =
+            LauncherConfig::load_or_recommended(&config_path).expect("failed to load config");
         assert_eq!(loaded.max_memory_mb, 6144);
         assert_eq!(loaded, initial);
     }
@@ -252,7 +266,7 @@ mod tests {
         let config_path = temp.path().join("config.toml");
         fs::write(&config_path, "invalid [ toml [[[ syntax").expect("failed to write invalid toml");
 
-        let result = LauncherConfig::load_or_default(&config_path);
+        let result = LauncherConfig::load_or_recommended(&config_path);
         assert!(matches!(result, Err(CoreError::ConfigParse(_))));
     }
 
@@ -274,7 +288,7 @@ mod tests {
         assert!(!tmp_path.exists());
 
         let loaded =
-            LauncherConfig::load_or_default(&config_path).expect("failed to load saved config");
+            LauncherConfig::load_or_recommended(&config_path).expect("failed to load saved config");
         assert_eq!(loaded.min_memory_mb, 2048);
     }
 

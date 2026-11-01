@@ -13,8 +13,7 @@ pub fn is_mainland_china() -> bool {
     if let Some(locale) = sys_locale::get_locale() {
         let normalized = locale.to_uppercase().replace('_', "-");
 
-        if normalized.ends_with("-CN") || normalized.contains("-CN-") || normalized == "ZH-HANS-CN"
-        {
+        if normalized.ends_with("-CN") || normalized.contains("-CN-") {
             return true;
         }
     }
@@ -23,7 +22,7 @@ pub fn is_mainland_china() -> bool {
     if let Ok(tz) = iana_time_zone::get_timezone()
         && (tz == "Asia/Shanghai" || tz == "Asia/Urumqi" || tz == "PRC")
     {
-        // The time zone is UTC+8 and the locale indicates mainland China.
+        // The time zone is UTC+8 indicates mainland China.
         return true;
     }
 

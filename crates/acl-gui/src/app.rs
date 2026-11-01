@@ -162,7 +162,7 @@ impl SimpleComponent for AppModel {
     ) -> relm4::prelude::ComponentParts<Self> {
         // Initialize launcher core
 
-        let config = match LauncherConfig::load_or_default(&dirs.config_file()) {
+        let config = match LauncherConfig::load_or_recommended(&dirs.config_file()) {
             Ok(cfg) => cfg,
             Err(err) => {
                 let err = format!("Failed to load config, using defaults: {err}");
