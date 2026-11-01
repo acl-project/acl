@@ -3,6 +3,7 @@ use std::{
     path::Path,
 };
 
+use acl_common::region::is_mainland_china;
 use acl_minecraft::mirror::DownloadSource;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -34,14 +35,32 @@ pub struct LauncherConfig {
 
 impl Default for LauncherConfig {
     fn default() -> Self {
+        let download_source = if is_mainland_china() {
+            DownloadSource::Bmclapi
+        } else {
+            DownloadSource::Official
+        };
+
+        let threads = match std::thread::available_parallelism() {
+            Ok(count) => count.get(),
+            Err(err) => {
+                warn!("Failed to get thread count: {err}");
+                1
+            }
+        };
+
+        let max_concurrent_downloads = 64.min(threads * 4);
+
+        info!("Set max concurrent downloads {max_concurrent_downloads}");
+
         Self {
             min_memory_mb: 512,
             max_memory_mb: 4096,
             default_java: None,
             java_list: Vec::new(),
-            max_concurrent_downloads: 16,
+            max_concurrent_downloads,
             close_launcher_on_launch: false,
-            download_source: DownloadSource::Official,
+            download_source,
         }
     }
 }

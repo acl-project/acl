@@ -2,3 +2,7 @@
 name = "acl-common"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+sys-locale = { workspace = true }
+iana-time-zone = { workspace = true }
