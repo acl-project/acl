@@ -3,6 +3,7 @@ pub mod cache;
 pub mod download;
 pub mod error;
 pub mod manifest;
+pub mod mirror;
 pub mod native;
 pub mod rule;
 pub mod version;
