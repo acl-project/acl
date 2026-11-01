@@ -51,3 +51,5 @@ md-5 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 glob = "0.3"
 sysinfo = "0.40"
+sys-locale = "0.3"
+iana-time-zone = "0.1"

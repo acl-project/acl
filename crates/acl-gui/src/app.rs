@@ -87,6 +87,7 @@ pub struct AppModel {
 pub enum AppMsg {
     Navigate(NavPage),
     ShowToast(String),
+    Quit,
 }
 
 #[relm4::component(pub)]
@@ -161,7 +162,7 @@ impl SimpleComponent for AppModel {
     ) -> relm4::prelude::ComponentParts<Self> {
         // Initialize launcher core
 
-        let config = match LauncherConfig::load_or_default(&dirs.config_file()) {
+        let config = match LauncherConfig::load_or_recommended(&dirs.config_file()) {
             Ok(cfg) => cfg,
             Err(err) => {
                 let err = format!("Failed to load config, using defaults: {err}");
@@ -222,6 +223,7 @@ impl SimpleComponent for AppModel {
             })
             .forward(sender.input_sender(), |msg| match msg {
                 HomeOutput::ShowToast(message) => AppMsg::ShowToast(message),
+                HomeOutput::RequestClose => AppMsg::Quit,
             });
         let instances_page = InstancesPage::builder()
             .launch(InstancesInit {
@@ -287,6 +289,9 @@ impl SimpleComponent for AppModel {
             AppMsg::ShowToast(msg) => {
                 let toast = adw::Toast::builder().title(msg).timeout(3).build();
                 self.toast_overlay.add_toast(toast);
+            }
+            AppMsg::Quit => {
+                relm4::main_application().quit();
             }
         }
     }

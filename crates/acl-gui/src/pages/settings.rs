@@ -193,7 +193,7 @@ impl SimpleComponent for SettingsPage {
                     set_adjustment: Some(&gtk::Adjustment::new(
                         model.config.read().max_concurrent_downloads as f64,
                         1.0,
-                        32.0,
+                        256.0,
                         1.0,
                         8.0,
                         0.0
@@ -211,6 +211,7 @@ impl SimpleComponent for SettingsPage {
                 set_title: "Launcher",
                 add = &adw::SwitchRow {
                     set_title: "Close Launcher On Launch",
+                    #[watch]
                     set_active: model.config.read().close_launcher_on_launch,
 
                     connect_active_notify[sender] => move |checkbox| {

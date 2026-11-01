@@ -67,6 +67,7 @@ impl LaunchStage {
 #[derive(Debug)]
 pub enum HomeOutput {
     ShowToast(String),
+    RequestClose,
 }
 
 #[derive(Debug)]
@@ -469,6 +470,11 @@ impl Component for HomePage {
                             && let Err(err) = ins.update_last_play()
                         {
                             warn!("Failed to update instance last play time: {err}");
+                        }
+
+                        // Only exit the launcher when the game starts successfully.
+                        if self.config.read().close_launcher_on_launch {
+                            let _ = sender.output(HomeOutput::RequestClose);
                         }
                     }
                 }
