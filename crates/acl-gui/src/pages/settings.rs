@@ -211,6 +211,7 @@ impl SimpleComponent for SettingsPage {
                 set_title: "Launcher",
                 add = &adw::SwitchRow {
                     set_title: "Close Launcher On Launch",
+                    #[watch]
                     set_active: model.config.read().close_launcher_on_launch,
 
                     connect_active_notify[sender] => move |checkbox| {
