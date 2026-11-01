@@ -258,11 +258,9 @@ impl VersionMetadata {
                 continue;
             };
 
-            if let Some(artifact) = &downloads.artifact {
-                if !seen_hashed.insert(artifact.sha1.clone()) {
-                    continue;
-                }
-
+            if let Some(artifact) = &downloads.artifact
+                && seen_hashed.insert(artifact.sha1.clone())
+            {
                 let rel_path = lib.artifact_relative_path(artifact);
                 if let Some(rel_path) = rel_path {
                     tasks.push(DownloadTask {
@@ -279,6 +277,9 @@ impl VersionMetadata {
                     );
                 }
             }
+
+            // Mojang's braindead legacy design: a library is written twice and only the second entry has native download URLs.
+            // Therefore, even if the primary artifact is a duplicate, we still need to process the classifiers below.
 
             if let (Some(natives), Some(classifiers)) = (&lib.natives, &downloads.classifiers)
                 && let Some(classifier_key) = natives.get("linux")
