@@ -92,8 +92,11 @@ impl VersionManifest {
         ttl: Duration,
         download_source: DownloadSource,
     ) -> Result<Self> {
-        // Use the official URL to ensure the cache remains valid.
-        let file_name = cache_key_for_url(url);
+        // Store the manifest cache separately for each download source.
+        // This ensures that when a download source has not synchronized the latest version, the version list will not show unsupported versions.
+        let url = download_source.rewrite_url(url);
+
+        let file_name = cache_key_for_url(&url);
 
         let cache_path = cache_dir.join(file_name);
 
@@ -109,10 +112,9 @@ impl VersionManifest {
             );
             return Ok(entry.data.clone());
         }
-        let target_url = &download_source.rewrite_url(url);
-        match Self::fetch_from_url(client, target_url).await {
+        match Self::fetch_from_url(client, &url).await {
             Ok(manifest) => {
-                manifest.save_cache(cache_dir, url, ttl);
+                manifest.save_cache(cache_dir, &url, ttl);
                 Ok(manifest)
             }
 
