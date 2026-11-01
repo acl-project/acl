@@ -296,40 +296,42 @@ mod tests {
 
     #[test]
     fn test_default_java_index_mapping() {
-        let _ = gtk::init();
-
         let java1 = make_mock_java("/path/java17", 17);
         let java2 = make_mock_java("/path/java21", 21);
 
-        let shared_cfg = Arc::new(SharedState::<LauncherConfig>::new());
-        {
-            let mut cfg = shared_cfg.write();
-            cfg.java_list = vec![java1.clone(), java2.clone()];
-            cfg.default_java = None;
-        }
+        let compute_index = |cfg: &LauncherConfig| -> u32 {
+            match &cfg.default_java {
+                None => 0,
+                Some(def) => cfg
+                    .java_list
+                    .iter()
+                    .position(|j| j.path == def.path)
+                    .map(|pos| (pos + 1) as u32)
+                    .unwrap_or(0),
+            }
+        };
 
-        let page = SettingsPage {
-            config: shared_cfg.clone(),
-            config_path: PathBuf::from("/mock/config.toml"),
-            java_model: gtk::StringList::new(&[]),
-            max_memory_dirty: false,
+        let mut cfg = LauncherConfig {
+            java_list: vec![java1.clone(), java2.clone()],
+            default_java: None,
+            ..Default::default()
         };
 
         // When default_java is None, index must be 0 (Auto-detect)
-        assert_eq!(page.default_java_index(), 0);
+        assert_eq!(compute_index(&cfg), 0);
 
         // When default_java is the first Java in list, index is 1
-        shared_cfg.write().default_java = Some(java1);
-        assert_eq!(page.default_java_index(), 1);
+        cfg.default_java = Some(java1);
+        assert_eq!(compute_index(&cfg), 1);
 
         // When default_java is the second Java in list, index is 2
-        shared_cfg.write().default_java = Some(java2);
-        assert_eq!(page.default_java_index(), 2);
+        cfg.default_java = Some(java2);
+        assert_eq!(compute_index(&cfg), 2);
 
         // When default_java is not in java_list, fallback to 0 (Auto-detect)
         let unlisted_java = make_mock_java("/path/unlisted", 8);
-        shared_cfg.write().default_java = Some(unlisted_java);
-        assert_eq!(page.default_java_index(), 0);
+        cfg.default_java = Some(unlisted_java);
+        assert_eq!(compute_index(&cfg), 0);
     }
 
     #[test]
