@@ -3,8 +3,6 @@ use serde::Serialize;
 
 use crate::Account;
 
-// What a terrible company!
-// It’s comparable to the Journey to the West.
 pub const MICROSOFT_OAUTH_AUTHORIZE_URL: &str = "https://login.live.com/oauth20_authorize.srf";
 pub const MICROSOFT_OAUTH_TOKEN_URL: &str = "https://login.live.com/oauth20_token.srf";
 pub const XBOXLIVE_AUTHORIZE_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
@@ -131,7 +129,7 @@ pub struct MicrosoftTokenBundle {
     /// Minecraft game access token (valid for 24 hours).
     pub access_token: String,
     /// Expiration time of the access token.
-    pub expires_at: u64,
+    pub expires_at: i64,
 }
 
 impl MicrosoftTokenBundle {
@@ -140,7 +138,7 @@ impl MicrosoftTokenBundle {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
+            .as_secs() as i64;
         self.expires_at <= now + 300
     }
 }

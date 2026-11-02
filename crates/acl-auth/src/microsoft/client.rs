@@ -150,3 +150,41 @@ pub async fn fetch_minecraft_profile(
     let profile: MinecraftProfileResponse = res.json().await?;
     Ok(profile)
 }
+
+pub async fn refresh_ms_token(
+    client: &reqwest::Client,
+    token_url: &str,
+    client_id: &str,
+    refresh_token: &str,
+) -> Result<MsTokenResponse> {
+    let params = [
+        ("client_id", client_id),
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+        ("scope", "XboxLive.signin offline_access"),
+    ];
+
+    let res = client.post(token_url).form(&params).send().await?;
+
+    let status = res.status();
+    if !status.is_success() {
+        let body_text = res.text().await.unwrap_or_default();
+
+        // Check whether the refresh token has expired.
+        if status == reqwest::StatusCode::BAD_REQUEST
+            && let Ok(err) = serde_json::from_str::<MsTokenError>(&body_text)
+            && err.error == "invalid_grant"
+        {
+            return Err(AuthError::RefreshTokenExpired);
+        }
+
+        return Err(AuthError::TokenRequestFailed {
+            status: status.as_u16(),
+            message: body_text,
+        });
+    }
+
+    let token: MsTokenResponse = res.json().await?;
+
+    Ok(token)
+}

@@ -56,6 +56,9 @@ pub enum AuthError {
 
     #[error("Socket I/O error: {0}")]
     Socket(#[from] std::io::Error),
+
+    #[error("Microsoft refresh token is expired")]
+    RefreshTokenExpired,
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;
