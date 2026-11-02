@@ -29,6 +29,30 @@ pub enum AuthError {
 
     #[error("Failed to parse JSON: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Network request failed: {0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("Parse url failed: {0}")]
+    UrlParse(#[from] url::ParseError),
+
+    #[error("OAuth login timed out waiting for browser callback")]
+    OAuthTimeout,
+
+    #[error("OAuth state mismatch (expected '{expected}', got '{actual}')")]
+    StateMismatch { expected: String, actual: String },
+
+    #[error("OAuth callback returned error '{error}': {description}")]
+    OAuthCallbackError { error: String, description: String },
+
+    #[error("Invalid OAuth callback request: {reason}")]
+    InvalidCallbackRequest { reason: String },
+
+    #[error("Microsoft OAuth token request failed ({status}): {message}")]
+    TokenRequestFailed { status: u16, message: String },
+
+    #[error("Socket I/O error: {0}")]
+    Socket(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;
