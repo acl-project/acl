@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::error::{MinecraftError, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha1::{Digest, Sha1};

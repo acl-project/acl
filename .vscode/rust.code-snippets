@@ -1,0 +1,12 @@
+{
+    "SPDX GPL Header": {
+        "prefix": ["lic", "spdx", "header"],
+        "body": [
+            "// SPDX-FileCopyrightText: ${CURRENT_YEAR} The Adwaita Craft Launcher Authors",
+            "// SPDX-License-Identifier: GPL-3.0-or-later",
+            "",
+            "$0"
+        ],
+        "description": "Insert standard SPDX license header"
+    }
+}

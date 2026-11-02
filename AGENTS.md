@@ -35,6 +35,7 @@ When reviewing the code, follow these guidelines:
 - Verify that changes are being made on a branch other than `main`.
 - Ensure that branch names follow the `feat/` or `fix/` naming conventions, as appropriate.
 - Production code must not contain code that can cause crashes, such as unwrap/expect/panic!, direct slice indexing, raw arithmetic, etc.
+- Check for any files that are missing a copyright notice, or whose copyright notice format is incorrect.
 
 # Mandatory Pre-Delivery Verification
 

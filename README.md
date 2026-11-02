@@ -41,7 +41,7 @@ sudo pacman -S --needed base-devel pkgconf gtk4 libadwaita openssl libsecret
 Clone the repository:
 
 ```bash
-git clone https://github.com/zhenyan121/acl.git
+git clone https://github.com/acl-project/acl.git
 cd acl
 ```
 

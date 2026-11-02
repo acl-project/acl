@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use std::{io::Write, path::Path};
 
 pub fn write_atomic(path: impl AsRef<Path>, bytes: &[u8]) -> std::io::Result<()> {

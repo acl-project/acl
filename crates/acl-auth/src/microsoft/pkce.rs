@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
 use rand::{RngCore, rngs::OsRng};
