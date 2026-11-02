@@ -1,0 +1,193 @@
+use std::collections::HashMap;
+
+use rand::RngCore;
+use reqwest::Url;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
+
+use crate::AuthError;
+use crate::Result;
+use crate::microsoft::pkce::PkcePair;
+use crate::microsoft::types::*;
+
+pub struct MicrosoftLoginSession {
+    pub auth_url: Url,
+    pub redirect_uri: String,
+    pub state: String,
+    pub pkce: PkcePair,
+    pub client_id: String,
+    pub listener: tokio::net::TcpListener,
+}
+
+impl MicrosoftLoginSession {
+    pub fn build_authorize_url(
+        client_id: &str,
+        redirect_uri: &str,
+        state: &str,
+        code_challenge: &str,
+    ) -> Result<Url> {
+        let mut url = Url::parse(MICROSOFT_OAUTH_AUTHORIZE_URL)?;
+        url.query_pairs_mut()
+            .append_pair("client_id", client_id)
+            .append_pair("response_type", "code")
+            .append_pair("redirect_uri", redirect_uri)
+            .append_pair("scope", "XboxLive.signin offline_access")
+            .append_pair("state", state)
+            .append_pair("code_challenge", code_challenge)
+            .append_pair("code_challenge_method", "S256");
+
+        Ok(url)
+    }
+
+    // Generate a 16-byte secure random hex string as the state.
+    pub fn build_state() -> String {
+        let mut state_bytes = [0u8; 16];
+        rand::rngs::OsRng.fill_bytes(&mut state_bytes);
+        state_bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
+    pub async fn start(client_id: &str) -> Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let redirect_uri = format!("http://localhost:{port}/callback");
+
+        let pkce = PkcePair::generate();
+        let state = Self::build_state();
+
+        let auth_url =
+            Self::build_authorize_url(client_id, &redirect_uri, &state, &pkce.challenge)?;
+
+        Ok(Self {
+            auth_url,
+            redirect_uri,
+            state,
+            pkce,
+            client_id: client_id.to_string(),
+            listener,
+        })
+    }
+
+    pub async fn wait_for_callback(&self) -> Result<String> {
+        let (mut stream, _) = self.listener.accept().await?;
+
+        let mut buf = [0u8; 4096];
+        let n = stream.read(&mut buf).await?;
+        let request_str = String::from_utf8_lossy(&buf[..n]);
+
+        let first_line = request_str.lines().next().unwrap_or_default();
+        let mut parts = first_line.split_whitespace();
+        let method = parts.next().unwrap_or_default();
+        let uri = parts.next().unwrap_or("/");
+
+        // Any non-GET method is directly invalid.
+        if method != "GET" {
+            return Err(AuthError::InvalidCallbackRequest {
+                reason: format!("Expected HTTP GET, got {method}"),
+            });
+        }
+
+        let parsed_url = Url::parse(&format!("http://localhost{uri}"))?;
+        // Must be "/callback".
+        if parsed_url.path() != "/callback" {
+            return Err(AuthError::InvalidCallbackRequest {
+                reason: format!("Unexpected path: {}", parsed_url.path()),
+            });
+        }
+
+        let query: HashMap<String, String> = parsed_url.query_pairs().into_owned().collect();
+
+        if let Some(err) = query.get("error") {
+            let desc = query.get("error_description").cloned().unwrap_or_default();
+            return Err(AuthError::OAuthCallbackError {
+                error: err.clone(),
+                description: desc,
+            });
+        }
+
+        match query.get("state") {
+            Some(state) if state == &self.state => {}
+            Some(state) => {
+                return Err(AuthError::StateMismatch {
+                    expected: self.state.clone(),
+                    actual: state.clone(),
+                });
+            }
+            None => {
+                return Err(AuthError::InvalidCallbackRequest {
+                    reason: "Missing 'state' parameter in callback".into(),
+                });
+            }
+        }
+
+        let code = query
+            .get("code")
+            .cloned()
+            .ok_or_else(|| AuthError::InvalidCallbackRequest {
+                reason: "Missing 'code' parameter in callback".into(),
+            })?;
+
+        // Return a simple HTTP page to let the user return to the launcher.
+        let body = "<html><body><h2>Login successful!</h2><p>You can close this tab now.</p></body></html>";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/html; charset=utf-8\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\r\n\
+         {}",
+            body.len(),
+            body
+        );
+
+        let _ = stream.write_all(response.as_bytes()).await;
+        let _ = stream.flush().await;
+
+        Ok(code)
+    }
+
+    pub async fn exchange_code_for_ms_token(
+        &self,
+        client: &reqwest::Client,
+        token_url: &str,
+        code: &str,
+    ) -> Result<MsTokenResponse> {
+        let params = [
+            ("client_id", self.client_id.clone()),
+            ("grant_type", "authorization_code".to_owned()),
+            ("code", code.to_owned()),
+            ("redirect_uri", self.redirect_uri.clone()),
+            ("code_verifier", self.pkce.verifier.clone()),
+        ];
+
+        let res = client.post(token_url).form(&params).send().await?;
+
+        let status = res.status();
+        if !status.is_success() {
+            let status_code = status.as_u16();
+            let body_text = res.text().await.unwrap_or_default();
+
+            let messgae = if let Ok(err) = serde_json::from_str::<MsTokenError>(&body_text) {
+                match err.error_description {
+                    Some(desc) => format!("{}: {desc}", err.error),
+                    None => err.error,
+                }
+            } else if !body_text.trim().is_empty() {
+                body_text
+            } else {
+                status
+                    .canonical_reason()
+                    .unwrap_or("Unknown error")
+                    .to_string()
+            };
+
+            return Err(AuthError::TokenRequestFailed {
+                status: status_code,
+                message: messgae,
+            });
+        }
+
+        let token: MsTokenResponse = res.json().await?;
+
+        Ok(token)
+    }
+}
