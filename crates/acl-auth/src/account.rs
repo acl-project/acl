@@ -173,4 +173,28 @@ mod tests {
         let cloned = account.clone();
         assert_eq!(account, cloned);
     }
+
+    #[test]
+    fn test_new_microsoft_valid_hyphenated_uuid() {
+        let uuid_str = "550e8400-e29b-41d4-a716-446655440000";
+        let account = Account::new_microsoft("Steve", uuid_str).unwrap();
+        assert_eq!(account.username, "Steve");
+        assert_eq!(account.account_type, AccountType::Microsoft);
+        assert_eq!(account.uuid.to_string(), uuid_str);
+    }
+
+    #[test]
+    fn test_new_microsoft_valid_simple_hex_uuid() {
+        let hex_str = "4566e69fc90748ee8d71d7ba5aaafced";
+        let account = Account::new_microsoft("Alex", hex_str).unwrap();
+        assert_eq!(account.username, "Alex");
+        assert_eq!(account.account_type, AccountType::Microsoft);
+        assert_eq!(account.uuid.simple().to_string(), hex_str);
+    }
+
+    #[test]
+    fn test_new_microsoft_invalid_uuid() {
+        let err = Account::new_microsoft("Steve", "not-a-valid-uuid").unwrap_err();
+        assert!(matches!(err, AuthError::Uuid(_)));
+    }
 }

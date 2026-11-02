@@ -153,3 +153,109 @@ pub struct MicrosoftRefreshResult {
     pub username: String,
     pub uuid: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_token_bundle_is_expired() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        // Valid for 1 hour (> 300s buffer) -> not expired
+        let future_bundle = MicrosoftTokenBundle {
+            refresh_token: "ref".into(),
+            access_token: "acc".into(),
+            expires_at: now.saturating_add(3600),
+        };
+        assert!(!future_bundle.is_expired());
+
+        // Expires in 200 seconds (within 300s buffer) -> considered expired
+        let buffer_bundle = MicrosoftTokenBundle {
+            refresh_token: "ref".into(),
+            access_token: "acc".into(),
+            expires_at: now.saturating_add(200),
+        };
+        assert!(buffer_bundle.is_expired());
+
+        // Already expired in the past -> expired
+        let past_bundle = MicrosoftTokenBundle {
+            refresh_token: "ref".into(),
+            access_token: "acc".into(),
+            expires_at: now.saturating_sub(100),
+        };
+        assert!(past_bundle.is_expired());
+    }
+
+    #[test]
+    fn test_serde_ms_token_response() {
+        let json = r#"{
+            "access_token": "ms_access_123",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "XboxLive.signin offline_access",
+            "refresh_token": "ms_refresh_456",
+            "user_id": "user_789"
+        }"#;
+
+        let res: MsTokenResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(res.access_token, "ms_access_123");
+        assert_eq!(res.expires_in, 3600);
+        assert_eq!(res.refresh_token.as_deref(), Some("ms_refresh_456"));
+    }
+
+    #[test]
+    fn test_serde_xbox_responses() {
+        let auth_json = r#"{
+            "IssueInstant": "2026-11-02T12:00:00Z",
+            "NotAfter": "2026-11-03T12:00:00Z",
+            "Token": "xbl_token_xyz",
+            "DisplayClaims": {
+                "xui": [
+                    { "uhs": "123456789" }
+                ]
+            }
+        }"#;
+
+        let res: XboxLiveAuthResponse = serde_json::from_str(auth_json).unwrap();
+        assert_eq!(res.token, "xbl_token_xyz");
+        assert_eq!(res.display_claims.xui.len(), 1);
+        assert_eq!(res.display_claims.xui[0].uhs, "123456789");
+
+        let err_json = r#"{
+            "Identity": "0",
+            "XErr": 2148916238,
+            "Message": "Child account",
+            "Redirect": "https://start.ui.xboxlive.com"
+        }"#;
+
+        let err_res: XboxErrorResponse = serde_json::from_str(err_json).unwrap();
+        assert_eq!(err_res.xerr, Some(2148916238));
+        assert_eq!(err_res.message.as_deref(), Some("Child account"));
+    }
+
+    #[test]
+    fn test_serde_minecraft_responses() {
+        let login_json = r#"{
+            "username": "4566e69fc90748ee8d71d7ba5aaafced",
+            "roles": [],
+            "access_token": "mc_token_abc",
+            "token_type": "Bearer",
+            "expires_in": 86400
+        }"#;
+        let login_res: MinecraftLoginResponse = serde_json::from_str(login_json).unwrap();
+        assert_eq!(login_res.access_token, "mc_token_abc");
+        assert_eq!(login_res.expires_in, 86400);
+
+        let profile_json = r#"{
+            "id": "4566e69fc90748ee8d71d7ba5aaafced",
+            "name": "Steve"
+        }"#;
+        let profile_res: MinecraftProfileResponse = serde_json::from_str(profile_json).unwrap();
+        assert_eq!(profile_res.id, "4566e69fc90748ee8d71d7ba5aaafced");
+        assert_eq!(profile_res.name, "Steve");
+    }
+}

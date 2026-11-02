@@ -99,4 +99,54 @@ mod tests {
         let expected_json_msg = format!("Failed to parse JSON: {json_err}");
         assert_eq!(AuthError::Json(json_err).to_string(), expected_json_msg);
     }
+
+    #[test]
+    fn test_auth_error_display_new_variants() {
+        assert_eq!(
+            AuthError::OAuthTimeout.to_string(),
+            "OAuth login timed out waiting for browser callback"
+        );
+        assert_eq!(
+            AuthError::StateMismatch {
+                expected: "abc".to_string(),
+                actual: "xyz".to_string(),
+            }
+            .to_string(),
+            "OAuth state mismatch (expected 'abc', got 'xyz')"
+        );
+        assert_eq!(
+            AuthError::OAuthCallbackError {
+                error: "access_denied".to_string(),
+                description: "user cancelled".to_string(),
+            }
+            .to_string(),
+            "OAuth callback returned error 'access_denied': user cancelled"
+        );
+        assert_eq!(
+            AuthError::InvalidCallbackRequest {
+                reason: "unexpected path".to_string(),
+            }
+            .to_string(),
+            "Invalid OAuth callback request: unexpected path"
+        );
+        assert_eq!(
+            AuthError::TokenRequestFailed {
+                status: 400,
+                message: "bad request".to_string(),
+            }
+            .to_string(),
+            "Microsoft OAuth token request failed (400): bad request"
+        );
+        assert_eq!(
+            AuthError::RefreshTokenExpired.to_string(),
+            "Microsoft refresh token is expired"
+        );
+        assert_eq!(
+            AuthError::UrlParse(url::ParseError::EmptyHost).to_string(),
+            "Failed to parse URL: empty host"
+        );
+        let uuid_err = uuid::Uuid::parse_str("invalid").unwrap_err();
+        let expected_uuid_msg = format!("Uuid error: {uuid_err}");
+        assert_eq!(AuthError::Uuid(uuid_err).to_string(), expected_uuid_msg);
+    }
 }

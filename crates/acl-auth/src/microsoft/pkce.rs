@@ -34,3 +34,40 @@ impl PkcePair {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pkce_generation_properties() {
+        let pkce = PkcePair::generate();
+
+        // RFC 7636: verifier must be between 43 and 128 characters
+        assert!((43..=128).contains(&pkce.verifier.len()));
+        assert_eq!(pkce.verifier.len(), 86);
+
+        // Verifier must only contain base64url unpadded characters
+        assert!(
+            pkce.verifier
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
+
+        // Challenge must be SHA256 of verifier, Base64URL-encoded (32 bytes = 43 chars unpadded)
+        assert_eq!(pkce.challenge.len(), 43);
+        let mut hasher = Sha256::new();
+        hasher.update(pkce.verifier.as_bytes());
+        let expected_challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
+        assert_eq!(pkce.challenge, expected_challenge);
+    }
+
+    #[test]
+    fn test_pkce_uniqueness() {
+        let pkce1 = PkcePair::generate();
+        let pkce2 = PkcePair::generate();
+
+        assert_ne!(pkce1.verifier, pkce2.verifier);
+        assert_ne!(pkce1.challenge, pkce2.challenge);
+    }
+}

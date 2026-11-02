@@ -220,3 +220,165 @@ impl MicrosoftLoginSession {
         Ok(token)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
+    #[test]
+    fn test_build_authorize_url() {
+        let url = MicrosoftLoginSession::build_authorize_url(
+            "test_client_id",
+            "http://localhost:1234/callback",
+            "test_state",
+            "test_challenge",
+        )
+        .unwrap();
+
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("login.live.com"));
+        assert_eq!(url.path(), "/oauth20_authorize.srf");
+
+        let pairs: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            pairs.get("client_id").map(|s| s.as_str()),
+            Some("test_client_id")
+        );
+        assert_eq!(pairs.get("response_type").map(|s| s.as_str()), Some("code"));
+        assert_eq!(
+            pairs.get("redirect_uri").map(|s| s.as_str()),
+            Some("http://localhost:1234/callback")
+        );
+        assert_eq!(
+            pairs.get("scope").map(|s| s.as_str()),
+            Some("XboxLive.signin offline_access")
+        );
+        assert_eq!(pairs.get("state").map(|s| s.as_str()), Some("test_state"));
+        assert_eq!(
+            pairs.get("code_challenge").map(|s| s.as_str()),
+            Some("test_challenge")
+        );
+        assert_eq!(
+            pairs.get("code_challenge_method").map(|s| s.as_str()),
+            Some("S256")
+        );
+    }
+
+    #[test]
+    fn test_build_state() {
+        let state1 = MicrosoftLoginSession::build_state();
+        let state2 = MicrosoftLoginSession::build_state();
+
+        assert_eq!(state1.len(), 32);
+        assert!(state1.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(state1, state2);
+    }
+
+    #[tokio::test]
+    async fn test_callback_flow_success() {
+        let session = MicrosoftLoginSession::start("dummy_client_id")
+            .await
+            .unwrap();
+        let port = session.listener.local_addr().unwrap().port();
+        let state = session.state.clone();
+
+        let client_task = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+                .await
+                .unwrap();
+            let req = format!(
+                "GET /callback?code=mock_code_123&state={state} HTTP/1.1\r\nHost: localhost\r\n\r\n"
+            );
+            stream.write_all(req.as_bytes()).await.unwrap();
+
+            let mut resp = [0u8; 1024];
+            let n = stream.read(&mut resp).await.unwrap();
+            let resp_bytes = resp.get(..n).unwrap_or_default();
+            let resp_str = String::from_utf8_lossy(resp_bytes);
+            assert!(resp_str.starts_with("HTTP/1.1 200 OK"));
+        });
+
+        let code = session.wait_for_callback().await.unwrap();
+        assert_eq!(code, "mock_code_123");
+        client_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_callback_flow_ignores_favicon_and_succeeds() {
+        let session = MicrosoftLoginSession::start("dummy_client_id")
+            .await
+            .unwrap();
+        let port = session.listener.local_addr().unwrap().port();
+        let state = session.state.clone();
+
+        let client_task = tokio::spawn(async move {
+            // Send favicon request
+            let mut stream1 = TcpStream::connect(format!("127.0.0.1:{port}"))
+                .await
+                .unwrap();
+            stream1
+                .write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .await
+                .unwrap();
+            let mut resp1 = [0u8; 256];
+            let n1 = stream1.read(&mut resp1).await.unwrap();
+            let resp1_bytes = resp1.get(..n1).unwrap_or_default();
+            let resp1_str = String::from_utf8_lossy(resp1_bytes);
+            assert!(resp1_str.starts_with("HTTP/1.1 404 Not Found"));
+            drop(stream1);
+
+            // Send actual callback
+            let mut stream2 = TcpStream::connect(format!("127.0.0.1:{port}"))
+                .await
+                .unwrap();
+            let req = format!(
+                "GET /callback?code=real_code_456&state={state} HTTP/1.1\r\nHost: localhost\r\n\r\n"
+            );
+            stream2.write_all(req.as_bytes()).await.unwrap();
+        });
+
+        let code = session.wait_for_callback().await.unwrap();
+        assert_eq!(code, "real_code_456");
+        client_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_callback_flow_state_mismatch() {
+        let session = MicrosoftLoginSession::start("dummy_client_id")
+            .await
+            .unwrap();
+        let port = session.listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+                .await
+                .unwrap();
+            let req = "GET /callback?code=mock_code&state=wrong_state HTTP/1.1\r\nHost: localhost\r\n\r\n";
+            let _ = stream.write_all(req.as_bytes()).await;
+        });
+
+        let err = session.wait_for_callback().await.unwrap_err();
+        assert!(matches!(err, AuthError::StateMismatch { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_callback_flow_error_response() {
+        let session = MicrosoftLoginSession::start("dummy_client_id")
+            .await
+            .unwrap();
+        let port = session.listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+                .await
+                .unwrap();
+            let req = "GET /callback?error=access_denied&error_description=User+cancelled HTTP/1.1\r\nHost: localhost\r\n\r\n";
+            let _ = stream.write_all(req.as_bytes()).await;
+        });
+
+        let err = session.wait_for_callback().await.unwrap_err();
+        assert!(matches!(err, AuthError::OAuthCallbackError { .. }));
+    }
+}
