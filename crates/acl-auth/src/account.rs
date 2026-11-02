@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::error::{AuthError, Result};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
@@ -37,6 +39,14 @@ impl Account {
             uuid,
             username,
             account_type: AccountType::Offline,
+        })
+    }
+
+    pub fn new_microsoft(username: impl Into<String>, uuid: impl Into<String>) -> Result<Self> {
+        Ok(Self {
+            uuid: Uuid::from_str(&uuid.into())?,
+            username: username.into(),
+            account_type: AccountType::Microsoft,
         })
     }
 

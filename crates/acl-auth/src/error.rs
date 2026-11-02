@@ -27,6 +27,9 @@ pub enum AuthError {
         source: std::io::Error,
     },
 
+    #[error("Uuid error : {0}")]
+    Uuid(#[from] uuid::Error),
+
     #[error("Failed to parse JSON: {0}")]
     Json(#[from] serde_json::Error),
 
