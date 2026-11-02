@@ -128,7 +128,7 @@ pub struct MicrosoftTokenBundle {
     pub refresh_token: String,
     /// Minecraft game access token (valid for 24 hours).
     pub access_token: String,
-    /// Expiration time of the access token.
+    /// Expiration time point of the access token.
     pub expires_at: i64,
 }
 
@@ -139,7 +139,7 @@ impl MicrosoftTokenBundle {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        self.expires_at <= now + 300
+        self.expires_at <= now.saturating_add(300)
     }
 }
 

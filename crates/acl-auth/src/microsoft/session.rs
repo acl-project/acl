@@ -73,7 +73,10 @@ impl MicrosoftLoginSession {
 
         let mut buf = [0u8; 4096];
         let n = stream.read(&mut buf).await?;
-        let request_str = String::from_utf8_lossy(&buf[..n]);
+        let request_str =
+            String::from_utf8_lossy(buf.get(..n).ok_or(AuthError::InvalidCallbackRequest {
+                reason: "Stream size is not correct".to_owned(),
+            })?);
 
         let first_line = request_str.lines().next().unwrap_or_default();
         let mut parts = first_line.split_whitespace();
@@ -166,7 +169,7 @@ impl MicrosoftLoginSession {
             let status_code = status.as_u16();
             let body_text = res.text().await.unwrap_or_default();
 
-            let messgae = if let Ok(err) = serde_json::from_str::<MsTokenError>(&body_text) {
+            let message = if let Ok(err) = serde_json::from_str::<MsTokenError>(&body_text) {
                 match err.error_description {
                     Some(desc) => format!("{}: {desc}", err.error),
                     None => err.error,
@@ -182,7 +185,7 @@ impl MicrosoftLoginSession {
 
             return Err(AuthError::TokenRequestFailed {
                 status: status_code,
-                message: messgae,
+                message,
             });
         }
 

@@ -27,7 +27,7 @@ pub enum AuthError {
         source: std::io::Error,
     },
 
-    #[error("Uuid error : {0}")]
+    #[error("Uuid error: {0}")]
     Uuid(#[from] uuid::Error),
 
     #[error("Failed to parse JSON: {0}")]
@@ -36,7 +36,7 @@ pub enum AuthError {
     #[error("Network request failed: {0}")]
     Http(#[from] reqwest::Error),
 
-    #[error("Parse url failed: {0}")]
+    #[error("Failed to parse URL: {0}")]
     UrlParse(#[from] url::ParseError),
 
     #[error("OAuth login timed out waiting for browser callback")]

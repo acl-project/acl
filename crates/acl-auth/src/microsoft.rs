@@ -66,7 +66,7 @@ impl MicrosoftAuth {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let expires_at = now + minecraft_token.expires_in as i64;
+        let expires_at = now.saturating_add(minecraft_token.expires_in as i64);
 
         let tokens = MicrosoftTokenBundle {
             refresh_token: ms_token.refresh_token.unwrap_or_default(),
@@ -95,7 +95,8 @@ impl MicrosoftAuth {
             .unwrap_or_else(|| old_refresh_token.to_string());
 
         let xbox_token =
-            exchange_msa_for_xbox_token(client, XBOXLIVE_AUTHORIZE_URL, &new_refresh_token).await?;
+            exchange_msa_for_xbox_token(client, XBOXLIVE_AUTHORIZE_URL, &ms_token.access_token)
+                .await?;
 
         let xsts_token =
             exchange_xbox_token_for_xsts_token(client, XSTS_AUTHORIZE_URL, &xbox_token.token)
@@ -124,7 +125,7 @@ impl MicrosoftAuth {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let expires_at = now + minecraft_token.expires_in as i64;
+        let expires_at = now.saturating_add(minecraft_token.expires_in as i64);
 
         let tokens = MicrosoftTokenBundle {
             refresh_token: new_refresh_token,

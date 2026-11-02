@@ -107,7 +107,7 @@ pub async fn exchange_xsts_for_minecraft_token(
 
         let message = if let Ok(err) = serde_json::from_str::<MinecraftErrorResponse>(&body_text) {
             match err.error_message {
-                Some(desc) => format!("{:?}:{desc}", err.error),
+                Some(desc) => format!("{:?}: {desc}", err.error),
                 None => "Unknown error".to_string(),
             }
         } else {
