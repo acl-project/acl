@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use rand::RngCore;
 use reqwest::Url;
@@ -68,7 +69,7 @@ impl MicrosoftLoginSession {
         })
     }
 
-    pub async fn wait_for_callback(&self) -> Result<String> {
+    async fn accept_once(&self) -> Result<Option<String>> {
         let (mut stream, _) = self.listener.accept().await?;
 
         let mut buf = [0u8; 4096];
@@ -83,25 +84,30 @@ impl MicrosoftLoginSession {
         let method = parts.next().unwrap_or_default();
         let uri = parts.next().unwrap_or("/");
 
-        // Any non-GET method is directly invalid.
+        // Directly return 405 for non-GET requests and ignore them.
         if method != "GET" {
-            return Err(AuthError::InvalidCallbackRequest {
-                reason: format!("Expected HTTP GET, got {method}"),
-            });
+            let _ = stream
+                .write_all(b"HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n")
+                .await;
+            return Ok(None);
         }
 
         let parsed_url = Url::parse(&format!("http://localhost{uri}"))?;
-        // Must be "/callback".
+        // Return 404 for non-/callback requests and ignore them, returning Ok(None).
         if parsed_url.path() != "/callback" {
-            return Err(AuthError::InvalidCallbackRequest {
-                reason: format!("Unexpected path: {}", parsed_url.path()),
-            });
+            let _ = stream
+                .write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")
+                .await;
+            return Ok(None);
         }
 
         let query: HashMap<String, String> = parsed_url.query_pairs().into_owned().collect();
 
         if let Some(err) = query.get("error") {
             let desc = query.get("error_description").cloned().unwrap_or_default();
+            let _ = stream
+                .write_all(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nLogin failed")
+                .await;
             return Err(AuthError::OAuthCallbackError {
                 error: err.clone(),
                 description: desc,
@@ -145,7 +151,27 @@ impl MicrosoftLoginSession {
         let _ = stream.write_all(response.as_bytes()).await;
         let _ = stream.flush().await;
 
-        Ok(code)
+        Ok(Some(code))
+    }
+
+    /// Wait for the callback; if none arrives after 180 seconds, treat it as a timeout.
+    pub async fn wait_for_callback(&self) -> Result<String> {
+        let timeout = tokio::time::sleep(Duration::from_secs(180));
+        tokio::pin!(timeout);
+
+        loop {
+            tokio::select! {
+                _ = &mut timeout => {
+                    return Err(AuthError::OAuthTimeout);
+                }
+                res = self.accept_once() => {
+                    if let Some(code) = res? {
+                        return Ok(code);
+                    }
+                }
+
+            }
+        }
     }
 
     pub async fn exchange_code_for_ms_token(

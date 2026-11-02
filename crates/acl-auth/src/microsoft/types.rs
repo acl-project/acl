@@ -151,4 +151,5 @@ pub struct MicrosoftLoginResult {
 pub struct MicrosoftRefreshResult {
     pub tokens: MicrosoftTokenBundle,
     pub username: String,
+    pub uuid: String,
 }

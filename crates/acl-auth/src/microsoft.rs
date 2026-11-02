@@ -136,6 +136,7 @@ impl MicrosoftAuth {
         Ok(MicrosoftRefreshResult {
             tokens,
             username: profile.name,
+            uuid: profile.id,
         })
     }
 }
