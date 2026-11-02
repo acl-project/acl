@@ -1,5 +1,6 @@
 pub mod account;
 pub mod error;
+pub mod microsoft;
 pub mod store;
 
 pub use account::{Account, AccountType};
