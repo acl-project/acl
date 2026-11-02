@@ -19,6 +19,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check License Header
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: insert-license --all-files
+
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
