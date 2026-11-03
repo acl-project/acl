@@ -125,7 +125,7 @@ pub struct MinecraftProfileResponse {
 
 /// Authentication credentials
 /// Must be stored securely and never printed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MicrosoftTokenBundle {
     /// Microsoft long-lived refresh token (valid for 90 days).
     pub refresh_token: String,
@@ -133,6 +133,17 @@ pub struct MicrosoftTokenBundle {
     pub access_token: String,
     /// Expiration time point of the access token.
     pub expires_at: i64,
+}
+
+// Manually implement Debug to avoid printing sensitive information.
+impl std::fmt::Debug for MicrosoftTokenBundle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MicrosoftTokenBundle")
+            .field("refresh_token", &"[REDACTED]")
+            .field("access_token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 impl MicrosoftTokenBundle {
