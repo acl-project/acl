@@ -35,6 +35,12 @@ impl AccountStore {
             .find(|account| Some(account.uuid) == self.active_uuid)
     }
 
+    pub fn account(&mut self, uuid: Uuid) -> Option<&mut Account> {
+        self.accounts
+            .iter_mut()
+            .find(|account| Some(account.uuid) == Some(uuid))
+    }
+
     pub fn active_uuid(&self) -> Option<Uuid> {
         self.active_uuid
     }

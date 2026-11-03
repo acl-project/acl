@@ -5,7 +5,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use acl_auth::AccountStore;
+use acl_auth::microsoft::MicrosoftAuth;
+use acl_auth::{Account, AccountStore, AccountType, CredentialStore, MICROSOFT_CLIENT_ID};
 use acl_core::launch::LaunchCommand;
 use acl_core::manager::InstanceManager;
 use acl_core::{LauncherConfig, LauncherDirs, launch};
@@ -15,6 +16,7 @@ use relm4::tokio::time::MissedTickBehavior;
 use relm4::{Component, ComponentParts, ComponentSender, RelmWidgetExt, tokio};
 use relm4::{SharedState, adw};
 use tracing::{error, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LaunchStage {
@@ -82,6 +84,7 @@ pub enum HomeInput {
 
 #[derive(Debug)]
 pub enum HomeCmdOutput {
+    UpdateUsername(Uuid, String),
     StageChanged(LaunchStage),
     LaunchFinished(Result<String, String>),
     GameExited {
@@ -177,9 +180,48 @@ impl HomePage {
         }
     }
 
+    // Get access_token; refresh if expired and update username
+    pub async fn access_token(
+        account: &mut Account,
+        client: &reqwest::Client,
+        client_id: Option<&str>,
+    ) -> Result<String, String> {
+        match account.account_type {
+            AccountType::Offline => Ok("0".to_string()),
+            AccountType::Microsoft => {
+                let tokens = CredentialStore::get(account.uuid).map_err(|err| err.to_string())?;
+                // Return directly if the token has not expired
+                if !tokens.is_expired() {
+                    return Ok(tokens.access_token);
+                }
+
+                let Some(client_id) = client_id else {
+                    return Err("Client id not set".to_string());
+                };
+
+                let res = MicrosoftAuth::refresh(client, client_id, &tokens.refresh_token)
+                    .await
+                    .map_err(|err| err.to_string())?;
+
+                if res.uuid != account.uuid.to_string() {
+                    return Err("UUIDs do not match".to_string());
+                }
+
+                CredentialStore::set(account.uuid, &res.tokens).map_err(|err| err.to_string())?;
+
+                // Update username
+                if account.username != res.username {
+                    account.username = res.username;
+                }
+
+                Ok(res.tokens.access_token)
+            }
+        }
+    }
+
     fn launch(&mut self, sender: ComponentSender<Self>) {
         // Check whether an account is selected.
-        let account = match self.accounts.read().active_account().cloned() {
+        let mut account = match self.accounts.read().active_account().cloned() {
             Some(acc) => acc,
             None => {
                 let _ = sender.output(HomeOutput::ShowToast(
@@ -208,8 +250,14 @@ impl HomePage {
             shutdown
                 .register(async move {
                     let result: Result<String, String> = async {
-                        // Log in to obtain an access token (not yet implemented).
+                        // Log in to obtain an access token.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Authenticating));
+                        let access_token =
+                            Self::access_token(&mut account, &client, MICROSOFT_CLIENT_ID).await?;
+                        let _ = out.send(HomeCmdOutput::UpdateUsername(
+                            account.uuid,
+                            account.username.clone(),
+                        ));
 
                         // Load local version metadata.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::LoadingMetadata));
@@ -267,6 +315,7 @@ impl HomePage {
                             &dirs,
                             &metadata,
                             &account,
+                            &access_token,
                             java.path,
                         )
                         .map_err(|e| format!("Failed to build launch command: {e}"))?;
@@ -514,6 +563,18 @@ impl Component for HomePage {
                     let _ = sender.output(HomeOutput::ShowToast(msg));
                 }
             },
+            HomeCmdOutput::UpdateUsername(uuid, username) => {
+                if let Some(account) = self.accounts.write().account(uuid)
+                    && account.username != username
+                {
+                    account.username = username;
+                    if let Err(err) = self.accounts.read().save(&self.dirs.accounts_file()) {
+                        let msg = format!("Failed to save accounts: {err}");
+                        error!("{msg}");
+                        let _ = sender.output(HomeOutput::ShowToast(msg));
+                    }
+                }
+            }
         }
     }
 }

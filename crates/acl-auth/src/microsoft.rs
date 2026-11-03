@@ -8,6 +8,8 @@ pub mod types;
 
 pub use types::{MicrosoftLoginResult, MicrosoftRefreshResult};
 
+pub const MICROSOFT_CLIENT_ID: Option<&'static str> = option_env!("CLIENT_ID");
+
 use crate::{
     Account, AuthError, Result,
     microsoft::{

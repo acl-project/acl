@@ -10,4 +10,5 @@ pub mod store;
 pub use account::{Account, AccountType};
 pub use credential::CredentialStore;
 pub use error::{AuthError, Result};
+pub use microsoft::MICROSOFT_CLIENT_ID;
 pub use store::AccountStore;

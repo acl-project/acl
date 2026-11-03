@@ -7,7 +7,7 @@ use std::{
     process::{self, Stdio},
 };
 
-use acl_auth::Account;
+use acl_auth::{Account, AccountType};
 use acl_minecraft::{VersionMetadata, VersionType};
 use tracing::{debug, info, warn};
 
@@ -53,6 +53,7 @@ impl LaunchCommand {
         dirs: &LauncherDirs,
         metadata: &VersionMetadata,
         account: &Account,
+        access_token: &str,
         classpath: String,
     ) -> Vec<(&'static str, String)> {
         let natives_dir = instance.natives_dir().to_string_lossy().into_owned();
@@ -79,6 +80,11 @@ impl LaunchCommand {
             VersionType::OldAlpha => "old_alpha",
         };
 
+        let user_type = match account.account_type {
+            AccountType::Offline => "legacy".to_string(),
+            AccountType::Microsoft => "msa".to_string(),
+        };
+
         vec![
             // JVM argument placeholder
             ("${natives_directory}", natives_dir),
@@ -93,8 +99,8 @@ impl LaunchCommand {
             ("${game_assets}", game_assets),
             ("${assets_index_name}", metadata.asset_index.id.clone()),
             ("${auth_uuid}", account.uuid.simple().to_string()),
-            ("${auth_access_token}", "0".to_string()),
-            ("${user_type}", "legacy".to_string()),
+            ("${auth_access_token}", access_token.to_string()),
+            ("${user_type}", user_type),
             ("${version_type}", version_type.to_string()),
             ("${user_properties}", "{}".to_string()),
         ]
@@ -118,6 +124,7 @@ impl LaunchCommand {
         dirs: &LauncherDirs,
         metadata: &VersionMetadata,
         account: &Account,
+        access_token: &str,
         java_path: PathBuf,
     ) -> Result<Self> {
         let mut jvm_args = Vec::new();
@@ -150,7 +157,8 @@ impl LaunchCommand {
             .to_string_lossy()
             .into_owned();
 
-        let vars = Self::build_param_vars(instance, dirs, metadata, account, classpath);
+        let vars =
+            Self::build_param_vars(instance, dirs, metadata, account, access_token, classpath);
 
         // JVM arguments in the metadata.
         let raw_jvm = metadata.resolve_jvm_arguments();
@@ -407,6 +415,7 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").expect("failed to create account");
         let java_path = PathBuf::from("/mock/java/bin/java");
+        let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
             &instance,
@@ -414,6 +423,7 @@ mod tests {
             &dirs,
             &metadata,
             &account,
+            &access_token,
             java_path.clone(),
         )
         .expect("build launch command should succeed");
@@ -474,6 +484,7 @@ mod tests {
         let metadata = mock_version_metadata("1.12.2", true, Some(8));
         let account = Account::new_offline("Alex").expect("failed to create account");
         let java_path = PathBuf::from("/mock/java8/bin/java");
+        let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
             &instance,
@@ -481,6 +492,7 @@ mod tests {
             &dirs,
             &metadata,
             &account,
+            &access_token,
             java_path.clone(),
         )
         .expect("build legacy launch command should succeed");
@@ -527,6 +539,7 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
+        let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
             &instance,
@@ -534,6 +547,7 @@ mod tests {
             &dirs,
             &metadata,
             &account,
+            &access_token,
             java_path.clone(),
         )
         .expect("memory config should be valid");
@@ -551,6 +565,7 @@ mod tests {
             &dirs,
             &metadata,
             &account,
+            "0",
             java_path,
         )
         .expect_err("min_mem > max_mem should fail");
@@ -579,6 +594,7 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
+        let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
             &instance,
@@ -586,6 +602,7 @@ mod tests {
             &dirs,
             &metadata,
             &account,
+            &access_token,
             java_path,
         )
         .expect("build should succeed");

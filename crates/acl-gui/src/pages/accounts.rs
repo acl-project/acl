@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use acl_auth::microsoft::session::MicrosoftLoginSession;
 use acl_auth::microsoft::{MicrosoftAuth, MicrosoftLoginResult};
-use acl_auth::{Account, AccountStore, AccountType, CredentialStore};
+use acl_auth::{Account, AccountStore, AccountType, CredentialStore, MICROSOFT_CLIENT_ID};
 use gtk::prelude::*;
 use libadwaita::prelude::*;
 use relm4::ComponentParts;
@@ -14,8 +14,6 @@ use relm4::tokio::task::AbortHandle;
 use relm4::{SharedState, prelude::*};
 use tracing::{error, info};
 use uuid::Uuid;
-
-pub const MICROSOFT_CLIENT_ID: Option<&'static str> = option_env!("CLIENT_ID");
 
 #[derive(Debug, Clone)]
 pub struct AccountRow {
