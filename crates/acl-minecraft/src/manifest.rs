@@ -135,9 +135,9 @@ impl VersionManifest {
         }
     }
 
-    /// Cache the manifest at the default address.
-    pub fn cache(&self, cache_dir: &Path) {
-        self.save_cache(cache_dir, VERSION_MANIFEST_URL, DEFAULT_MANIFEST_TTL);
+    /// Cache the manifest at the default TTL.
+    pub fn cache_from_url(&self, cache_dir: &Path, url: &str) {
+        self.save_cache(cache_dir, url, DEFAULT_MANIFEST_TTL);
     }
 
     /// Manually cache the manifest.
@@ -425,7 +425,7 @@ mod tests {
         let default_cache_path = temp.path().join(default_cache_key);
         assert!(!default_cache_path.exists());
 
-        manifest.cache(temp.path());
+        manifest.cache_from_url(temp.path(), VERSION_MANIFEST_URL);
         assert!(default_cache_path.exists());
 
         let default_cached = Cached::<VersionManifest>::load_from_file(&default_cache_path)
