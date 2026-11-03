@@ -44,7 +44,7 @@ pub struct MsTokenError {
     pub error_description: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct XboxLiveProperties {
     #[serde(rename = "AuthMethod")]
     pub auth_method: String,
@@ -54,7 +54,17 @@ pub struct XboxLiveProperties {
     pub rps_ticket: String,
 }
 
-#[derive(Debug, Serialize)]
+impl std::fmt::Debug for XboxLiveProperties {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XboxLiveProperties")
+            .field("auth_method", &self.auth_method)
+            .field("site_name", &self.site_name)
+            .field("rps_ticket", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Serialize)]
 pub struct XboxLiveAuthRequest {
     #[serde(rename = "Properties")]
     pub properties: XboxLiveProperties,
@@ -62,6 +72,16 @@ pub struct XboxLiveAuthRequest {
     pub relying_party: String,
     #[serde(rename = "TokenType")]
     pub token_type: String,
+}
+
+impl std::fmt::Debug for XboxLiveAuthRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XboxLiveAuthRequest")
+            .field("properties", &self.properties)
+            .field("relying_party", &self.relying_party)
+            .field("token_type", &self.token_type)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,7 +121,7 @@ pub struct XboxErrorResponse {
     pub redirect: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct XstsAuthRequest {
     #[serde(rename = "Properties")]
     pub properties: XstsProperties,
@@ -111,7 +131,17 @@ pub struct XstsAuthRequest {
     pub token_type: String,
 }
 
-#[derive(Debug, Serialize)]
+impl std::fmt::Debug for XstsAuthRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XstsAuthRequest")
+            .field("properties", &self.properties)
+            .field("relying_party", &self.relying_party)
+            .field("token_type", &self.token_type)
+            .finish()
+    }
+}
+
+#[derive(Serialize)]
 pub struct XstsProperties {
     #[serde(rename = "SandboxId")]
     pub sandbox_id: String,
@@ -119,10 +149,27 @@ pub struct XstsProperties {
     pub user_tokens: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+impl std::fmt::Debug for XstsProperties {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XstsProperties")
+            .field("sandbox_id", &self.sandbox_id)
+            .field("user_tokens", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Serialize)]
 pub struct MinecraftLoginRequest {
     #[serde(rename = "identityToken")]
     pub identity_token: String,
+}
+
+impl std::fmt::Debug for MinecraftLoginRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MinecraftLoginRequest")
+            .field("identity_token", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Deserialize)]
