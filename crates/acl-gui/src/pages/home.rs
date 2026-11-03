@@ -528,17 +528,18 @@ impl Component for HomePage {
                             warn!("Failed to update instance last play time: {err}");
                         }
 
+                        // Enable offline account creation after launching with an official Microsoft account.
                         if let Some(account) = self.accounts.read().active_account()
                             && matches!(account.account_type, AccountType::Microsoft)
                         {
-                            let enbale = self.config.read().enable_offline;
+                            let enable = self.config.read().enable_offline;
 
-                            if !enbale {
+                            if !enable {
                                 self.config.write().enable_offline = true;
                                 if let Err(err) = self.config.read().save(&self.dirs.config_file())
                                 {
                                     let msg = format!("Failed to save configuration: {err}");
-                                    error!("{err}");
+                                    error!("{msg}");
                                     let _ = sender.output(HomeOutput::ShowToast(msg));
                                 }
                             }

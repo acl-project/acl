@@ -118,7 +118,7 @@ impl LauncherConfig {
             source,
         })?;
 
-        info!("Luancher configuration saved to {}", path.display());
+        info!("Launcher configuration saved to {}", path.display());
         Ok(())
     }
 

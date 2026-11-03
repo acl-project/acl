@@ -179,6 +179,7 @@ pub struct AccountsPage {
     client: reqwest::Client,
     account_rows: FactoryVecDeque<AccountRow>,
     add_offline_dialog: adw::AlertDialog,
+    username_entry: gtk::Entry,
     offline_disabled_dialog: adw::AlertDialog,
     ms_login_dialog: adw::AlertDialog,
     ms_login_state: MsLoginState,
@@ -324,7 +325,7 @@ impl Component for AccountsPage {
 
         // Dialog for offline login.
         #[local_ref]
-        offline_dialog -> adw::AlertDialog {
+        add_offline_dialog -> adw::AlertDialog {
 
             set_heading: Some("Add Offline Account"),
             set_body: "Enter a Minecraft username (3-16 characters, letters, numbers, and underscores).",
@@ -335,9 +336,9 @@ impl Component for AccountsPage {
             set_default_response: Some("add"),
             set_close_response: "cancel",
 
-            #[name = "username_entry"]
+            #[local_ref]
             #[wrap(Some)]
-            set_extra_child = &gtk::Entry {
+            set_extra_child = username_entry -> gtk::Entry {
                 set_placeholder_text: Some("Username (e.g. Steve)"),
                 set_activates_default: true,
             },
@@ -456,6 +457,7 @@ impl Component for AccountsPage {
             client: init.client,
             account_rows,
             add_offline_dialog: adw::AlertDialog::new(None, None),
+            username_entry: gtk::Entry::new(),
             offline_disabled_dialog: adw::AlertDialog::new(None, None),
             ms_login_dialog: adw::AlertDialog::new(None, None),
             ms_login_state: MsLoginState::Idle,
@@ -465,7 +467,8 @@ impl Component for AccountsPage {
         model.rebuild_rows();
 
         let ms_login_dialog = &model.ms_login_dialog;
-        let offline_dialog = &model.add_offline_dialog;
+        let add_offline_dialog = &model.add_offline_dialog;
+        let username_entry = &model.username_entry;
         let offline_disabled_dialog = &model.offline_disabled_dialog;
         let accounts_group = model.account_rows.widget();
         let widgets = view_output!();
@@ -577,6 +580,7 @@ impl Component for AccountsPage {
             AccountsInput::RequestAddOffline => {
                 let enable = self.config.read().enable_offline;
                 if enable {
+                    self.username_entry.set_text("");
                     self.add_offline_dialog.present(Some(root));
                 } else {
                     self.offline_disabled_dialog.present(Some(root));

@@ -43,7 +43,7 @@ impl SettingsPage {
     fn save_config(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.config.read().save(&self.config_path) {
             let msg = format!("Failed to save configuration: {err}");
-            error!("{err}");
+            error!("{msg}");
             let _ = sender.output(SettingsOutput::ShowToast(msg));
         }
     }
