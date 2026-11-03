@@ -18,7 +18,7 @@ impl CredentialStore {
             .set_password(&serde_json::to_string(tokens)?)
             .map_err(AuthError::from)
     }
-    /// Get the Token.
+    /// Get the token.
     pub fn get(uuid: Uuid) -> Result<MicrosoftTokenBundle> {
         let entry = Entry::new(SERVICE_NAME, &uuid.to_string())?;
         match entry.get_password() {

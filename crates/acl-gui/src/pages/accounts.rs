@@ -151,19 +151,13 @@ pub enum MsLoginState {
 impl MsLoginState {
     fn state_text(&self) -> &str {
         match self {
-            MsLoginState::Idle | MsLoginState::Starting => {
-                "Starting
-                    local login session..."
-            }
-            MsLoginState::WaitingBrowser(_) => {
-                "Please complete the
-                    sign-in in your web browser."
-            }
+            MsLoginState::Idle | MsLoginState::Starting => "Starting local login session...",
+            MsLoginState::WaitingBrowser(_) => "Please complete the sign-in in your web browser.",
             MsLoginState::Failed(err) => err.as_str(),
         }
     }
 
-    fn is_logining(&self) -> bool {
+    fn is_logging_in(&self) -> bool {
         !matches!(self, MsLoginState::Idle | MsLoginState::Failed(_))
     }
 
@@ -374,7 +368,7 @@ impl Component for AccountsPage {
                     set_width_request: 32,
                     set_height_request: 32,
                     #[watch]
-                    set_visible: model.ms_login_state.is_logining(),
+                    set_visible: model.ms_login_state.is_logging_in(),
                 },
 
                 gtk::Image {
@@ -483,6 +477,12 @@ impl Component for AccountsPage {
             }
 
             AccountsInput::RemoveAccount(uuid) => {
+                if let Err(err) = CredentialStore::delete(uuid) {
+                    let msg = format!("Failed to remove tokens: {err}");
+                    error!("{msg}");
+                    let _ = sender.output(AccountsOutput::ShowToast(msg));
+                }
+
                 if let Err(err) = self.accounts.write().remove_account(uuid) {
                     let msg = format!("Failed to remove account: {err}");
                     error!("{msg}");
