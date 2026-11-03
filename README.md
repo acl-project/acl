@@ -2,6 +2,9 @@
 
 ACL is a Minecraft launcher built with GTK4, libadwaita, and Relm4, featuring a native GNOME-style interface.
 
+> **Disclaimer**  
+> NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.
+
 ## Project Architecture
 
 This project uses a Cargo Workspace to strictly separate the UI from the core business logic:

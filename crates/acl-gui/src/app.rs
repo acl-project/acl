@@ -7,7 +7,7 @@ use crate::pages::{
     accounts::{AccountsInit, AccountsOutput, AccountsPage},
     home::{HomeInit, HomeOutput, HomePage},
     instances::{InstancesInit, InstancesPage, InstancesPageOutput},
-    settings::{SettingsMsg, SettingsPage},
+    settings::{SettingsOutput, SettingsPage},
 };
 use adw::prelude::*;
 use gtk::prelude::GtkWindowExt;
@@ -242,6 +242,7 @@ impl SimpleComponent for AppModel {
         let accounts_page = AccountsPage::builder()
             .launch(AccountsInit {
                 store: Arc::clone(&accounts_state),
+                config: Arc::clone(&config_state),
                 accounts_path,
                 client: client.clone(),
             })
@@ -252,7 +253,7 @@ impl SimpleComponent for AppModel {
         let settings_page = SettingsPage::builder()
             .launch((Arc::clone(&config_state), dirs.config_file()))
             .forward(sender.input_sender(), |msg| match msg {
-                SettingsMsg::ShowToast(message) => AppMsg::ShowToast(message),
+                SettingsOutput::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
         let toast_overlay = adw::ToastOverlay::new();

@@ -528,6 +528,23 @@ impl Component for HomePage {
                             warn!("Failed to update instance last play time: {err}");
                         }
 
+                        // Enable offline account creation after launching with an official Microsoft account.
+                        if let Some(account) = self.accounts.read().active_account()
+                            && matches!(account.account_type, AccountType::Microsoft)
+                        {
+                            let enable = self.config.read().enable_offline;
+
+                            if !enable {
+                                self.config.write().enable_offline = true;
+                                if let Err(err) = self.config.read().save(&self.dirs.config_file())
+                                {
+                                    let msg = format!("Failed to save configuration: {err}");
+                                    error!("{msg}");
+                                    let _ = sender.output(HomeOutput::ShowToast(msg));
+                                }
+                            }
+                        }
+
                         // Only exit the launcher when the game starts successfully.
                         if self.config.read().close_launcher_on_launch {
                             let _ = sender.output(HomeOutput::RequestClose);
