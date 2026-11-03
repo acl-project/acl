@@ -56,6 +56,8 @@ impl std::fmt::Debug for LaunchCommand {
             .map(|(i, arg)| {
                 if i > 0 && self.game_args.get(i - 1).map(|s| s.as_str()) == Some("--accessToken") {
                     "[REDACTED]".to_string()
+                } else if arg.starts_with("--accessToken=") {
+                    "--accessToken=[REDACTED]".to_string()
                 } else {
                     arg.clone()
                 }
