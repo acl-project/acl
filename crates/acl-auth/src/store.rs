@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fs::{self};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{Account, AuthError, Result};
@@ -122,6 +123,13 @@ impl AccountStore {
             path: path.to_path_buf(),
             source,
         })?;
+
+        // Set the file permissions to 600.
+        let res = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+
+        if let Err(err) = res {
+            warn!("Failed to set {} permissions: {}", path.display(), err);
+        }
 
         info!("Accounts saved to {}", path.display());
         Ok(())
@@ -304,6 +312,12 @@ mod tests {
 
         store.save(&store_path).expect("failed to save store");
         assert!(store_path.exists());
+
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&store_path).expect("failed to get metadata");
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        }
 
         let loaded = AccountStore::load_or_default(&store_path).expect("failed to load store");
         assert_eq!(loaded, store);

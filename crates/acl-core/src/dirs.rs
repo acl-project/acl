@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 
 use directories::ProjectDirs;
 use tracing::debug;
+use tracing::warn;
 
 use crate::error::CoreError;
 use crate::error::Result;
@@ -58,6 +60,17 @@ impl LauncherDirs {
                     source,
                 })?;
             }
+        }
+
+        // Set the configuration directory permissions to 700.
+        let res = fs::set_permissions(self.config_dir(), fs::Permissions::from_mode(0o700));
+
+        if let Err(err) = res {
+            warn!(
+                "Failed to set {} permissions: {}",
+                self.config_dir().display(),
+                err
+            );
         }
 
         Ok(())
@@ -189,6 +202,12 @@ mod tests {
         assert!(dirs.instances_dir().is_dir());
         assert!(dirs.libraries_dir().is_dir());
         assert!(dirs.versions_dir().is_dir());
+
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&config_dir).expect("failed to get config dir metadata");
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+        }
 
         // Calling it again when directories already exist should succeed idempotently
         dirs.ensure_dirs_exist()

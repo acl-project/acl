@@ -44,7 +44,7 @@ pub struct MsTokenError {
     pub error_description: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct XboxLiveProperties {
     #[serde(rename = "AuthMethod")]
     pub auth_method: String,
@@ -54,7 +54,17 @@ pub struct XboxLiveProperties {
     pub rps_ticket: String,
 }
 
-#[derive(Debug, Serialize)]
+impl std::fmt::Debug for XboxLiveProperties {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XboxLiveProperties")
+            .field("auth_method", &self.auth_method)
+            .field("site_name", &self.site_name)
+            .field("rps_ticket", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Serialize)]
 pub struct XboxLiveAuthRequest {
     #[serde(rename = "Properties")]
     pub properties: XboxLiveProperties,
@@ -62,6 +72,16 @@ pub struct XboxLiveAuthRequest {
     pub relying_party: String,
     #[serde(rename = "TokenType")]
     pub token_type: String,
+}
+
+impl std::fmt::Debug for XboxLiveAuthRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XboxLiveAuthRequest")
+            .field("properties", &self.properties)
+            .field("relying_party", &self.relying_party)
+            .field("token_type", &self.token_type)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,7 +121,7 @@ pub struct XboxErrorResponse {
     pub redirect: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct XstsAuthRequest {
     #[serde(rename = "Properties")]
     pub properties: XstsProperties,
@@ -111,7 +131,17 @@ pub struct XstsAuthRequest {
     pub token_type: String,
 }
 
-#[derive(Debug, Serialize)]
+impl std::fmt::Debug for XstsAuthRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XstsAuthRequest")
+            .field("properties", &self.properties)
+            .field("relying_party", &self.relying_party)
+            .field("token_type", &self.token_type)
+            .finish()
+    }
+}
+
+#[derive(Serialize)]
 pub struct XstsProperties {
     #[serde(rename = "SandboxId")]
     pub sandbox_id: String,
@@ -119,10 +149,27 @@ pub struct XstsProperties {
     pub user_tokens: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+impl std::fmt::Debug for XstsProperties {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XstsProperties")
+            .field("sandbox_id", &self.sandbox_id)
+            .field("user_tokens", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Serialize)]
 pub struct MinecraftLoginRequest {
     #[serde(rename = "identityToken")]
     pub identity_token: String,
+}
+
+impl std::fmt::Debug for MinecraftLoginRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MinecraftLoginRequest")
+            .field("identity_token", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Deserialize)]
@@ -336,5 +383,54 @@ mod tests {
         assert_eq!(refresh_clone.uuid, "4566e69fc90748ee8d71d7ba5aaafced");
         let refresh_debug = format!("{refresh_res:?}");
         assert!(refresh_debug.contains("MicrosoftRefreshResult"));
+    }
+
+    #[test]
+    fn test_auth_request_types_debug_redaction() {
+        let xbl_props = XboxLiveProperties {
+            auth_method: "RPS".to_string(),
+            site_name: "user.auth.xboxlive.com".to_string(),
+            rps_ticket: "secret_rps_ticket".to_string(),
+        };
+        let xbl_props_debug = format!("{xbl_props:?}");
+        assert!(!xbl_props_debug.contains("secret_rps_ticket"));
+        assert!(xbl_props_debug.contains("[REDACTED]"));
+        assert!(xbl_props_debug.contains("user.auth.xboxlive.com"));
+
+        let xbl_req = XboxLiveAuthRequest {
+            properties: xbl_props,
+            relying_party: "http://auth.xboxlive.com".to_string(),
+            token_type: "JWT".to_string(),
+        };
+        let xbl_req_debug = format!("{xbl_req:?}");
+        assert!(!xbl_req_debug.contains("secret_rps_ticket"));
+        assert!(xbl_req_debug.contains("[REDACTED]"));
+        assert!(xbl_req_debug.contains("http://auth.xboxlive.com"));
+
+        let xsts_props = XstsProperties {
+            sandbox_id: "RETAIL".to_string(),
+            user_tokens: vec!["secret_token_1".to_string(), "secret_token_2".to_string()],
+        };
+        let xsts_props_debug = format!("{xsts_props:?}");
+        assert!(!xsts_props_debug.contains("secret_token_1"));
+        assert!(!xsts_props_debug.contains("secret_token_2"));
+        assert!(xsts_props_debug.contains("[REDACTED]"));
+        assert!(xsts_props_debug.contains("RETAIL"));
+
+        let xsts_req = XstsAuthRequest {
+            properties: xsts_props,
+            relying_party: "rp".to_string(),
+            token_type: "JWT".to_string(),
+        };
+        let xsts_req_debug = format!("{xsts_req:?}");
+        assert!(!xsts_req_debug.contains("secret_token_1"));
+        assert!(xsts_req_debug.contains("[REDACTED]"));
+
+        let mc_req = MinecraftLoginRequest {
+            identity_token: "secret_identity_token".to_string(),
+        };
+        let mc_req_debug = format!("{mc_req:?}");
+        assert!(!mc_req_debug.contains("secret_identity_token"));
+        assert!(mc_req_debug.contains("[REDACTED]"));
     }
 }

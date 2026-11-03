@@ -56,6 +56,8 @@ impl std::fmt::Debug for LaunchCommand {
             .map(|(i, arg)| {
                 if i > 0 && self.game_args.get(i - 1).map(|s| s.as_str()) == Some("--accessToken") {
                     "[REDACTED]".to_string()
+                } else if arg.starts_with("--accessToken=") {
+                    "--accessToken=[REDACTED]".to_string()
                 } else {
                     arg.clone()
                 }
@@ -837,5 +839,31 @@ mod tests {
         let selected = select_java(&instance, &global_config, &metadata)
             .expect("should default to Java 8 requirement");
         assert_eq!(selected, java8);
+    }
+
+    #[test]
+    fn test_launch_command_debug_redacts_access_token() {
+        let cmd = LaunchCommand {
+            java_path: PathBuf::from("/usr/bin/java"),
+            game_dir: PathBuf::from("/path/to/game"),
+            jvm_args: vec!["-Xmx2G".to_string()],
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            game_args: vec![
+                "--username".to_string(),
+                "Player".to_string(),
+                "--accessToken".to_string(),
+                "secret_token_separate".to_string(),
+                "--accessToken=secret_token_equals".to_string(),
+                "--version".to_string(),
+                "1.21.1".to_string(),
+            ],
+        };
+
+        let debug_str = format!("{cmd:?}");
+        assert!(!debug_str.contains("secret_token_separate"));
+        assert!(!debug_str.contains("secret_token_equals"));
+        assert!(debug_str.contains("[REDACTED]"));
+        assert!(debug_str.contains("--accessToken=[REDACTED]"));
+        assert!(debug_str.contains("Player"));
     }
 }
