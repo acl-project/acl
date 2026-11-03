@@ -384,4 +384,53 @@ mod tests {
         let refresh_debug = format!("{refresh_res:?}");
         assert!(refresh_debug.contains("MicrosoftRefreshResult"));
     }
+
+    #[test]
+    fn test_auth_request_types_debug_redaction() {
+        let xbl_props = XboxLiveProperties {
+            auth_method: "RPS".to_string(),
+            site_name: "user.auth.xboxlive.com".to_string(),
+            rps_ticket: "secret_rps_ticket".to_string(),
+        };
+        let xbl_props_debug = format!("{xbl_props:?}");
+        assert!(!xbl_props_debug.contains("secret_rps_ticket"));
+        assert!(xbl_props_debug.contains("[REDACTED]"));
+        assert!(xbl_props_debug.contains("user.auth.xboxlive.com"));
+
+        let xbl_req = XboxLiveAuthRequest {
+            properties: xbl_props,
+            relying_party: "http://auth.xboxlive.com".to_string(),
+            token_type: "JWT".to_string(),
+        };
+        let xbl_req_debug = format!("{xbl_req:?}");
+        assert!(!xbl_req_debug.contains("secret_rps_ticket"));
+        assert!(xbl_req_debug.contains("[REDACTED]"));
+        assert!(xbl_req_debug.contains("http://auth.xboxlive.com"));
+
+        let xsts_props = XstsProperties {
+            sandbox_id: "RETAIL".to_string(),
+            user_tokens: vec!["secret_token_1".to_string(), "secret_token_2".to_string()],
+        };
+        let xsts_props_debug = format!("{xsts_props:?}");
+        assert!(!xsts_props_debug.contains("secret_token_1"));
+        assert!(!xsts_props_debug.contains("secret_token_2"));
+        assert!(xsts_props_debug.contains("[REDACTED]"));
+        assert!(xsts_props_debug.contains("RETAIL"));
+
+        let xsts_req = XstsAuthRequest {
+            properties: xsts_props,
+            relying_party: "rp".to_string(),
+            token_type: "JWT".to_string(),
+        };
+        let xsts_req_debug = format!("{xsts_req:?}");
+        assert!(!xsts_req_debug.contains("secret_token_1"));
+        assert!(xsts_req_debug.contains("[REDACTED]"));
+
+        let mc_req = MinecraftLoginRequest {
+            identity_token: "secret_identity_token".to_string(),
+        };
+        let mc_req_debug = format!("{mc_req:?}");
+        assert!(!mc_req_debug.contains("secret_identity_token"));
+        assert!(mc_req_debug.contains("[REDACTED]"));
+    }
 }

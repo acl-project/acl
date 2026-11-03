@@ -203,6 +203,12 @@ mod tests {
         assert!(dirs.libraries_dir().is_dir());
         assert!(dirs.versions_dir().is_dir());
 
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&config_dir).expect("failed to get config dir metadata");
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+        }
+
         // Calling it again when directories already exist should succeed idempotently
         dirs.ensure_dirs_exist()
             .expect("failed to call ensure_dirs_exist idempotently");

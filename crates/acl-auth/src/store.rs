@@ -313,6 +313,12 @@ mod tests {
         store.save(&store_path).expect("failed to save store");
         assert!(store_path.exists());
 
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&store_path).expect("failed to get metadata");
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        }
+
         let loaded = AccountStore::load_or_default(&store_path).expect("failed to load store");
         assert_eq!(loaded, store);
         assert_eq!(loaded.active_uuid(), Some(acc2.uuid));
