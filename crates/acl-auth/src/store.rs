@@ -382,4 +382,19 @@ mod tests {
         let nonexistent_uuid = Uuid::new_v4();
         assert!(store.account_mut(nonexistent_uuid).is_none());
     }
+
+    #[test]
+    fn test_store_account() {
+        let mut store = AccountStore::new();
+        let acc1 = Account::new_offline("Player1").unwrap();
+        let acc2 = Account::new_offline("Player2").unwrap();
+        store.add_account(acc1.clone());
+        store.add_account(acc2.clone());
+
+        assert_eq!(store.account(acc1.uuid), Some(&acc1));
+        assert_eq!(store.account(acc2.uuid), Some(&acc2));
+
+        let nonexistent_uuid = Uuid::new_v4();
+        assert!(store.account(nonexistent_uuid).is_none());
+    }
 }

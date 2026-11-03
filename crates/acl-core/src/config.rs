@@ -183,6 +183,7 @@ mod tests {
         assert_eq!(config.max_concurrent_downloads, 16);
         assert!(!config.close_launcher_on_launch);
         assert_eq!(config.download_source, DownloadSource::Official);
+        assert!(!config.enable_offline);
     }
 
     #[test]
@@ -196,21 +197,23 @@ mod tests {
                 is_64bit: true,
             },
         };
-        let config = LauncherConfig {
-            min_memory_mb: 2048,
-            max_memory_mb: 8192,
-            default_java: Some(java.clone()),
-            java_list: vec![java],
-            max_concurrent_downloads: 8,
-            close_launcher_on_launch: true,
-            download_source: DownloadSource::Official,
-            enable_offline: false,
-        };
+        for enable_offline in [false, true] {
+            let config = LauncherConfig {
+                min_memory_mb: 2048,
+                max_memory_mb: 8192,
+                default_java: Some(java.clone()),
+                java_list: vec![java.clone()],
+                max_concurrent_downloads: 8,
+                close_launcher_on_launch: true,
+                download_source: DownloadSource::Official,
+                enable_offline,
+            };
 
-        let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");
-        let deserialized: LauncherConfig =
-            toml::from_str(&toml_str).expect("failed to deserialize config");
-        assert_eq!(config, deserialized);
+            let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");
+            let deserialized: LauncherConfig =
+                toml::from_str(&toml_str).expect("failed to deserialize config");
+            assert_eq!(config, deserialized);
+        }
     }
 
     #[test]
@@ -228,6 +231,7 @@ mod tests {
         assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
         assert_eq!(config.download_source, DownloadSource::Official);
+        assert!(!config.enable_offline);
     }
 
     #[test]
@@ -238,6 +242,7 @@ mod tests {
         assert_eq!(config.default_java, None);
         assert!(config.java_list.is_empty());
         assert!(!config.close_launcher_on_launch);
+        assert!(!config.enable_offline);
         assert!((16..=64).contains(&config.max_concurrent_downloads));
         if acl_common::region::is_mainland_china() {
             assert_eq!(config.download_source, DownloadSource::Bmclapi);
