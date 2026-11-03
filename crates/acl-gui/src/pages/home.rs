@@ -15,7 +15,7 @@ use gtk::prelude::*;
 use relm4::tokio::time::MissedTickBehavior;
 use relm4::{Component, ComponentParts, ComponentSender, RelmWidgetExt, tokio};
 use relm4::{SharedState, adw};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -196,14 +196,14 @@ impl HomePage {
                 }
 
                 let Some(client_id) = client_id else {
-                    return Err("Client id not set".to_string());
+                    return Err("Client ID not set".to_string());
                 };
 
                 let res = MicrosoftAuth::refresh(client, client_id, &tokens.refresh_token)
                     .await
                     .map_err(|err| err.to_string())?;
 
-                if res.uuid != account.uuid.to_string() {
+                if res.uuid.parse::<Uuid>().ok() != Some(account.uuid) {
                     return Err("UUIDs do not match".to_string());
                 }
 
@@ -252,12 +252,16 @@ impl HomePage {
                     let result: Result<String, String> = async {
                         // Log in to obtain an access token.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Authenticating));
+                        let old_username = account.username.clone();
                         let access_token =
                             Self::access_token(&mut account, &client, MICROSOFT_CLIENT_ID).await?;
-                        let _ = out.send(HomeCmdOutput::UpdateUsername(
-                            account.uuid,
-                            account.username.clone(),
-                        ));
+
+                        if old_username != account.username {
+                            let _ = out.send(HomeCmdOutput::UpdateUsername(
+                                account.uuid,
+                                account.username.clone(),
+                            ));
+                        }
 
                         // Load local version metadata.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::LoadingMetadata));
@@ -564,11 +568,14 @@ impl Component for HomePage {
                 }
             },
             HomeCmdOutput::UpdateUsername(uuid, username) => {
-                if let Some(account) = self.accounts.write().account(uuid)
+                let mut accounts = self.accounts.write();
+
+                if let Some(account) = accounts.account_mut(uuid)
                     && account.username != username
                 {
+                    info!("Update username {} to {}", account.username, username);
                     account.username = username;
-                    if let Err(err) = self.accounts.read().save(&self.dirs.accounts_file()) {
+                    if let Err(err) = accounts.save(&self.dirs.accounts_file()) {
                         let msg = format!("Failed to save accounts: {err}");
                         error!("{msg}");
                         let _ = sender.output(HomeOutput::ShowToast(msg));

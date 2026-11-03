@@ -494,7 +494,7 @@ impl Component for AccountsPage {
             AccountsInput::StartMicrosoftLogin => {
                 let Some(client_id) = MICROSOFT_CLIENT_ID else {
                     let _ = sender.output(AccountsOutput::ShowToast(
-                        "Microsoft client ID is not configured".to_string(),
+                        "Microsoft Client ID is not configured".to_string(),
                     ));
                     return;
                 };

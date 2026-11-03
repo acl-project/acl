@@ -8,6 +8,8 @@ pub mod types;
 
 pub use types::{MicrosoftLoginResult, MicrosoftRefreshResult};
 
+/// Client ID obtained from environment variables, used for Microsoft login
+/// It is unavailable if the Microsoft login method is not available.
 pub const MICROSOFT_CLIENT_ID: Option<&'static str> = option_env!("CLIENT_ID");
 
 use crate::{

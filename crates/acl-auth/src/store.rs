@@ -35,10 +35,11 @@ impl AccountStore {
             .find(|account| Some(account.uuid) == self.active_uuid)
     }
 
-    pub fn account(&mut self, uuid: Uuid) -> Option<&mut Account> {
+    /// Returns a mutable borrow of the account.
+    pub fn account_mut(&mut self, uuid: Uuid) -> Option<&mut Account> {
         self.accounts
             .iter_mut()
-            .find(|account| Some(account.uuid) == Some(uuid))
+            .find(|account| account.uuid == uuid)
     }
 
     pub fn active_uuid(&self) -> Option<Uuid> {
