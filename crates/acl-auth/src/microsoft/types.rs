@@ -15,7 +15,7 @@ pub const MINECRAFT_LOGIN_URL: &str =
     "https://api.minecraftservices.com/authentication/login_with_xbox";
 pub const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MsTokenResponse {
     pub access_token: String,
     pub token_type: String,
@@ -23,6 +23,19 @@ pub struct MsTokenResponse {
     pub scope: Option<String>,
     pub refresh_token: Option<String>,
     pub user_id: Option<String>,
+}
+
+impl std::fmt::Debug for MsTokenResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MsTokenResponse")
+            .field("token_type", &self.token_type)
+            .field("expires_in", &self.expires_in)
+            .field("scope", &self.scope)
+            .field("user_id", &self.user_id)
+            .field("access_token", &"[REDACTED]")
+            .field("refresh_token", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,12 +74,21 @@ pub struct XboxLiveDisplayClaims {
     pub xui: Vec<XboxLiveXui>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct XboxLiveAuthResponse {
     #[serde(rename = "Token")]
     pub token: String,
     #[serde(rename = "DisplayClaims")]
     pub display_claims: XboxLiveDisplayClaims,
+}
+
+impl std::fmt::Debug for XboxLiveAuthResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XboxLiveAuthResponse")
+            .field("token", &"[REDACTED]")
+            .field("display_claims", &self.display_claims)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,11 +125,21 @@ pub struct MinecraftLoginRequest {
     pub identity_token: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct MinecraftLoginResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
+}
+
+impl std::fmt::Debug for MinecraftLoginResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MinecraftLoginResponse")
+            .field("token_type", &self.token_type)
+            .field("expires_in", &self.expires_in)
+            .field("access_token", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,7 +157,7 @@ pub struct MinecraftProfileResponse {
 
 /// Authentication credentials
 /// Must be stored securely and never printed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MicrosoftTokenBundle {
     /// Microsoft long-lived refresh token (valid for 90 days).
     pub refresh_token: String,
@@ -133,6 +165,17 @@ pub struct MicrosoftTokenBundle {
     pub access_token: String,
     /// Expiration time point of the access token.
     pub expires_at: i64,
+}
+
+// Manually implement Debug to avoid printing sensitive information.
+impl std::fmt::Debug for MicrosoftTokenBundle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MicrosoftTokenBundle")
+            .field("refresh_token", &"[REDACTED]")
+            .field("access_token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 impl MicrosoftTokenBundle {

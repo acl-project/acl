@@ -35,6 +35,13 @@ impl AccountStore {
             .find(|account| Some(account.uuid) == self.active_uuid)
     }
 
+    /// Returns a mutable borrow of the account.
+    pub fn account_mut(&mut self, uuid: Uuid) -> Option<&mut Account> {
+        self.accounts
+            .iter_mut()
+            .find(|account| account.uuid == uuid)
+    }
+
     pub fn active_uuid(&self) -> Option<Uuid> {
         self.active_uuid
     }
@@ -331,5 +338,29 @@ mod tests {
 
         let loaded = AccountStore::load_or_default(&store_path).expect("failed to load store");
         assert_eq!(loaded, store);
+    }
+
+    #[test]
+    fn test_store_account_mut() {
+        let mut store = AccountStore::new();
+        let acc1 = Account::new_offline("Player1").unwrap();
+        let acc2 = Account::new_offline("Player2").unwrap();
+        store.add_account(acc1.clone());
+        store.add_account(acc2.clone());
+
+        let account = store
+            .account_mut(acc1.uuid)
+            .expect("account should be found");
+        account.username = "Player1Updated".to_string();
+
+        let updated = store
+            .accounts()
+            .iter()
+            .find(|a| a.uuid == acc1.uuid)
+            .expect("updated account should exist");
+        assert_eq!(updated.username, "Player1Updated");
+
+        let nonexistent_uuid = Uuid::new_v4();
+        assert!(store.account_mut(nonexistent_uuid).is_none());
     }
 }

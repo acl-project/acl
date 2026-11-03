@@ -8,12 +8,21 @@ use rand::{RngCore, rngs::OsRng};
 use sha2::Digest;
 use sha2::Sha256;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PkcePair {
     /// A random string of 43–128 characters (Base64URL-encoded).
     pub verifier: String,
     /// BASE64URL_NO_PAD(SHA256(verifier))
     pub challenge: String,
+}
+
+impl std::fmt::Debug for PkcePair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PkcePair")
+            .field("challenge", &self.challenge)
+            .field("verifier", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl PkcePair {
