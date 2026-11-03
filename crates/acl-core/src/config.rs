@@ -34,6 +34,8 @@ pub struct LauncherConfig {
     pub close_launcher_on_launch: bool,
     /// The launcher's download source.
     pub download_source: DownloadSource,
+    /// Offline feature toggle.
+    pub enable_offline: bool,
 }
 
 impl Default for LauncherConfig {
@@ -46,6 +48,7 @@ impl Default for LauncherConfig {
             max_concurrent_downloads: 16,
             close_launcher_on_launch: false,
             download_source: DownloadSource::Official,
+            enable_offline: false,
         }
     }
 }
@@ -79,6 +82,7 @@ impl LauncherConfig {
             max_concurrent_downloads,
             close_launcher_on_launch: false,
             download_source,
+            enable_offline: false, // Offline login is disabled by default.
         }
     }
 
@@ -200,6 +204,7 @@ mod tests {
             max_concurrent_downloads: 8,
             close_launcher_on_launch: true,
             download_source: DownloadSource::Official,
+            enable_offline: false,
         };
 
         let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");

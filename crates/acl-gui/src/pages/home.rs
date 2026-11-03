@@ -528,6 +528,22 @@ impl Component for HomePage {
                             warn!("Failed to update instance last play time: {err}");
                         }
 
+                        if let Some(account) = self.accounts.read().active_account()
+                            && matches!(account.account_type, AccountType::Microsoft)
+                        {
+                            let enbale = self.config.read().enable_offline;
+
+                            if !enbale {
+                                self.config.write().enable_offline = true;
+                                if let Err(err) = self.config.read().save(&self.dirs.config_file())
+                                {
+                                    let msg = format!("Failed to save configuration: {err}");
+                                    error!("{err}");
+                                    let _ = sender.output(HomeOutput::ShowToast(msg));
+                                }
+                            }
+                        }
+
                         // Only exit the launcher when the game starts successfully.
                         if self.config.read().close_launcher_on_launch {
                             let _ = sender.output(HomeOutput::RequestClose);

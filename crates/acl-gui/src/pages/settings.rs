@@ -21,7 +21,7 @@ pub struct SettingsPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SettingsMsg {
+pub enum SettingsOutput {
     ShowToast(String),
 }
 
@@ -44,7 +44,7 @@ impl SettingsPage {
         if let Err(err) = self.config.read().save(&self.config_path) {
             let msg = format!("Failed to save configuration: {err}");
             error!("{err}");
-            let _ = sender.output(SettingsMsg::ShowToast(msg));
+            let _ = sender.output(SettingsOutput::ShowToast(msg));
         }
     }
 
@@ -83,7 +83,7 @@ impl SettingsPage {
 #[relm4::component(pub)]
 impl SimpleComponent for SettingsPage {
     type Init = (Arc<SharedState<LauncherConfig>>, PathBuf);
-    type Output = SettingsMsg;
+    type Output = SettingsOutput;
     type Input = SettingsInput;
 
     view! {
@@ -286,7 +286,7 @@ impl SimpleComponent for SettingsPage {
             SettingsInput::ScanJava => {
                 self.config.write().search_java();
                 self.refresh_java_model();
-                let _ = sender.output(SettingsMsg::ShowToast(
+                let _ = sender.output(SettingsOutput::ShowToast(
                     "Successfully refreshed the Java list.".to_owned(),
                 ));
             }
@@ -319,9 +319,9 @@ mod tests {
 
     #[test]
     fn test_settings_msg_equality() {
-        let msg1 = SettingsMsg::ShowToast("Success".to_string());
-        let msg2 = SettingsMsg::ShowToast("Success".to_string());
-        let msg3 = SettingsMsg::ShowToast("Error".to_string());
+        let msg1 = SettingsOutput::ShowToast("Success".to_string());
+        let msg2 = SettingsOutput::ShowToast("Success".to_string());
+        let msg3 = SettingsOutput::ShowToast("Error".to_string());
         assert_eq!(msg1, msg2);
         assert_ne!(msg1, msg3);
     }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use acl_auth::microsoft::session::MicrosoftLoginSession;
 use acl_auth::microsoft::{MicrosoftAuth, MicrosoftLoginResult};
 use acl_auth::{Account, AccountStore, AccountType, CredentialStore, MICROSOFT_CLIENT_ID};
+use acl_core::LauncherConfig;
 use gtk::prelude::*;
 use libadwaita::prelude::*;
 use relm4::ComponentParts;
@@ -14,6 +15,9 @@ use relm4::tokio::task::AbortHandle;
 use relm4::{SharedState, prelude::*};
 use tracing::{error, info};
 use uuid::Uuid;
+
+const XBOX_STORE_URL: &str =
+    "https://www.xbox.com/games/store/minecraft-java-bedrock-edition-for-pc/9nxp44l49shj";
 
 #[derive(Debug, Clone)]
 pub struct AccountRow {
@@ -170,9 +174,12 @@ impl MsLoginState {
 
 pub struct AccountsPage {
     accounts: Arc<SharedState<AccountStore>>,
+    config: Arc<SharedState<LauncherConfig>>,
     accounts_path: PathBuf,
     client: reqwest::Client,
     account_rows: FactoryVecDeque<AccountRow>,
+    add_offline_dialog: adw::AlertDialog,
+    offline_disabled_dialog: adw::AlertDialog,
     ms_login_dialog: adw::AlertDialog,
     ms_login_state: MsLoginState,
     login_abort: Option<AbortHandle>,
@@ -186,6 +193,8 @@ pub enum AccountsOutput {
 #[derive(Debug)]
 pub enum AccountsInput {
     AddOfflineAccount(String),
+    RequestAddOffline,
+    OpenXboxStore,
     StartMicrosoftLogin,
     CopyAuthUrl,
     CancelMicrosoftLogin,
@@ -202,6 +211,7 @@ pub enum AccountsCmdOutput {
 #[derive(Debug)]
 pub struct AccountsInit {
     pub store: Arc<SharedState<AccountStore>>,
+    pub config: Arc<SharedState<LauncherConfig>>,
     pub accounts_path: PathBuf,
     pub client: reqwest::Client,
 }
@@ -303,10 +313,7 @@ impl Component for AccountsPage {
                             set_label: "Add Offline",
                         },
 
-                        connect_clicked[add_dialog, username_entry, page] => move |_| {
-                                username_entry.set_text("");
-                                add_dialog.present(Some(&page));
-                        },
+                      connect_clicked => AccountsInput::RequestAddOffline,
                     },
                 }
 
@@ -316,8 +323,8 @@ impl Component for AccountsPage {
         },
 
         // Dialog for offline login.
-        #[name = "add_dialog"]
-        adw::AlertDialog {
+        #[local_ref]
+        offline_dialog -> adw::AlertDialog {
 
             set_heading: Some("Add Offline Account"),
             set_body: "Enter a Minecraft username (3-16 characters, letters, numbers, and underscores).",
@@ -341,6 +348,28 @@ impl Component for AccountsPage {
                 move |_, _| {
                     let username = username_entry.text().trim().to_owned();
                     sender.input(AccountsInput::AddOfflineAccount(username));
+                }
+            }),
+
+        },
+
+        #[local_ref]
+        offline_disabled_dialog -> adw::AlertDialog {
+            set_heading: Some("Offline Mode Unavailable"),
+            set_body: "You must launch the game at least once with an official Microsoft account before adding an offline account.",
+
+            add_response: ("cancel", "Cancel"),
+            add_response: ("store", "Get Minecraft"),
+
+            set_close_response: "cancel",
+
+            set_response_appearance: ("store", adw::ResponseAppearance::Suggested),
+            set_default_response: Some("store"),
+
+            connect_response: (Some("store"), {
+                let sender = sender.clone();
+                move |_, _| {
+                    sender.input(AccountsInput::OpenXboxStore);
                 }
             }),
 
@@ -422,9 +451,12 @@ impl Component for AccountsPage {
 
         let mut model = AccountsPage {
             accounts: init.store,
+            config: init.config,
             accounts_path: init.accounts_path,
             client: init.client,
             account_rows,
+            add_offline_dialog: adw::AlertDialog::new(None, None),
+            offline_disabled_dialog: adw::AlertDialog::new(None, None),
             ms_login_dialog: adw::AlertDialog::new(None, None),
             ms_login_state: MsLoginState::Idle,
             login_abort: None,
@@ -433,6 +465,8 @@ impl Component for AccountsPage {
         model.rebuild_rows();
 
         let ms_login_dialog = &model.ms_login_dialog;
+        let offline_dialog = &model.add_offline_dialog;
+        let offline_disabled_dialog = &model.offline_disabled_dialog;
         let accounts_group = model.account_rows.widget();
         let widgets = view_output!();
 
@@ -526,6 +560,26 @@ impl Component for AccountsPage {
                     let _ = sender.output(AccountsOutput::ShowToast(
                         "Login link copied to clipboard".to_string(),
                     ));
+                }
+            }
+
+            AccountsInput::OpenXboxStore => {
+                if let Err(err) = gtk::gio::AppInfo::launch_default_for_uri(
+                    XBOX_STORE_URL,
+                    gtk::gio::AppLaunchContext::NONE,
+                ) {
+                    let msg = format!("Failed to open browser: {err}");
+                    error!("{msg}");
+                    let _ = sender.output(AccountsOutput::ShowToast(msg));
+                }
+            }
+
+            AccountsInput::RequestAddOffline => {
+                let enable = self.config.read().enable_offline;
+                if enable {
+                    self.add_offline_dialog.present(Some(root));
+                } else {
+                    self.offline_disabled_dialog.present(Some(root));
                 }
             }
         }

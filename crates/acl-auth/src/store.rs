@@ -43,6 +43,11 @@ impl AccountStore {
             .find(|account| account.uuid == uuid)
     }
 
+    /// Returns a borrow of the account.
+    pub fn account(&self, uuid: Uuid) -> Option<&Account> {
+        self.accounts.iter().find(|account| account.uuid == uuid)
+    }
+
     pub fn active_uuid(&self) -> Option<Uuid> {
         self.active_uuid
     }
