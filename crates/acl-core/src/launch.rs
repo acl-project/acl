@@ -473,6 +473,67 @@ mod tests {
     }
 
     #[test]
+    fn test_launch_command_build_microsoft_account() {
+        let instance = mock_instance("ms_inst");
+        let global_config = LauncherConfig::default();
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
+        let mut metadata = mock_version_metadata("1.21.1", false, Some(21));
+        if let Some(args) = &mut metadata.arguments {
+            args.game
+                .push(ArgumentEntry::Simple("--accessToken".to_string()));
+            args.game
+                .push(ArgumentEntry::Simple("${auth_access_token}".to_string()));
+            args.game
+                .push(ArgumentEntry::Simple("--userType".to_string()));
+            args.game
+                .push(ArgumentEntry::Simple("${user_type}".to_string()));
+        }
+
+        let hex_uuid = "4566e69fc90748ee8d71d7ba5aaafced";
+        let account = Account::new_microsoft("Steve", hex_uuid).expect("failed to create account");
+        let java_path = PathBuf::from("/mock/java/bin/java");
+        let access_token = "mock_msa_access_token_xyz".to_string();
+
+        let cmd = LaunchCommand::build(
+            &instance,
+            &global_config,
+            &dirs,
+            &metadata,
+            &account,
+            &access_token,
+            java_path,
+        )
+        .expect("build launch command should succeed");
+
+        assert_eq!(account.account_type, AccountType::Microsoft);
+
+        let token_pos = cmd
+            .game_args
+            .iter()
+            .position(|arg| arg == "--accessToken")
+            .expect("--accessToken should exist");
+        assert_eq!(cmd.game_args[token_pos + 1], "mock_msa_access_token_xyz");
+
+        let user_type_pos = cmd
+            .game_args
+            .iter()
+            .position(|arg| arg == "--userType")
+            .expect("--userType should exist");
+        assert_eq!(cmd.game_args[user_type_pos + 1], "msa");
+
+        let uuid_pos = cmd
+            .game_args
+            .iter()
+            .position(|arg| arg == "--uuid")
+            .expect("--uuid should exist");
+        assert_eq!(cmd.game_args[uuid_pos + 1], hex_uuid);
+    }
+
+    #[test]
     fn test_launch_command_build_legacy() {
         let instance = mock_instance("legacy_inst");
         let global_config = LauncherConfig::default();
