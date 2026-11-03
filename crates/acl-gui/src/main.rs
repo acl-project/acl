@@ -16,7 +16,8 @@ use tracing_subscriber::EnvFilter;
 use crate::app::AppModel;
 
 fn init_logging() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,relm4=warn,reqwest=warn,hyper=warn")); // Avoid having reqwest print the full request body.
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 

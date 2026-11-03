@@ -37,7 +37,7 @@ impl GameProcess {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct LaunchCommand {
     pub java_path: PathBuf,
     /// Working dir
@@ -45,6 +45,31 @@ pub struct LaunchCommand {
     pub jvm_args: Vec<String>,
     pub main_class: String,
     pub game_args: Vec<String>,
+}
+
+impl std::fmt::Debug for LaunchCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sanitized_game_args: Vec<String> = self
+            .game_args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                if i > 0 && self.game_args.get(i - 1).map(|s| s.as_str()) == Some("--accessToken") {
+                    "[REDACTED]".to_string()
+                } else {
+                    arg.clone()
+                }
+            })
+            .collect();
+
+        f.debug_struct("LaunchCommand")
+            .field("java_path", &self.java_path)
+            .field("game_dir", &self.game_dir)
+            .field("jvm_args", &self.jvm_args)
+            .field("main_class", &self.main_class)
+            .field("game_args", &sanitized_game_args)
+            .finish()
+    }
 }
 
 impl LaunchCommand {
