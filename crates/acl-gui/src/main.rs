@@ -17,7 +17,10 @@ use crate::app::AppModel;
 
 fn init_logging() {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,relm4=warn,reqwest=warn,hyper=warn")); // Avoid having reqwest print the full request body.
+        .unwrap_or_else(|_| EnvFilter::new("info"))
+        .add_directive("relm4=warn".parse().unwrap()) // Avoid printing framework logs for update_cmd_with_view.
+        .add_directive("reqwest=warn".parse().unwrap()) // Avoid having reqwest print the full request body.
+        .add_directive("hyper=warn".parse().unwrap());
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
