@@ -155,4 +155,14 @@ mod tests {
         let expected_uuid_msg = format!("Uuid error: {uuid_err}");
         assert_eq!(AuthError::Uuid(uuid_err).to_string(), expected_uuid_msg);
     }
+
+    #[test]
+    fn test_auth_error_keyring_display() {
+        let keyring_err = keyring::Error::NoEntry;
+        let auth_err = AuthError::from(keyring_err);
+        assert_eq!(
+            auth_err.to_string(),
+            format!("Keyring error: {}", keyring::Error::NoEntry)
+        );
+    }
 }

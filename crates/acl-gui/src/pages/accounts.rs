@@ -618,4 +618,42 @@ mod tests {
         assert_eq!(msg1, msg2);
         assert_ne!(msg1, msg3);
     }
+
+    #[test]
+    fn test_ms_login_state_behavior() {
+        assert_eq!(MsLoginState::default(), MsLoginState::Idle);
+
+        let idle = MsLoginState::Idle;
+        assert_eq!(idle.state_text(), "Starting local login session...");
+        assert!(!idle.is_logging_in());
+        assert!(!idle.is_failed());
+        assert!(!idle.is_waiting_browser());
+
+        let starting = MsLoginState::Starting;
+        assert_eq!(starting.state_text(), "Starting local login session...");
+        assert!(starting.is_logging_in());
+        assert!(!starting.is_failed());
+        assert!(!starting.is_waiting_browser());
+
+        let waiting = MsLoginState::WaitingBrowser("https://example.com".to_string());
+        assert_eq!(
+            waiting.state_text(),
+            "Please complete the sign-in in your web browser."
+        );
+        assert!(waiting.is_logging_in());
+        assert!(!waiting.is_failed());
+        assert!(waiting.is_waiting_browser());
+
+        let failed = MsLoginState::Failed("Network timeout".to_string());
+        assert_eq!(failed.state_text(), "Network timeout");
+        assert!(!failed.is_logging_in());
+        assert!(failed.is_failed());
+        assert!(!failed.is_waiting_browser());
+    }
+
+    #[test]
+    fn test_accounts_cmd_output_debug() {
+        let open_browser = AccountsCmdOutput::OpenBrowser("https://login.live.com".to_string());
+        assert!(format!("{open_browser:?}").contains("OpenBrowser"));
+    }
 }
