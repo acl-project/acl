@@ -119,11 +119,8 @@ impl MicrosoftLoginSession {
 
         match query.get("state") {
             Some(state) if state == &self.state => {}
-            Some(state) => {
-                return Err(AuthError::StateMismatch {
-                    expected: self.state.clone(),
-                    actual: state.clone(),
-                });
+            Some(_) => {
+                return Err(AuthError::StateMismatch);
             }
             None => {
                 return Err(AuthError::InvalidCallbackRequest {
@@ -363,7 +360,7 @@ mod tests {
         });
 
         let err = session.wait_for_callback().await.unwrap_err();
-        assert!(matches!(err, AuthError::StateMismatch { .. }));
+        assert!(matches!(err, AuthError::StateMismatch));
     }
 
     #[tokio::test]

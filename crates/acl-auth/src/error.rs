@@ -45,8 +45,8 @@ pub enum AuthError {
     #[error("OAuth login timed out waiting for browser callback")]
     OAuthTimeout,
 
-    #[error("OAuth state mismatch (expected '{expected}', got '{actual}')")]
-    StateMismatch { expected: String, actual: String },
+    #[error("OAuth state mismatch")]
+    StateMismatch,
 
     #[error("OAuth callback returned error '{error}': {description}")]
     OAuthCallbackError { error: String, description: String },
@@ -112,14 +112,7 @@ mod tests {
             AuthError::OAuthTimeout.to_string(),
             "OAuth login timed out waiting for browser callback"
         );
-        assert_eq!(
-            AuthError::StateMismatch {
-                expected: "abc".to_string(),
-                actual: "xyz".to_string(),
-            }
-            .to_string(),
-            "OAuth state mismatch (expected 'abc', got 'xyz')"
-        );
+        assert_eq!(AuthError::StateMismatch.to_string(), "OAuth state mismatch");
         assert_eq!(
             AuthError::OAuthCallbackError {
                 error: "access_denied".to_string(),
