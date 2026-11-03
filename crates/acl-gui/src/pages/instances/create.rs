@@ -227,16 +227,12 @@ impl CreatePage {
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let download_source = self.config.read().download_source;
+        let url = download_source.rewrite_url(VERSION_MANIFEST_URL);
         sender.oneshot_command(async move {
             let result = if force_refresh {
-                match VersionManifest::fetch_from_url(
-                    &client,
-                    &download_source.rewrite_url(VERSION_MANIFEST_URL),
-                )
-                .await
-                {
+                match VersionManifest::fetch_from_url(&client, &url).await {
                     Ok(manifest) => {
-                        manifest.cache(&cache_dir);
+                        manifest.cache_from_url(&cache_dir, &url);
                         Ok(manifest)
                     }
 
