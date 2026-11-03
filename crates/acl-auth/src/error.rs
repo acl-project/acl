@@ -62,6 +62,9 @@ pub enum AuthError {
 
     #[error("Microsoft refresh token is expired")]
     RefreshTokenExpired,
+
+    #[error("Keyring error: {0}")]
+    Keyring(#[from] keyring::Error),
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;

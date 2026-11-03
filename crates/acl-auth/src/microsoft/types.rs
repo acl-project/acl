@@ -125,7 +125,7 @@ pub struct MinecraftProfileResponse {
 
 /// Authentication credentials
 /// Must be stored securely and never printed.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MicrosoftTokenBundle {
     /// Microsoft long-lived refresh token (valid for 90 days).
     pub refresh_token: String,
@@ -146,11 +146,13 @@ impl MicrosoftTokenBundle {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct MicrosoftLoginResult {
     pub account: Account,
     pub tokens: MicrosoftTokenBundle,
 }
 
+#[derive(Debug, Clone)]
 pub struct MicrosoftRefreshResult {
     pub tokens: MicrosoftTokenBundle,
     pub username: String,

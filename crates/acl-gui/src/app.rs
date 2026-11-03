@@ -4,7 +4,7 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::pages::{
-    accounts::{AccountsOutput, AccountsPage},
+    accounts::{AccountsInit, AccountsOutput, AccountsPage},
     home::{HomeInit, HomeOutput, HomePage},
     instances::{InstancesInit, InstancesPage, InstancesPageOutput},
     settings::{SettingsMsg, SettingsPage},
@@ -240,7 +240,11 @@ impl SimpleComponent for AppModel {
             });
 
         let accounts_page = AccountsPage::builder()
-            .launch((Arc::clone(&accounts_state), accounts_path))
+            .launch(AccountsInit {
+                store: Arc::clone(&accounts_state),
+                accounts_path,
+                client: client.clone(),
+            })
             .forward(sender.input_sender(), |msg| match msg {
                 AccountsOutput::ShowToast(message) => AppMsg::ShowToast(message),
             });
