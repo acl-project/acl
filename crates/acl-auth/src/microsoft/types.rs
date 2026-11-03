@@ -125,7 +125,7 @@ pub struct MinecraftProfileResponse {
 
 /// Authentication credentials
 /// Must be stored securely and never printed.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MicrosoftTokenBundle {
     /// Microsoft long-lived refresh token (valid for 90 days).
     pub refresh_token: String,
@@ -146,11 +146,13 @@ impl MicrosoftTokenBundle {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct MicrosoftLoginResult {
     pub account: Account,
     pub tokens: MicrosoftTokenBundle,
 }
 
+#[derive(Debug, Clone)]
 pub struct MicrosoftRefreshResult {
     pub tokens: MicrosoftTokenBundle,
     pub username: String,
@@ -260,5 +262,36 @@ mod tests {
         let profile_res: MinecraftProfileResponse = serde_json::from_str(profile_json).unwrap();
         assert_eq!(profile_res.id, "4566e69fc90748ee8d71d7ba5aaafced");
         assert_eq!(profile_res.name, "Steve");
+    }
+
+    #[test]
+    fn test_microsoft_login_and_refresh_result_derive() {
+        let account = Account::new_offline("Steve".to_string()).unwrap();
+        let tokens = MicrosoftTokenBundle {
+            refresh_token: "ref_123".into(),
+            access_token: "acc_123".into(),
+            expires_at: 1234567890,
+        };
+        let login_res = MicrosoftLoginResult {
+            account,
+            tokens: tokens.clone(),
+        };
+        let login_clone = login_res.clone();
+        assert_eq!(login_clone.account.username, "Steve");
+        assert_eq!(login_clone.tokens.refresh_token, "ref_123");
+        let debug_str = format!("{login_res:?}");
+        assert!(debug_str.contains("MicrosoftLoginResult"));
+        assert!(debug_str.contains("Steve"));
+
+        let refresh_res = MicrosoftRefreshResult {
+            tokens,
+            username: "Steve".to_string(),
+            uuid: "4566e69fc90748ee8d71d7ba5aaafced".to_string(),
+        };
+        let refresh_clone = refresh_res.clone();
+        assert_eq!(refresh_clone.username, "Steve");
+        assert_eq!(refresh_clone.uuid, "4566e69fc90748ee8d71d7ba5aaafced");
+        let refresh_debug = format!("{refresh_res:?}");
+        assert!(refresh_debug.contains("MicrosoftRefreshResult"));
     }
 }

@@ -36,6 +36,7 @@ When reviewing the code, follow these guidelines:
 - Ensure that branch names follow the `feat/` or `fix/` naming conventions, as appropriate.
 - Production code must not contain code that can cause crashes, such as unwrap/expect/panic!, direct slice indexing, raw arithmetic, etc.
 - Check for any files that are missing a copyright notice, or whose copyright notice format is incorrect.
+- It is strictly forbidden to read sensitive information, including files such as .cargo/config.toml.
 
 # Mandatory Pre-Delivery Verification
 
