@@ -61,6 +61,7 @@ dependencies = [
  "relm4-components",
  "reqwest",
  "sysinfo",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
  "uuid",

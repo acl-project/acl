@@ -15,8 +15,11 @@ use gtk::prelude::*;
 use relm4::tokio::time::MissedTickBehavior;
 use relm4::{Component, ComponentParts, ComponentSender, RelmWidgetExt, tokio};
 use relm4::{SharedState, adw};
+use thiserror::Error;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+use LaunchError::Other;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LaunchStage {
@@ -69,10 +72,26 @@ impl LaunchStage {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum LaunchError {
+    #[error("Microsoft session for \"{username}\" has expired")]
+    RefreshTokenExpired { username: String },
+
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for LaunchError {
+    fn from(msg: String) -> Self {
+        Self::Other(msg)
+    }
+}
+
 #[derive(Debug)]
 pub enum HomeOutput {
     ShowToast(String),
     RequestClose,
+    PromptReauth(String),
 }
 
 #[derive(Debug)]
@@ -86,7 +105,7 @@ pub enum HomeInput {
 pub enum HomeCmdOutput {
     UpdateUsername(Uuid, String),
     StageChanged(LaunchStage),
-    LaunchFinished(Result<String, String>),
+    LaunchFinished(Result<String, LaunchError>),
     GameExited {
         id: String,
         name: String,
@@ -185,29 +204,38 @@ impl HomePage {
         account: &mut Account,
         client: &reqwest::Client,
         client_id: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<String, LaunchError> {
         match account.account_type {
             AccountType::Offline => Ok("0".to_string()),
             AccountType::Microsoft => {
-                let tokens = CredentialStore::get(account.uuid).map_err(|err| err.to_string())?;
+                let tokens =
+                    CredentialStore::get(account.uuid).map_err(|err| Other(err.to_string()))?;
                 // Return directly if the token has not expired
                 if !tokens.is_expired() {
                     return Ok(tokens.access_token);
                 }
 
                 let Some(client_id) = client_id else {
-                    return Err("Client ID not set".to_string());
+                    return Err(Other("Client ID not set".to_string()));
                 };
 
                 let res = MicrosoftAuth::refresh(client, client_id, &tokens.refresh_token)
                     .await
-                    .map_err(|err| err.to_string())?;
+                    .map_err(|err| match err {
+                        acl_auth::AuthError::RefreshTokenExpired => {
+                            LaunchError::RefreshTokenExpired {
+                                username: account.username.clone(),
+                            }
+                        }
+                        other => LaunchError::Other(other.to_string()),
+                    })?;
 
                 if res.uuid.parse::<Uuid>().ok() != Some(account.uuid) {
-                    return Err("UUIDs do not match".to_string());
+                    return Err(Other("UUIDs do not match".to_string()));
                 }
 
-                CredentialStore::set(account.uuid, &res.tokens).map_err(|err| err.to_string())?;
+                CredentialStore::set(account.uuid, &res.tokens)
+                    .map_err(|err| Other(err.to_string()))?;
 
                 // Update username
                 if account.username != res.username {
@@ -249,7 +277,7 @@ impl HomePage {
         sender.command(move |out, shutdown| {
             shutdown
                 .register(async move {
-                    let result: Result<String, String> = async {
+                    let result: Result<String, LaunchError> = async {
                         // Log in to obtain an access token.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Authenticating));
                         let old_username = account.username.clone();
@@ -267,12 +295,12 @@ impl HomePage {
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::LoadingMetadata));
                         let metadata = instance
                             .load_metadata()
-                            .map_err(|e| format!("Failed to load version metadata: {e}"))?;
+                            .map_err(|e| Other(format!("Failed to load version metadata: {e}")))?;
 
                         // Validate and select a matching Java runtime.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::CheckingJava));
                         let java = launch::select_java(&instance, &global_config, &metadata)
-                            .map_err(|e| format!("Java error: {e}"))?;
+                            .map_err(|e| Other(format!("Java error: {e}")))?;
 
                         // Validate and concurrently compare all files (client.jar, libraries, assets).
                         let _ =
@@ -284,7 +312,7 @@ impl HomePage {
                             global_config.download_source,
                         )
                         .await
-                        .map_err(|e| format!("Failed to verify asset index: {e}"))?;
+                        .map_err(|e| Other(format!("Failed to verify asset index: {e}")))?;
 
                         let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
                         let tasks = instance.check_integrity(tasks);
@@ -296,7 +324,7 @@ impl HomePage {
                             None,
                         )
                         .await
-                        .map_err(|e| format!("Failed to verify resources: {e}"))?;
+                        .map_err(|e| Other(format!("Failed to verify resources: {e}")))?;
 
                         // Extract native libraries and prepare legacy asset mappings.
                         let _ =
@@ -308,8 +336,8 @@ impl HomePage {
                             inst_clone.prepare_runtime(&metadata_clone, &asset_index, &dirs_clone)
                         })
                         .await
-                        .map_err(|e| format!("Runtime task execution error: {e}"))?
-                        .map_err(|e| format!("Failed to prepare runtime: {e}"))?;
+                        .map_err(|e| Other(format!("Runtime task execution error: {e}")))?
+                        .map_err(|e| Other(format!("Failed to prepare runtime: {e}")))?;
 
                         // Assemble the launch command and start the game process.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Launching));
@@ -322,14 +350,14 @@ impl HomePage {
                             &access_token,
                             java.path,
                         )
-                        .map_err(|e| format!("Failed to build launch command: {e}"))?;
+                        .map_err(|e| Other(format!("Failed to build launch command: {e}")))?;
 
                         let spawn_time = SystemTime::now();
 
                         let process = cmd
                             .spawn()
                             .await
-                            .map_err(|e| format!("Failed to spawn game process: {e}"))?;
+                            .map_err(|e| Other(format!("Failed to spawn game process: {e}")))?;
 
                         // A background standalone task monitors the process exit.
                         let inst_name = instance.config.name.clone();
@@ -512,10 +540,15 @@ impl Component for HomePage {
             HomeCmdOutput::LaunchFinished(result) => {
                 self.stage = LaunchStage::Idle;
                 match result {
-                    Err(err) => {
-                        error!("Failed to launch game: {err}");
-                        let _ = sender.output(HomeOutput::ShowToast(err));
-                    }
+                    Err(err) => match err {
+                        LaunchError::RefreshTokenExpired { username } => {
+                            let _ = sender.output(HomeOutput::PromptReauth(username));
+                        }
+                        LaunchError::Other(msg) => {
+                            error!("Failed to launch game: {msg}");
+                            let _ = sender.output(HomeOutput::ShowToast(msg.to_string()));
+                        }
+                    },
                     Ok(id) => {
                         if let Some(ins) = self
                             .mgr
@@ -670,5 +703,41 @@ mod tests {
             LaunchStage::WaitingWindow.status_text(),
             Some("Waiting for game window...".to_string())
         );
+    }
+
+    #[test]
+    fn test_launch_error_display() {
+        let expired = LaunchError::RefreshTokenExpired {
+            username: "Steve".to_string(),
+        };
+        assert_eq!(
+            expired.to_string(),
+            "Microsoft session for \"Steve\" has expired"
+        );
+
+        let other = LaunchError::Other("Network failure".to_string());
+        assert_eq!(other.to_string(), "Network failure");
+    }
+
+    #[test]
+    fn test_launch_error_from_string() {
+        let err: LaunchError = "Custom error message".to_string().into();
+        assert_eq!(err, LaunchError::Other("Custom error message".to_string()));
+    }
+
+    #[test]
+    fn test_launch_error_traits() {
+        let err1 = LaunchError::RefreshTokenExpired {
+            username: "Alex".to_string(),
+        };
+        let err2 = err1.clone();
+        assert_eq!(err1, err2);
+        assert_ne!(
+            err1,
+            LaunchError::RefreshTokenExpired {
+                username: "Steve".to_string(),
+            }
+        );
+        assert!(format!("{err1:?}").contains("RefreshTokenExpired"));
     }
 }
