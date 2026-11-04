@@ -4,6 +4,7 @@
 pub mod app;
 pub mod pages;
 mod system;
+pub mod widgets;
 
 use std::process::ExitCode;
 

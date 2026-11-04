@@ -3,11 +3,14 @@
 
 use std::{str::FromStr, sync::Arc, time::Duration};
 
-use crate::pages::{
-    accounts::{AccountsInit, AccountsOutput, AccountsPage},
-    home::{HomeInit, HomeOutput, HomePage},
-    instances::{InstancesInit, InstancesPage, InstancesPageOutput},
-    settings::{SettingsOutput, SettingsPage},
+use crate::{
+    pages::{
+        accounts::{AccountsInit, AccountsOutput, AccountsPage},
+        home::{HomeInit, HomeOutput, HomePage},
+        instances::{InstancesInit, InstancesPage, InstancesPageOutput},
+        settings::{SettingsOutput, SettingsPage},
+    },
+    widgets::ms_login::{MsLoginDialog, MsLoginInit, MsLoginInput, MsLoginOutput},
 };
 use adw::prelude::*;
 use gtk::prelude::GtkWindowExt;
@@ -75,6 +78,7 @@ pub struct AppModel {
     instances_page: Controller<InstancesPage>,
     accounts_page: Controller<AccountsPage>,
     settings_page: Controller<SettingsPage>,
+    ms_login: Controller<MsLoginDialog>,
 
     #[allow(dead_code)]
     config: Arc<SharedState<LauncherConfig>>,
@@ -90,6 +94,8 @@ pub struct AppModel {
 pub enum AppMsg {
     Navigate(NavPage),
     ShowToast(String),
+    StartMicrosoftLogin,
+    PromptReauth(String),
     Quit,
 }
 
@@ -216,6 +222,18 @@ impl SimpleComponent for AppModel {
             });
 
         // Initialize ui widgets
+
+        let ms_login = MsLoginDialog::builder()
+            .launch(MsLoginInit {
+                parent: root.clone().upcast(),
+                store: Arc::clone(&accounts_state),
+                accounts_path: accounts_path.clone(),
+                client: client.clone(),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                MsLoginOutput::ShowToast(message) => AppMsg::ShowToast(message),
+            });
+
         let home_page = HomePage::builder()
             .launch(HomeInit {
                 mgr: Arc::clone(&instances_state),
@@ -227,6 +245,7 @@ impl SimpleComponent for AppModel {
             .forward(sender.input_sender(), |msg| match msg {
                 HomeOutput::ShowToast(message) => AppMsg::ShowToast(message),
                 HomeOutput::RequestClose => AppMsg::Quit,
+                HomeOutput::PromptReauth(uesrname) => AppMsg::PromptReauth(uesrname),
             });
         let instances_page = InstancesPage::builder()
             .launch(InstancesInit {
@@ -248,6 +267,7 @@ impl SimpleComponent for AppModel {
             })
             .forward(sender.input_sender(), |msg| match msg {
                 AccountsOutput::ShowToast(message) => AppMsg::ShowToast(message),
+                AccountsOutput::RequestMicrosoftLogin => AppMsg::StartMicrosoftLogin,
             });
 
         let settings_page = SettingsPage::builder()
@@ -264,6 +284,7 @@ impl SimpleComponent for AppModel {
             instances_page,
             accounts_page,
             settings_page,
+            ms_login,
             config: config_state,
             accounts: accounts_state,
             instances: instances_state,
@@ -300,6 +321,12 @@ impl SimpleComponent for AppModel {
             }
             AppMsg::Quit => {
                 relm4::main_application().quit();
+            }
+            AppMsg::StartMicrosoftLogin => {
+                self.ms_login.emit(MsLoginInput::Start);
+            }
+            AppMsg::PromptReauth(username) => {
+                self.ms_login.emit(MsLoginInput::PromptReauth { username });
             }
         }
     }
