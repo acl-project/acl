@@ -11,6 +11,7 @@ path = "src/main.rs"
 acl-core = { workspace = true }
 acl-auth = { workspace = true }
 acl-minecraft = { workspace = true }
+acl-common = { workspace = true }
 
 gtk = { workspace = true }
 libadwaita = { workspace = true }
@@ -25,3 +26,8 @@ uuid = { workspace = true }
 
 reqwest = { workspace = true }
 thiserror = { workspace = true }
+
+i18n-embed = { workspace = true }
+rust-embed = { workspace = true }
+unic-langid = { workspace = true }
+fluent = { workspace = true }

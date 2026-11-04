@@ -58,3 +58,8 @@ sysinfo = "0.40"
 sys-locale = "0.3"
 iana-time-zone = "0.1"
 keyring = { version = "4", default-features = false, features = ["v1","zbus-secret-service-keyring-store"] }
+
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+rust-embed = "8"
+unic-langid = "0.9"
+fluent = "0.17"
