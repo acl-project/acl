@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use acl_common::region::is_mainland_china;
+use acl_common::{Language, region::is_mainland_china};
 use acl_minecraft::mirror::DownloadSource;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -36,6 +36,8 @@ pub struct LauncherConfig {
     pub download_source: DownloadSource,
     /// Offline feature toggle.
     pub enable_offline: bool,
+    /// Current language.
+    pub language: Language,
 }
 
 impl Default for LauncherConfig {
@@ -49,6 +51,7 @@ impl Default for LauncherConfig {
             close_launcher_on_launch: false,
             download_source: DownloadSource::Official,
             enable_offline: false,
+            language: Language::System,
         }
     }
 }
@@ -83,6 +86,7 @@ impl LauncherConfig {
             close_launcher_on_launch: false,
             download_source,
             enable_offline: false, // Offline login is disabled by default.
+            language: Language::System,
         }
     }
 
@@ -207,6 +211,7 @@ mod tests {
                 close_launcher_on_launch: true,
                 download_source: DownloadSource::Official,
                 enable_offline,
+                language: Language::System,
             };
 
             let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");

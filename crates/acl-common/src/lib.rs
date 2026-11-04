@@ -2,4 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod fs;
+pub mod language;
 pub mod region;
+
+pub use language::Language;
