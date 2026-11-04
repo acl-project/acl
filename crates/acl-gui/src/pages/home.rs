@@ -19,7 +19,7 @@ use thiserror::Error;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::pages::home::LaunchError::Other;
+use LaunchError::Other;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LaunchStage {

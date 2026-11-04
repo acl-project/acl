@@ -245,7 +245,7 @@ impl SimpleComponent for AppModel {
             .forward(sender.input_sender(), |msg| match msg {
                 HomeOutput::ShowToast(message) => AppMsg::ShowToast(message),
                 HomeOutput::RequestClose => AppMsg::Quit,
-                HomeOutput::PromptReauth(uesrname) => AppMsg::PromptReauth(uesrname),
+                HomeOutput::PromptReauth(username) => AppMsg::PromptReauth(username),
             });
         let instances_page = InstancesPage::builder()
             .launch(InstancesInit {

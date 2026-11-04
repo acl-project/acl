@@ -166,9 +166,6 @@ pub enum AccountsInput {
 }
 
 #[derive(Debug)]
-pub enum AccountsCmdOutput {}
-
-#[derive(Debug)]
 pub struct AccountsInit {
     pub store: Arc<SharedState<AccountStore>>,
     pub config: Arc<SharedState<LauncherConfig>>,
@@ -202,7 +199,7 @@ impl Component for AccountsPage {
     type Init = AccountsInit;
     type Output = AccountsOutput;
     type Input = AccountsInput;
-    type CommandOutput = AccountsCmdOutput;
+    type CommandOutput = ();
 
     view! {
         #[root]
@@ -427,14 +424,6 @@ impl Component for AccountsPage {
                 let _ = sender.output(AccountsOutput::RequestMicrosoftLogin);
             }
         }
-    }
-
-    fn update_cmd(
-        &mut self,
-        _msg: Self::CommandOutput,
-        _sender: ComponentSender<Self>,
-        _root: &Self::Root,
-    ) {
     }
 }
 
