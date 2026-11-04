@@ -51,3 +51,43 @@ macro_rules! t {
 
     }};
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_language_loader_initialization_safety() {
+        let loader = &*LANGUAGE_LOADER;
+        let res = loader.get("nonexistent.key");
+        assert!(!res.is_empty());
+    }
+
+    #[test]
+    fn test_apply_language_all_variants() {
+        let variants = [
+            Language::System,
+            Language::English,
+            Language::SimplifiedChinese,
+        ];
+
+        for lang in variants {
+            apply_language(lang);
+        }
+    }
+
+    #[test]
+    fn test_t_macro_basic_expansion() {
+        let result = t!("app.name", "Adwaita Craft Launcher");
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_t_macro_with_arguments() {
+        let single_arg = t!("greet.user", "Hello {name}", name = "Player");
+        assert!(!single_arg.is_empty());
+
+        let multi_arg = t!("info.version", "{app} version {ver}", app = "ACL", ver = 1);
+        assert!(!multi_arg.is_empty());
+    }
+}
