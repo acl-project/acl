@@ -4,6 +4,7 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::{
+    i18n::apply_language,
     pages::{
         accounts::{AccountsInit, AccountsOutput, AccountsPage},
         home::{HomeInit, HomeOutput, HomePage},
@@ -180,6 +181,8 @@ impl SimpleComponent for AppModel {
                 LauncherConfig::default()
             }
         };
+
+        apply_language(config.language);
 
         let config_state = Arc::new(SharedState::<LauncherConfig>::new());
         *config_state.write() = config;

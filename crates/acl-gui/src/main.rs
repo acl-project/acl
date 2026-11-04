@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod app;
+pub mod i18n;
 pub mod pages;
-mod system;
 pub mod widgets;
+
+mod system;
 
 use std::process::ExitCode;
 
