@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 sys-locale = { workspace = true }
 iana-time-zone = { workspace = true }
+serde = { workspace = true }
