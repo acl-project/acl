@@ -704,4 +704,40 @@ mod tests {
             Some("Waiting for game window...".to_string())
         );
     }
+
+    #[test]
+    fn test_launch_error_display() {
+        let expired = LaunchError::RefreshTokenExpired {
+            username: "Steve".to_string(),
+        };
+        assert_eq!(
+            expired.to_string(),
+            "Microsoft session for \"Steve\" has expired"
+        );
+
+        let other = LaunchError::Other("Network failure".to_string());
+        assert_eq!(other.to_string(), "Network failure");
+    }
+
+    #[test]
+    fn test_launch_error_from_string() {
+        let err: LaunchError = "Custom error message".to_string().into();
+        assert_eq!(err, LaunchError::Other("Custom error message".to_string()));
+    }
+
+    #[test]
+    fn test_launch_error_traits() {
+        let err1 = LaunchError::RefreshTokenExpired {
+            username: "Alex".to_string(),
+        };
+        let err2 = err1.clone();
+        assert_eq!(err1, err2);
+        assert_ne!(
+            err1,
+            LaunchError::RefreshTokenExpired {
+                username: "Steve".to_string(),
+            }
+        );
+        assert!(format!("{err1:?}").contains("RefreshTokenExpired"));
+    }
 }
