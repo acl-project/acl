@@ -45,7 +45,7 @@ impl<T: LocalizeError + ?Sized> LocalizeError for &T {
 
 // A hacky trick.
 
-/// Perform type dispatch by reference,
+/// Perform type dispatch by reference, using autoref-based specialization
 /// So that "LocalizeError" automatically calls "to_i18n()" to obtain the translated string
 /// "Path" automatically uses "display()" to display the path
 #[doc(hidden)]
@@ -96,10 +96,11 @@ impl<T: std::fmt::Display> I18nDisplayKind for I18nWrapper<T> {
     }
 }
 
-#[allow(unused_macros)]
 #[macro_export]
 macro_rules! t {
     // Garbage syntax
+
+    // "default_en" is used by xtask to automatically generate the English source text.
     ($message_id:literal, $default_en:literal) => {{
         $crate::i18n::LANGUAGE_LOADER.get($message_id)
     }};

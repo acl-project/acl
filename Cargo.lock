@@ -3841,6 +3841,7 @@ dependencies = [
  "anyhow",
  "clap",
  "fluent-syntax",
+ "heck",
  "proc-macro2",
  "serde",
  "syn 3.0.9",

@@ -14,6 +14,7 @@ use fluent_syntax::{
     ast::{Entry, Resource},
     serializer,
 };
+use heck::ToKebabCase;
 use proc_macro2::{TokenStream, TokenTree};
 use serde::{Deserialize, Serialize};
 use syn::{Expr, Fields, Item, LitStr, Meta, Token, parse::Parser, punctuated::Punctuated};
@@ -131,12 +132,13 @@ fn parse_t_args(tokens: TokenStream, entries: &mut BTreeMap<String, String>) -> 
     let Ok(args) = parser.parse2(tokens) else {
         return Ok(()); // Skip the "macro_rules! t" definition body itself.
     };
-    if args.len() < 2 {
-        return Ok(());
-    }
-    let (Expr::Lit(key_expr), Expr::Lit(en_expr)) = (&args[0], &args[1]) else {
+
+    // Safely retrieve the first and second arguments; return directly if there are not enough.
+    let mut iter = args.iter();
+    let (Some(Expr::Lit(key_expr)), Some(Expr::Lit(en_expr))) = (iter.next(), iter.next()) else {
         return Ok(());
     };
+
     let (syn::Lit::Str(key_lit), syn::Lit::Str(en_lit)) = (&key_expr.lit, &en_expr.lit) else {
         return Ok(());
     };
@@ -153,30 +155,6 @@ fn parse_t_args(tokens: TokenStream, entries: &mut BTreeMap<String, String>) -> 
     entries.insert(key, fluent_val);
 
     Ok(())
-}
-
-/// Convert CamelCase to kebab-case, e.g., "JavaNotFound" -> "java-not-found".
-pub fn to_kebab_case(s: &str) -> String {
-    let mut out = String::new();
-    let chars: Vec<char> = s.chars().collect();
-
-    for (i, &ch) in chars.iter().enumerate() {
-        if ch.is_ascii_uppercase() {
-            if i > 0 {
-                let prev_lower = chars[i - 1].is_ascii_lowercase() || chars[i - 1].is_ascii_digit();
-                let next_lower = i + 1 < chars.len() && chars[i + 1].is_ascii_lowercase();
-
-                if prev_lower || next_lower {
-                    out.push('-');
-                }
-            }
-            out.push(ch.to_ascii_lowercase());
-        } else {
-            out.push(ch);
-        }
-    }
-
-    out
 }
 
 pub fn scan_gui_dir(dir: &Path, map: &mut BTreeMap<String, String>) -> anyhow::Result<()> {
@@ -223,7 +201,7 @@ pub fn parse_error_enum(
         };
 
         let enum_ident = enum_item.ident.to_string();
-        let enum_kebab = to_kebab_case(&enum_ident);
+        let enum_kebab = enum_ident.to_kebab_case();
         let mut arms = Vec::new();
 
         for variant in &enum_item.variants {
@@ -241,7 +219,7 @@ pub fn parse_error_enum(
                 let raw = lit_str.value();
                 let v_ident = variant.ident.to_string();
 
-                let key = format!("{enum_kebab}-{}", to_kebab_case(&v_ident));
+                let key = format!("{enum_kebab}-{}", v_ident.to_kebab_case());
                 let value = to_fluent_pattern(&raw);
 
                 if let Some(existing) = entries.get(&key)
@@ -344,7 +322,7 @@ fn format_rust_code(code: &str) -> anyhow::Result<String> {
 
     let output = child.wait_with_output()?;
     if !output.status.success() {
-        bail!("rustfmt failed");
+        bail!("Rustfmt failed");
     }
     Ok(String::from_utf8(output.stdout)?)
 }
