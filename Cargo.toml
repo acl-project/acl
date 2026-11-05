@@ -6,6 +6,7 @@ members = [
     "crates/acl-minecraft",
     "crates/acl-auth",
     "crates/acl-common",
+    "xtask",
 ]
 
 default-members = ["crates/acl-gui"]
@@ -63,3 +64,9 @@ i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester
 rust-embed = "8"
 unic-langid = "0.9"
 fluent = "0.17"
+fluent-syntax = "0.12"
+
+syn = { version = "3.0", features = ["full", "extra-traits"] }
+proc-macro2 = "1.0"
+walkdir = "2.5"
+clap = { version = "4.6", features = ["derive"] }

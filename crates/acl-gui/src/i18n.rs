@@ -33,18 +33,85 @@ pub fn apply_language(lang: Language) {
     let _ = i18n_embed::select(&*LANGUAGE_LOADER, &Localizations, &requested);
 }
 
-// Garbage syntax
+pub trait LocalizeError {
+    fn to_i18n(&self) -> String;
+}
+
+impl<T: LocalizeError + ?Sized> LocalizeError for &T {
+    fn to_i18n(&self) -> String {
+        (**self).to_i18n()
+    }
+}
+
+// A hacky trick.
+
+/// Perform type dispatch by reference,
+/// So that "LocalizeError" automatically calls "to_i18n()" to obtain the translated string
+/// "Path" automatically uses "display()" to display the path
+#[doc(hidden)]
+pub struct I18nWrapper<T>(pub T);
+
+#[doc(hidden)]
+pub trait I18nErrorKind {
+    fn to_i18n_arg(&self) -> String;
+}
+impl<T: LocalizeError> I18nErrorKind for &&I18nWrapper<T> {
+    fn to_i18n_arg(&self) -> String {
+        self.0.to_i18n()
+    }
+}
+
+#[doc(hidden)]
+pub trait I18nPathKind {
+    fn to_i18n_arg(&self) -> String;
+}
+impl I18nPathKind for &I18nWrapper<&std::path::Path> {
+    fn to_i18n_arg(&self) -> String {
+        self.0.display().to_string()
+    }
+}
+impl I18nPathKind for &I18nWrapper<&&std::path::Path> {
+    fn to_i18n_arg(&self) -> String {
+        self.0.display().to_string()
+    }
+}
+impl I18nPathKind for &I18nWrapper<&std::path::PathBuf> {
+    fn to_i18n_arg(&self) -> String {
+        self.0.display().to_string()
+    }
+}
+impl I18nPathKind for &I18nWrapper<&&std::path::PathBuf> {
+    fn to_i18n_arg(&self) -> String {
+        self.0.display().to_string()
+    }
+}
+
+#[doc(hidden)]
+pub trait I18nDisplayKind {
+    fn to_i18n_arg(&self) -> String;
+}
+impl<T: std::fmt::Display> I18nDisplayKind for I18nWrapper<T> {
+    fn to_i18n_arg(&self) -> String {
+        self.0.to_string()
+    }
+}
+
 #[allow(unused_macros)]
 #[macro_export]
 macro_rules! t {
+    // Garbage syntax
     ($message_id:literal, $default_en:literal) => {{
         $crate::i18n::LANGUAGE_LOADER.get($message_id)
     }};
     ($message_id:literal, $default_en:literal, $($key:ident = $value:expr),+$(,)?) => {{
         let mut args = std::collections::HashMap::new();
-
+        #[allow(unused_imports)]
+        use $crate::i18n::{I18nDisplayKind as _, I18nErrorKind as _, I18nPathKind as _};
         $(
-            args.insert(stringify!($key), $value.to_string());
+            args.insert(
+                stringify!($key),
+                (&&&$crate::i18n::I18nWrapper(&$value)).to_i18n_arg(),
+            );
         )+
 
         $crate::i18n::LANGUAGE_LOADER.get_args($message_id, args)
