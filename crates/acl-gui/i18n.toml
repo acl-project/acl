@@ -6,3 +6,4 @@ available_languages = ["zh-CN", "en-US"]
 
 [fluent]
 assets_dir = "../../assets/i18n"
+domain = "acl"

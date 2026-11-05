@@ -478,3 +478,161 @@ pub fn run(check: bool) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_to_fluent_pattern_basic() {
+        assert_eq!(to_fluent_pattern("{foo}").unwrap(), "{ $foo }");
+        assert_eq!(
+            to_fluent_pattern("Hello {name}, welcome!").unwrap(),
+            "Hello { $name }, welcome!"
+        );
+        assert_eq!(to_fluent_pattern("{$name}").unwrap(), "{ $name }");
+        assert_eq!(to_fluent_pattern("{ name }").unwrap(), "{ $name }");
+        assert_eq!(
+            to_fluent_pattern("No placeholders").unwrap(),
+            "No placeholders"
+        );
+    }
+
+    #[test]
+    fn test_to_fluent_pattern_numeric_tuple_args() {
+        assert_eq!(to_fluent_pattern("{0}").unwrap(), "{ $arg0 }");
+        assert_eq!(
+            to_fluent_pattern("Error at {0}: {1}").unwrap(),
+            "Error at { $arg0 }: { $arg1 }"
+        );
+    }
+
+    #[test]
+    fn test_to_fluent_pattern_errors() {
+        assert!(to_fluent_pattern("{}").is_err());
+        assert!(to_fluent_pattern("{   }").is_err());
+        assert!(to_fluent_pattern("{unclosed").is_err());
+        assert!(to_fluent_pattern("{").is_err());
+        assert!(to_fluent_pattern("foo {nested {bar} baz").is_err());
+        assert!(to_fluent_pattern("unmatched } brace").is_err());
+    }
+
+    #[test]
+    fn test_parse_error_enum_str_variants() {
+        let code = r#"
+            #[derive(thiserror::Error, Debug)]
+            pub enum SampleError {
+                #[error("Network failure")]
+                Network,
+                #[error("I/O error: {0}")]
+                Io(std::io::Error),
+                #[error("Entity '{id}' not found at '{path}'")]
+                NotFound { id: String, path: String },
+            }
+        "#;
+        let mut entries = BTreeMap::new();
+        let generated = parse_error_enum_str(code, "my_crate", &mut entries).unwrap();
+
+        assert!(generated.contains("impl LocalizeError for my_crate::SampleError"));
+        assert!(
+            generated.contains(
+                "Self::Network => crate::t!(\"sample-error-network\", \"Network failure\")"
+            )
+        );
+        assert!(generated.contains(
+            "Self::Io(arg0) => crate::t!(\"sample-error-io\", \"I/O error: {arg0}\", arg0 = arg0)"
+        ));
+        assert!(generated.contains(
+            "Self::NotFound { id, path } => crate::t!(\"sample-error-not-found\", \"Entity '{id}' not found at '{path}'\", id = id, path = path)"
+        ));
+
+        assert_eq!(
+            entries.get("sample-error-network").unwrap(),
+            "Network failure"
+        );
+        assert_eq!(
+            entries.get("sample-error-io").unwrap(),
+            "I/O error: { $arg0 }"
+        );
+        assert_eq!(
+            entries.get("sample-error-not-found").unwrap(),
+            "Entity '{ $id }' not found at '{ $path }'"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_enum_str_unsupported_attribute() {
+        let code = r#"
+            pub enum InvalidAttrError {
+                #[error(12345)]
+                Invalid,
+            }
+        "#;
+        let mut entries = BTreeMap::new();
+        assert!(parse_error_enum_str(code, "my_crate", &mut entries).is_err());
+    }
+
+    #[test]
+    fn test_build_ftl_content_fallback() {
+        let mut entries = BTreeMap::new();
+        entries.insert("app-title".into(), "ACL Launcher".into());
+        entries.insert("greet".into(), "Hello { $name }".into());
+
+        let ftl = build_ftl_content(&entries, None, true).unwrap();
+        assert!(ftl.starts_with("# SPDX-FileCopyrightText: 2026"));
+        assert!(ftl.contains("app-title = ACL Launcher"));
+        assert!(ftl.contains("greet = Hello { $name }"));
+    }
+
+    #[test]
+    fn test_build_ftl_content_target_language() {
+        let mut entries = BTreeMap::new();
+        entries.insert("key-translated".into(), "Source Translated".into());
+        entries.insert("key-new".into(), "Source New".into());
+
+        let existing = "key-translated = 已翻译文本\nkey-obsolete = 废弃文本\n";
+        let ftl = build_ftl_content(&entries, Some(existing), false).unwrap();
+
+        assert!(ftl.contains("# Source: Source Translated"));
+        assert!(ftl.contains("key-translated = 已翻译文本"));
+
+        assert!(ftl.contains("# Source: Source New"));
+        assert!(ftl.contains("# key-new = Source New"));
+
+        // Obsolete key should be removed
+        assert!(!ftl.contains("key-obsolete"));
+    }
+
+    #[test]
+    fn test_extract_t_from_stream_skips_tests() {
+        let code = r#"
+            fn normal_fn() {
+                let _ = t!("app.name", "Adwaita Craft Launcher");
+            }
+
+            #[test]
+            fn test_fn() {
+                let _ = t!("test.ignored1", "Should not be extracted");
+            }
+
+            #[cfg(test)]
+            mod tests {
+                fn inner_test() {
+                    let _ = t!("test.ignored2", "Should also not be extracted");
+                }
+            }
+        "#;
+        let stream = TokenStream::from_str(code).unwrap();
+        let mut entries = BTreeMap::new();
+        extract_t_from_stream(stream, &mut entries).unwrap();
+
+        assert_eq!(
+            entries.get("app.name").map(String::as_str),
+            Some("Adwaita Craft Launcher")
+        );
+        assert!(!entries.contains_key("test.ignored1"));
+        assert!(!entries.contains_key("test.ignored2"));
+    }
+}
