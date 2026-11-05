@@ -21,7 +21,7 @@ fn run() -> anyhow::Result<()> {
 
 fn main() -> ExitCode {
     if let Err(err) = run() {
-        println!("{err}");
+        eprintln!("{err}");
         return ExitCode::FAILURE;
     }
 

@@ -47,14 +47,23 @@ pub fn to_fluent_pattern(raw: &str) -> anyhow::Result<String> {
     while let Some(ch) = chars.next() {
         if ch == '{' {
             let mut var = String::new();
-            while let Some(&c) = chars.peek() {
-                chars.next();
+            // Check whether there are extra "{" or unclosed "}".
+            let mut closed = false;
+            for c in chars.by_ref() {
+                if c == '{' {
+                    bail!("Unexpected nested '{{' in placeholder: {raw:?}");
+                }
                 if c == '}' {
+                    closed = true;
                     break;
                 }
-
                 var.push(c);
             }
+
+            if !closed {
+                bail!("Unclosed placeholder in text: {raw:?}");
+            }
+
             let trimmed = var.trim();
             // Strip the manually written $.
             let name = trimmed
@@ -70,6 +79,8 @@ pub fn to_fluent_pattern(raw: &str) -> anyhow::Result<String> {
             } else {
                 out.push_str(&format!("{{ ${name} }}"));
             }
+        } else if ch == '}' {
+            bail!("Unmatched '}}' in text: {raw:?}");
         } else {
             out.push(ch);
         }
@@ -344,7 +355,10 @@ fn format_rust_code(code: &str) -> anyhow::Result<String> {
 
     let output = child.wait_with_output()?;
     if !output.status.success() {
-        bail!("Rustfmt failed");
+        bail!(
+            "Rustfmt failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     Ok(String::from_utf8(output.stdout)?)
 }
