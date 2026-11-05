@@ -1,0 +1,638 @@
+// SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+use std::{
+    collections::BTreeMap,
+    fs,
+    io::Write,
+    path::Path,
+    process::{Command, Stdio},
+};
+
+use anyhow::{Context, bail};
+use fluent_syntax::{
+    ast::{Comment, Entry, Resource},
+    serializer,
+};
+use heck::ToKebabCase;
+use proc_macro2::{TokenStream, TokenTree};
+use serde::{Deserialize, Serialize};
+use syn::{Expr, Fields, Item, LitStr, Meta, Token, parse::Parser, punctuated::Punctuated};
+use walkdir::WalkDir;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct I18nConfig {
+    pub fallback_language: String,
+    pub available_languages: Vec<String>,
+    pub fluent: FluentConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FluentConfig {
+    pub assets_dir: String,
+}
+
+impl I18nConfig {
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let content = fs::read_to_string(path)?;
+        let config = toml::from_str(&content)?;
+        Ok(config)
+    }
+}
+
+/// Convert "{name}" to the Fluent format "{ $name }".
+pub fn to_fluent_pattern(raw: &str) -> anyhow::Result<String> {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '{' {
+            let mut var = String::new();
+            // Check whether there are extra "{" or unclosed "}".
+            let mut closed = false;
+            for c in chars.by_ref() {
+                if c == '{' {
+                    bail!("Unexpected nested '{{' in placeholder: {raw:?}");
+                }
+                if c == '}' {
+                    closed = true;
+                    break;
+                }
+                var.push(c);
+            }
+
+            if !closed {
+                bail!("Unclosed placeholder in text: {raw:?}");
+            }
+
+            let trimmed = var.trim();
+            // Strip the manually written $.
+            let name = trimmed
+                .strip_prefix('$')
+                .map(str::trim_start)
+                .unwrap_or(trimmed);
+            if name.is_empty() {
+                bail!("Empty placeholder in text: {raw:?}");
+            }
+            // Handle purely numeric variables in the tuple.
+            if name.chars().all(|c| c.is_ascii_digit()) {
+                out.push_str(&format!("{{ $arg{name} }}"));
+            } else {
+                out.push_str(&format!("{{ ${name} }}"));
+            }
+        } else if ch == '}' {
+            bail!("Unmatched '}}' in text: {raw:?}");
+        } else {
+            out.push(ch);
+        }
+    }
+
+    Ok(out)
+}
+
+fn is_test_attr(group: &proc_macro2::Group) -> bool {
+    if group.delimiter() != proc_macro2::Delimiter::Bracket {
+        return false;
+    }
+    let s = group.stream().to_string().replace(' ', "");
+    s == "test" || s == "cfg(test)" || s.ends_with("::test")
+}
+
+pub fn extract_t_from_stream(
+    stream: TokenStream,
+    entries: &mut BTreeMap<String, String>,
+) -> anyhow::Result<()> {
+    let mut iter = stream.into_iter().peekable();
+    while let Some(tree) = iter.next() {
+        match tree {
+            TokenTree::Punct(punct) if punct.as_char() == '#' => {
+                if let Some(TokenTree::Group(group)) = iter.peek()
+                    && is_test_attr(group)
+                {
+                    iter.next();
+                    // Skip the test entire annotated item until its `{ ... }` body or `;`.
+                    for next_tree in iter.by_ref() {
+                        match next_tree {
+                            TokenTree::Group(g)
+                                if g.delimiter() == proc_macro2::Delimiter::Brace =>
+                            {
+                                break;
+                            }
+                            TokenTree::Punct(p) if p.as_char() == ';' => {
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            TokenTree::Group(group) => {
+                extract_t_from_stream(group.stream(), entries)?;
+            }
+            TokenTree::Ident(ident) if ident == "t" => {
+                if let Some(TokenTree::Punct(punct)) = iter.peek()
+                    && punct.as_char() == '!'
+                {
+                    iter.next(); // Consume the '!'.
+
+                    if let Some(TokenTree::Group(group)) = iter.next() {
+                        parse_t_args(group.stream(), entries)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_t_args(tokens: TokenStream, entries: &mut BTreeMap<String, String>) -> anyhow::Result<()> {
+    let parser = Punctuated::<Expr, Token![,]>::parse_terminated;
+    let Ok(args) = parser.parse2(tokens) else {
+        return Ok(()); // Skip the "macro_rules! t" definition body itself.
+    };
+
+    // Safely retrieve the first and second arguments; return directly if there are not enough.
+    let mut iter = args.iter();
+    let (Some(Expr::Lit(key_expr)), Some(Expr::Lit(en_expr))) = (iter.next(), iter.next()) else {
+        return Ok(());
+    };
+
+    let (syn::Lit::Str(key_lit), syn::Lit::Str(en_lit)) = (&key_expr.lit, &en_expr.lit) else {
+        return Ok(());
+    };
+
+    let key = key_lit.value();
+    let fluent_val = to_fluent_pattern(&en_lit.value())
+        .with_context(|| format!("Invalid pattern for key '{key}'"))?;
+
+    if let Some(existing) = entries.get(&key)
+        && existing != &fluent_val
+    {
+        bail!("Conflicting English text for key '{key}': '{existing}' vs '{fluent_val}'");
+    }
+
+    entries.insert(key, fluent_val);
+
+    Ok(())
+}
+
+pub fn scan_gui_dir(dir: &Path, map: &mut BTreeMap<String, String>) -> anyhow::Result<()> {
+    // Keep files ending in .rs except i18n_errors_gen.rs.
+    let paths = WalkDir::new(dir)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            name != "i18n_errors_gen.rs"
+        })
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+        .filter(|p| p.extension().is_some_and(|s| s.to_str() == Some("rs")));
+
+    for path in paths {
+        let Ok(content) = fs::read_to_string(path) else {
+            continue;
+        };
+        let stream: TokenStream = content.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
+        extract_t_from_stream(stream, map)?;
+    }
+
+    Ok(())
+}
+
+/// Handle the error messages in error enum.
+/// Return generated "impl LocalizeError" code.
+pub fn parse_error_enum(
+    path: &Path,
+    crate_name: &str,
+    entries: &mut BTreeMap<String, String>,
+) -> anyhow::Result<String> {
+    let content = fs::read_to_string(path)?;
+    parse_error_enum_str(&content, crate_name, entries)
+}
+
+pub fn parse_error_enum_str(
+    content: &str,
+    crate_name: &str,
+    entries: &mut BTreeMap<String, String>,
+) -> anyhow::Result<String> {
+    let ast = syn::parse_file(content)?;
+    let mut out = String::new();
+
+    for item in &ast.items {
+        let Item::Enum(enum_item) = item else {
+            continue;
+        };
+
+        let enum_ident = enum_item.ident.to_string();
+        let enum_kebab = enum_ident.to_kebab_case();
+        let mut arms = Vec::new();
+
+        for variant in &enum_item.variants {
+            // Get the key and value.
+            for attr in &variant.attrs {
+                if !attr.path().is_ident("error") {
+                    continue;
+                }
+
+                let Meta::List(list) = &attr.meta else {
+                    continue;
+                };
+
+                let v_ident = variant.ident.to_string();
+                let Ok(lit_str) = list.parse_args::<LitStr>() else {
+                    bail!(
+                        "Unsupported #[error(...)] attribute on {crate_name}::{enum_ident}::{v_ident}: \
+                        only string literals are supported for i18n generation"
+                    );
+                };
+                let raw = lit_str.value();
+                let key = format!("{enum_kebab}-{}", v_ident.to_kebab_case());
+                let value = to_fluent_pattern(&raw)
+                    .with_context(|| format!("Invalid pattern for key '{key}'"))?;
+
+                if let Some(existing) = entries.get(&key)
+                    && existing != &value
+                {
+                    bail!("Conflicting English text for key '{key}': '{existing}' vs '{value}'");
+                }
+
+                entries.insert(key.to_string(), value);
+
+                let arm = match &variant.fields {
+                    Fields::Unit => {
+                        format!("            Self::{v_ident} => crate::t!({key:?}, {raw:?}),")
+                    }
+                    Fields::Unnamed(unnamed) => {
+                        let mut en = raw.clone();
+                        let mut pat_names = Vec::new();
+                        let mut call_args = Vec::new();
+                        for i in 0..unnamed.unnamed.len() {
+                            en = en.replace(&format!("{{{i}}}"), &format!("{{arg{i}}}"));
+                            pat_names.push(format!("arg{i}"));
+                            call_args.push(format!("arg{i} = arg{i}"));
+                        }
+                        let pat = pat_names.join(", ");
+                        let args = call_args.join(", ");
+                        format!(
+                            "            Self::{v_ident}({pat}) => crate::t!({key:?}, {en:?}, {args}),"
+                        )
+                    }
+                    Fields::Named(named) => {
+                        let names: Vec<String> = named
+                            .named
+                            .iter()
+                            .filter_map(|f| f.ident.as_ref().map(ToString::to_string))
+                            .collect();
+
+                        let pat = names.join(", ");
+                        let args = names
+                            .iter()
+                            .map(|n| format!("{n} = {n}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+
+                        format!(
+                            "            Self::{v_ident} {{ {pat} }} => crate::t!({key:?}, {raw:?}, {args}),"
+                        )
+                    }
+                };
+                arms.push(arm);
+            }
+        }
+
+        if !arms.is_empty() {
+            let arms_str = arms.join("\n");
+            out.push_str(&format!(
+                 "\nimpl LocalizeError for {crate_name}::{enum_ident} {{\n    fn to_i18n(&self) -> String {{\n        match self {{\n{arms_str}\n        }}\n
+                       }}\n}}\n"
+            ));
+        }
+    }
+
+    Ok(out)
+}
+
+/// Automatically generate "t!" calls for "thiserror" types
+/// Provides "to_i18n" to obtain the already-translated text.
+pub fn generate_all_errors(entries: &mut BTreeMap<String, String>) -> anyhow::Result<String> {
+    let targets = [
+        ("crates/acl-core/src/error.rs", "acl_core"),
+        ("crates/acl-auth/src/error.rs", "acl_auth"),
+        ("crates/acl-minecraft/src/error.rs", "acl_minecraft"),
+    ];
+
+    let mut code = String::from(
+        "// SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors\n\
+         // SPDX-License-Identifier: GPL-3.0-or-later\n\
+         //\n\
+         // @generated by `cargo xtask i18n`. Do not edit manually.\n\n\
+         use crate::i18n::LocalizeError;\n",
+    );
+
+    for (path, crate_name) in targets {
+        let impl_block = parse_error_enum(Path::new(path), crate_name, entries)?;
+        code.push_str(&impl_block);
+    }
+
+    Ok(code)
+}
+
+fn format_rust_code(code: &str) -> anyhow::Result<String> {
+    let mut child = Command::new("rustfmt")
+        .arg("--edition=2024")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(code.as_bytes())?;
+    }
+
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        bail!(
+            "Rustfmt failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+const FTL_HEADER: &str = "# SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors\n\
+                          # SPDX-License-Identifier: GPL-3.0-or-later\n\n";
+
+/// Build the FTL file content, automatically adding new keys and removing keys that no longer exist.
+pub fn build_ftl_content(
+    entries: &BTreeMap<String, String>,
+    existing_ftl: Option<&str>,
+    is_fallback: bool,
+) -> anyhow::Result<String> {
+    let raw_en: String = entries
+        .iter()
+        .map(|(k, v)| format!("{k} = {v}\n"))
+        .collect();
+    let en_res = fluent_syntax::parser::parse(raw_en)
+        .map_err(|(_, errs)| anyhow::anyhow!("Invalid generated Fluent entry: {errs:?}"))?;
+
+    // The source text in "t!" is the single source of truth for the fallback language.
+    if is_fallback {
+        return Ok(format!("{FTL_HEADER}{}", serializer::serialize(&en_res)));
+    }
+
+    let existing_text = existing_ftl.unwrap_or_default();
+
+    // Get the already-translated entry.
+    let mut existing_map = if existing_text.trim().is_empty() {
+        BTreeMap::new()
+    } else {
+        let existing_res = fluent_syntax::parser::parse(existing_text.to_owned())
+            .map_err(|(_, errs)| anyhow::anyhow!("Fluent syntax error: {errs:?}"))?;
+        let mut map = BTreeMap::new();
+        for entry in existing_res.body {
+            if let Entry::Message(msg) = entry {
+                map.insert(msg.id.name.clone(), msg);
+            }
+        }
+        map
+    };
+
+    let mut body = Vec::new();
+    for entry in en_res.body {
+        if let Entry::Message(en_msg) = entry {
+            let key = en_msg.id.name.clone();
+            let source = entries.get(&key).map(|s| s.as_str()).unwrap_or_default();
+            if let Some(msg) = existing_map.remove(&key) {
+                // A translation already exists; keep it as is.
+                body.push(Entry::Comment(Comment {
+                    content: vec![format!("Source: {source}")],
+                }));
+                body.push(Entry::Message(msg));
+            } else {
+                // New keys will be present as comments requiring translation.
+                body.push(Entry::Comment(Comment {
+                    content: vec![format!("Source: {source}"), format!("{key} = {source}")],
+                }));
+            }
+        }
+    }
+
+    let merged = Resource { body };
+    Ok(format!("{FTL_HEADER}{}", serializer::serialize(&merged)))
+}
+
+fn write_or_check(path: &Path, content: &str, check: bool) -> anyhow::Result<()> {
+    let current = fs::read_to_string(path).unwrap_or_default();
+    if check {
+        if current != content {
+            bail!(
+                "File '{}' is out of date. Please run `cargo xtask i18n`.",
+                path.display()
+            );
+        }
+        return Ok(());
+    }
+
+    if current != content {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        fs::write(path, content)?;
+    }
+
+    Ok(())
+}
+
+pub fn run(check: bool) -> anyhow::Result<()> {
+    let config_path = Path::new("crates/acl-gui/i18n.toml");
+    let config = I18nConfig::load(config_path)?;
+
+    let mut entries = BTreeMap::new();
+    scan_gui_dir(Path::new("crates/acl-gui/src"), &mut entries)?;
+
+    let raw_rs = generate_all_errors(&mut entries)?;
+    let formatted_rs = format_rust_code(&raw_rs)?;
+    write_or_check(
+        Path::new("crates/acl-gui/src/i18n_errors_gen.rs"),
+        &formatted_rs,
+        check,
+    )?;
+
+    let assets_dir = Path::new("crates/acl-gui").join(&config.fluent.assets_dir);
+
+    for lang in &config.available_languages {
+        let ftl_path = assets_dir.join(lang).join("acl.ftl");
+        let content = if lang == &config.fallback_language {
+            build_ftl_content(&entries, None, true)
+        } else {
+            let old_text = fs::read_to_string(&ftl_path).unwrap_or_default();
+            build_ftl_content(&entries, Some(&old_text), false)
+        }?;
+        write_or_check(&ftl_path, &content, check)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn test_to_fluent_pattern_basic() {
+        assert_eq!(to_fluent_pattern("{foo}").unwrap(), "{ $foo }");
+        assert_eq!(
+            to_fluent_pattern("Hello {name}, welcome!").unwrap(),
+            "Hello { $name }, welcome!"
+        );
+        assert_eq!(to_fluent_pattern("{$name}").unwrap(), "{ $name }");
+        assert_eq!(to_fluent_pattern("{ name }").unwrap(), "{ $name }");
+        assert_eq!(
+            to_fluent_pattern("No placeholders").unwrap(),
+            "No placeholders"
+        );
+    }
+
+    #[test]
+    fn test_to_fluent_pattern_numeric_tuple_args() {
+        assert_eq!(to_fluent_pattern("{0}").unwrap(), "{ $arg0 }");
+        assert_eq!(
+            to_fluent_pattern("Error at {0}: {1}").unwrap(),
+            "Error at { $arg0 }: { $arg1 }"
+        );
+    }
+
+    #[test]
+    fn test_to_fluent_pattern_errors() {
+        assert!(to_fluent_pattern("{}").is_err());
+        assert!(to_fluent_pattern("{   }").is_err());
+        assert!(to_fluent_pattern("{unclosed").is_err());
+        assert!(to_fluent_pattern("{").is_err());
+        assert!(to_fluent_pattern("foo {nested {bar} baz").is_err());
+        assert!(to_fluent_pattern("unmatched } brace").is_err());
+    }
+
+    #[test]
+    fn test_parse_error_enum_str_variants() {
+        let code = r#"
+            #[derive(thiserror::Error, Debug)]
+            pub enum SampleError {
+                #[error("Network failure")]
+                Network,
+                #[error("I/O error: {0}")]
+                Io(std::io::Error),
+                #[error("Entity '{id}' not found at '{path}'")]
+                NotFound { id: String, path: String },
+            }
+        "#;
+        let mut entries = BTreeMap::new();
+        let generated = parse_error_enum_str(code, "my_crate", &mut entries).unwrap();
+
+        assert!(generated.contains("impl LocalizeError for my_crate::SampleError"));
+        assert!(
+            generated.contains(
+                "Self::Network => crate::t!(\"sample-error-network\", \"Network failure\")"
+            )
+        );
+        assert!(generated.contains(
+            "Self::Io(arg0) => crate::t!(\"sample-error-io\", \"I/O error: {arg0}\", arg0 = arg0)"
+        ));
+        assert!(generated.contains(
+            "Self::NotFound { id, path } => crate::t!(\"sample-error-not-found\", \"Entity '{id}' not found at '{path}'\", id = id, path = path)"
+        ));
+
+        assert_eq!(
+            entries.get("sample-error-network").unwrap(),
+            "Network failure"
+        );
+        assert_eq!(
+            entries.get("sample-error-io").unwrap(),
+            "I/O error: { $arg0 }"
+        );
+        assert_eq!(
+            entries.get("sample-error-not-found").unwrap(),
+            "Entity '{ $id }' not found at '{ $path }'"
+        );
+    }
+
+    #[test]
+    fn test_parse_error_enum_str_unsupported_attribute() {
+        let code = r#"
+            pub enum InvalidAttrError {
+                #[error(12345)]
+                Invalid,
+            }
+        "#;
+        let mut entries = BTreeMap::new();
+        assert!(parse_error_enum_str(code, "my_crate", &mut entries).is_err());
+    }
+
+    #[test]
+    fn test_build_ftl_content_fallback() {
+        let mut entries = BTreeMap::new();
+        entries.insert("app-title".into(), "ACL Launcher".into());
+        entries.insert("greet".into(), "Hello { $name }".into());
+
+        let ftl = build_ftl_content(&entries, None, true).unwrap();
+        assert!(ftl.starts_with("# SPDX-FileCopyrightText: 2026"));
+        assert!(ftl.contains("app-title = ACL Launcher"));
+        assert!(ftl.contains("greet = Hello { $name }"));
+    }
+
+    #[test]
+    fn test_build_ftl_content_target_language() {
+        let mut entries = BTreeMap::new();
+        entries.insert("key-translated".into(), "Source Translated".into());
+        entries.insert("key-new".into(), "Source New".into());
+
+        let existing = "key-translated = 已翻译文本\nkey-obsolete = 废弃文本\n";
+        let ftl = build_ftl_content(&entries, Some(existing), false).unwrap();
+
+        assert!(ftl.contains("# Source: Source Translated"));
+        assert!(ftl.contains("key-translated = 已翻译文本"));
+
+        assert!(ftl.contains("# Source: Source New"));
+        assert!(ftl.contains("# key-new = Source New"));
+
+        // Obsolete key should be removed
+        assert!(!ftl.contains("key-obsolete"));
+    }
+
+    #[test]
+    fn test_extract_t_from_stream_skips_tests() {
+        let code = r#"
+            fn normal_fn() {
+                let _ = t!("app.name", "Adwaita Craft Launcher");
+            }
+
+            #[test]
+            fn test_fn() {
+                let _ = t!("test.ignored1", "Should not be extracted");
+            }
+
+            #[cfg(test)]
+            mod tests {
+                fn inner_test() {
+                    let _ = t!("test.ignored2", "Should also not be extracted");
+                }
+            }
+        "#;
+        let stream = TokenStream::from_str(code).unwrap();
+        let mut entries = BTreeMap::new();
+        extract_t_from_stream(stream, &mut entries).unwrap();
+
+        assert_eq!(
+            entries.get("app.name").map(String::as_str),
+            Some("Adwaita Craft Launcher")
+        );
+        assert!(!entries.contains_key("test.ignored1"));
+        assert!(!entries.contains_key("test.ignored2"));
+    }
+}

@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod i18n;
+pub mod i18n_errors_gen;
 pub mod pages;
 pub mod widgets;
 
