@@ -9,9 +9,9 @@ use std::{
     process::{Command, Stdio},
 };
 
-use anyhow::bail;
+use anyhow::{Context, bail};
 use fluent_syntax::{
-    ast::{Entry, Resource},
+    ast::{Comment, Entry, Resource},
     serializer,
 };
 use heck::ToKebabCase;
@@ -41,7 +41,7 @@ impl I18nConfig {
 }
 
 /// Convert "{name}" to the Fluent format "{ $name }".
-pub fn to_fluent_pattern(raw: &str) -> String {
+pub fn to_fluent_pattern(raw: &str) -> anyhow::Result<String> {
     let mut out = String::with_capacity(raw.len());
     let mut chars = raw.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -56,18 +56,26 @@ pub fn to_fluent_pattern(raw: &str) -> String {
                 var.push(c);
             }
             let trimmed = var.trim();
+            // Strip the manually written $.
+            let name = trimmed
+                .strip_prefix('$')
+                .map(str::trim_start)
+                .unwrap_or(trimmed);
+            if name.is_empty() {
+                bail!("Empty placeholder in text: {raw:?}");
+            }
             // Handle purely numeric variables in the tuple.
-            if trimmed.chars().all(|c| c.is_ascii_digit()) {
-                out.push_str(&format!("{{ $arg{trimmed} }}"));
+            if name.chars().all(|c| c.is_ascii_digit()) {
+                out.push_str(&format!("{{ $arg{name} }}"));
             } else {
-                out.push_str(&format!("{{ ${trimmed} }}"));
+                out.push_str(&format!("{{ ${name} }}"));
             }
         } else {
             out.push(ch);
         }
     }
 
-    out
+    Ok(out)
 }
 
 fn is_test_attr(group: &proc_macro2::Group) -> bool {
@@ -144,7 +152,8 @@ fn parse_t_args(tokens: TokenStream, entries: &mut BTreeMap<String, String>) -> 
     };
 
     let key = key_lit.value();
-    let fluent_val = to_fluent_pattern(&en_lit.value());
+    let fluent_val = to_fluent_pattern(&en_lit.value())
+        .with_context(|| format!("Invalid pattern for key '{key}'"))?;
 
     if let Some(existing) = entries.get(&key)
         && existing != &fluent_val
@@ -192,7 +201,15 @@ pub fn parse_error_enum(
     entries: &mut BTreeMap<String, String>,
 ) -> anyhow::Result<String> {
     let content = fs::read_to_string(path)?;
-    let ast = syn::parse_file(&content)?;
+    parse_error_enum_str(&content, crate_name, entries)
+}
+
+pub fn parse_error_enum_str(
+    content: &str,
+    crate_name: &str,
+    entries: &mut BTreeMap<String, String>,
+) -> anyhow::Result<String> {
+    let ast = syn::parse_file(content)?;
     let mut out = String::new();
 
     for item in &ast.items {
@@ -215,12 +232,17 @@ pub fn parse_error_enum(
                     continue;
                 };
 
-                let lit_str = list.parse_args::<LitStr>()?;
-                let raw = lit_str.value();
                 let v_ident = variant.ident.to_string();
-
+                let Ok(lit_str) = list.parse_args::<LitStr>() else {
+                    bail!(
+                        "Unsupported #[error(...)] attribute on {crate_name}::{enum_ident}::{v_ident}: \
+                        only string literals are supported for i18n generation"
+                    );
+                };
+                let raw = lit_str.value();
                 let key = format!("{enum_kebab}-{}", v_ident.to_kebab_case());
-                let value = to_fluent_pattern(&raw);
+                let value = to_fluent_pattern(&raw)
+                    .with_context(|| format!("Invalid pattern for key '{key}'"))?;
 
                 if let Some(existing) = entries.get(&key)
                     && existing != &value
@@ -334,25 +356,32 @@ const FTL_HEADER: &str = "# SPDX-FileCopyrightText: 2026 The Adwaita Craft Launc
 pub fn build_ftl_content(
     entries: &BTreeMap<String, String>,
     existing_ftl: Option<&str>,
+    is_fallback: bool,
 ) -> anyhow::Result<String> {
     let raw_en: String = entries
         .iter()
         .map(|(k, v)| format!("{k} = {v}\n"))
         .collect();
-    let en_res = fluent_syntax::parser::parse(raw_en.as_str())
+    let en_res = fluent_syntax::parser::parse(raw_en)
         .map_err(|(_, errs)| anyhow::anyhow!("Invalid generated Fluent entry: {errs:?}"))?;
+
+    // The source text in "t!" is the single source of truth for the fallback language.
+    if is_fallback {
+        return Ok(format!("{FTL_HEADER}{}", serializer::serialize(&en_res)));
+    }
 
     let existing_text = existing_ftl.unwrap_or_default();
 
+    // Get the already-translated entry.
     let mut existing_map = if existing_text.trim().is_empty() {
         BTreeMap::new()
     } else {
-        let existing_res = fluent_syntax::parser::parse(existing_text)
+        let existing_res = fluent_syntax::parser::parse(existing_text.to_owned())
             .map_err(|(_, errs)| anyhow::anyhow!("Fluent syntax error: {errs:?}"))?;
         let mut map = BTreeMap::new();
         for entry in existing_res.body {
             if let Entry::Message(msg) = entry {
-                map.insert(msg.id.name, msg);
+                map.insert(msg.id.name.clone(), msg);
             }
         }
         map
@@ -361,8 +390,20 @@ pub fn build_ftl_content(
     let mut body = Vec::new();
     for entry in en_res.body {
         if let Entry::Message(en_msg) = entry {
-            let msg = existing_map.remove(en_msg.id.name).unwrap_or(en_msg);
-            body.push(Entry::Message(msg));
+            let key = en_msg.id.name.clone();
+            let source = entries.get(&key).map(|s| s.as_str()).unwrap_or_default();
+            if let Some(msg) = existing_map.remove(&key) {
+                // A translation already exists; keep it as is.
+                body.push(Entry::Comment(Comment {
+                    content: vec![format!("Source: {source}")],
+                }));
+                body.push(Entry::Message(msg));
+            } else {
+                // New keys will be present as comments requiring translation.
+                body.push(Entry::Comment(Comment {
+                    content: vec![format!("Source: {source}"), format!("{key} = {source}")],
+                }));
+            }
         }
     }
 
@@ -413,10 +454,10 @@ pub fn run(check: bool) -> anyhow::Result<()> {
     for lang in &config.available_languages {
         let ftl_path = assets_dir.join(lang).join("acl.ftl");
         let content = if lang == &config.fallback_language {
-            build_ftl_content(&entries, None)
+            build_ftl_content(&entries, None, true)
         } else {
             let old_text = fs::read_to_string(&ftl_path).unwrap_or_default();
-            build_ftl_content(&entries, Some(&old_text))
+            build_ftl_content(&entries, Some(&old_text), false)
         }?;
         write_or_check(&ftl_path, &content, check)?;
     }
