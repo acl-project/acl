@@ -133,11 +133,14 @@ impl Component for MsLoginDialog {
     view! {
         #[root]
         adw::AlertDialog {
+            #[watch]
             set_heading: Some(&t!("ms-login-dialog-heading","Microsoft Login")),
             #[watch]
             set_body: model.login_state.state_text(),
 
             add_response: ("cancel", &t!("ms-login-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("cancel", &t!("ms-login-dialog-cancel","Cancel")),
             set_close_response: "cancel",
 
             #[wrap(Some)]
@@ -174,6 +177,7 @@ impl Component for MsLoginDialog {
 
                     adw::ButtonContent {
                         set_icon_name: "edit-copy-symbolic",
+                        #[watch]
                         set_label: &t!("ms-login-dialog-copy-link","Copy Login Link"),
                     },
 
@@ -192,6 +196,7 @@ impl Component for MsLoginDialog {
 
         #[local_ref]
         reauth_dialog -> adw::AlertDialog {
+            #[watch]
             set_heading: Some(&t!("reauth-dialog-heading","Session Expired")),
             #[watch]
             set_body: &t!(
@@ -202,6 +207,12 @@ impl Component for MsLoginDialog {
 
             add_response: ("cancel", &t!("reauth-dialog-cancel","Cancel")),
             add_response: ("login", &t!("reauth-dialog-sign-in","Sign In")),
+
+            #[watch]
+            set_response_label: ("cancel",  &t!("reauth-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("login", &t!("reauth-dialog-sign-in","Sign In")),
+
             set_response_appearance: ("login", adw::ResponseAppearance::Suggested),
 
             set_default_response: Some("login"),

@@ -345,16 +345,22 @@ impl Component for CreatePage {
                                 sender.input(CreateInput::FilterChanged(filter));
                             },
 
-                            add = adw::Toggle {
+                            #[wrap(Clone::clone)]
+                            add = &adw::Toggle {
                                 set_name: Some(VersionFilter::Release.as_str()),
+                                #[watch]
                                 set_label: Some(&VersionFilter::Release.title()),
                             },
-                            add = adw::Toggle {
+                            #[wrap(Clone::clone)]
+                            add = &adw::Toggle {
                                 set_name: Some(VersionFilter::Snapshot.as_str()),
+                                #[watch]
                                 set_label: Some(&VersionFilter::Snapshot.title()),
                             },
-                            add = adw::Toggle {
+                            #[wrap(Clone::clone)]
+                            add = &adw::Toggle {
                                 set_name: Some(VersionFilter::Old.as_str()),
+                                #[watch]
                                 set_label: Some(&VersionFilter::Old.title()),
                             },
 

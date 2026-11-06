@@ -264,11 +264,17 @@ impl Component for AccountsPage {
         // Dialog for offline login.
         #[local_ref]
         add_offline_dialog -> adw::AlertDialog {
+            #[watch]
             set_heading: Some(&t!("add-offline-dialog-heading","Add Offline Account")),
+            #[watch]
             set_body: &t!("add-offline-dialog-body","Enter a Minecraft username (3-16 characters, letters, numbers, and underscores)."),
 
             add_response: ("cancel", &t!("add-offline-dialog-cancel","Cancel")),
             add_response: ("add", &t!("add-offline-dialog-add","Add")),
+            #[watch]
+            set_response_label: ("cancel", &t!("add-offline-dialog-cancel", "Cancel")),
+            #[watch]
+            set_response_label: ("add", &t!("add-offline-dialog-add", "Add")),
             set_response_appearance: ("add", adw::ResponseAppearance::Suggested),
             set_default_response: Some("add"),
             set_close_response: "cancel",
@@ -276,6 +282,7 @@ impl Component for AccountsPage {
             #[local_ref]
             #[wrap(Some)]
             set_extra_child = username_entry -> gtk::Entry {
+                #[watch]
                 set_placeholder_text: Some(&t!("username-entry-placeholder-text","Username (e.g. Steve)")),
                 set_activates_default: true,
             },
@@ -293,11 +300,18 @@ impl Component for AccountsPage {
 
         #[local_ref]
         offline_disabled_dialog -> adw::AlertDialog {
+            #[watch]
             set_heading: Some(&t!("offline-disabled-dialog-heading","Offline Mode Unavailable")),
+            #[watch]
             set_body: &t!("offline-disabled-dialog-body","You must launch the game at least once with an official Microsoft account before adding an offline account."),
 
             add_response: ("cancel", &t!("offline-disabled-dialog-cancel","Cancel")),
             add_response: ("store", &t!("offline-disabled-dialog-get-minecraft", "Get Minecraft")),
+
+            #[watch]
+            set_response_label: ("cancel", &t!("offline-disabled-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("store", &t!("offline-disabled-dialog-get-minecraft", "Get Minecraft")),
 
             set_close_response: "cancel",
 
