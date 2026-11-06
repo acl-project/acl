@@ -14,6 +14,7 @@ pub enum Language {
 }
 
 impl Language {
+    pub const ALL: &[Self] = &[Self::System, Self::English, Self::SimplifiedChinese];
     pub fn tag(self) -> Option<&'static str> {
         match self {
             Self::System => None,

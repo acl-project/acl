@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 use LaunchError::Other;
 
+use crate::t;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LaunchStage {
     #[default]
@@ -61,13 +63,29 @@ impl LaunchStage {
     fn status_text(&self) -> Option<String> {
         match self {
             LaunchStage::Idle => None,
-            LaunchStage::Authenticating => Some("Authenticating account...".to_string()),
-            LaunchStage::LoadingMetadata => Some("Loading version metadata...".to_string()),
-            LaunchStage::CheckingJava => Some("Checking Java runtime...".to_string()),
-            LaunchStage::CheckingIntegrity => Some("Verifying game files...".to_string()),
-            LaunchStage::PreparingRuntime => Some("Preparing runtime...".to_string()),
-            LaunchStage::Launching => Some("Launching Minecraft...".to_string()),
-            LaunchStage::WaitingWindow => Some("Waiting for game window...".to_string()),
+            LaunchStage::Authenticating => Some(t!(
+                "launch-stage-authenticating",
+                "Authenticating account..."
+            )),
+            LaunchStage::LoadingMetadata => Some(t!(
+                "launch-stage-loading-metadata",
+                "Loading version metadata..."
+            )),
+            LaunchStage::CheckingJava => {
+                Some(t!("launch-stage-checking-java", "Checking Java runtime..."))
+            }
+            LaunchStage::CheckingIntegrity => Some(t!(
+                "launch-stage-checking-integrity",
+                "Verifying game files..."
+            )),
+            LaunchStage::PreparingRuntime => {
+                Some(t!("launch-stage-prepare-runtime", "Preparing runtime..."))
+            }
+            LaunchStage::Launching => Some(t!("launch-stage-launching", "Launching Minecraft...")),
+            LaunchStage::WaitingWindow => Some(t!(
+                "launch-stage-waiting-window",
+                "Waiting for game window..."
+            )),
         }
     }
 }
@@ -135,16 +153,21 @@ impl HomePage {
         let mgr = self.mgr.read();
         let inst_text = match mgr.active_instance() {
             Some(inst) => format!("{} ({})", inst.config.name, inst.config.game_version),
-            None => "No instance selected".to_string(),
+            None => t!("home-page-no-instance", "No instance selected"),
         };
 
         let accounts = self.accounts.read();
         let acc_text = match accounts.active_account() {
             Some(acc) => acc.username.clone(),
-            None => "No account selected".to_string(),
+            None => t!("home-page-no-account", "No account selected"),
         };
 
-        format!("Instance: {inst_text} • Account: {acc_text}")
+        t!(
+            "home-page-status-description",
+            "Instance: {inst_text} • Account: {acc_text}",
+            inst_text = inst_text,
+            acc_text = acc_text
+        )
     }
 }
 
@@ -406,7 +429,8 @@ impl Component for HomePage {
             adw::StatusPage {
                 set_vexpand: true,
                 set_icon_name: Some("applications-games-symbolic"),
-                set_title: "Adwaita Craft Launcher",
+                #[watch]
+                set_title: &t!("home-page-status-title","Adwaita Craft Launcher"),
                 #[watch]
                 set_description: Some(&model.status_description()),
             },
@@ -485,10 +509,10 @@ impl Component for HomePage {
                         },
                         gtk::Label {
                             #[watch]
-                            set_label: if model.stage.is_launching() {
-                                "Launching..."
+                            set_label: &if model.stage.is_launching() {
+                                t!("home-page-button-launching","Launching...")
                             } else {
-                                "Start Game"
+                                t!("home-page-button-start-game","Start Game")
                             },
                         },
                     },

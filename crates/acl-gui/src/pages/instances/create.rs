@@ -14,6 +14,8 @@ use relm4::{
 };
 use tracing::{error, info};
 
+use crate::t;
+
 /// A single Minecraft version shown in the virtualized version list.
 #[derive(Debug, Clone)]
 pub struct VersionItem {
@@ -84,11 +86,11 @@ impl VersionFilter {
         }
     }
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            VersionFilter::Release => "Release",
-            VersionFilter::Snapshot => "Snapshot",
-            VersionFilter::Old => "Old",
+            VersionFilter::Release => t!("version-filter-release", "Release"),
+            VersionFilter::Snapshot => t!("version-filter-snapshot", "Snapshot"),
+            VersionFilter::Old => t!("version-filter-old", "Old"),
         }
     }
 
@@ -280,7 +282,8 @@ impl Component for CreatePage {
 
                             adw::ButtonContent {
                                 set_icon_name: "go-previous-symbolic",
-                                set_label: "Back",
+                                #[watch]
+                                set_label: &t!("instances-create-button-back","Back"),
                             },
                         },
 
@@ -294,7 +297,8 @@ impl Component for CreatePage {
 
                             adw::ButtonContent {
                                 set_icon_name: "list-add-symbolic",
-                                set_label: "Create",
+                                #[watch]
+                                set_label: &t!("instances-create-button-create","Create"),
                             },
                         },
                     },
@@ -302,17 +306,20 @@ impl Component for CreatePage {
                     // Instance settings section
 
                     adw::PreferencesGroup {
-                        set_title: "Instance Settings",
+                        #[watch]
+                        set_title: &t!("instances-create-settings-title","Instance Settings"),
 
                         adw::EntryRow {
-                            set_title: "Instance Name",
+                            #[watch]
+                            set_title: &t!("instances-create-settings-instance-name","Instance Name"),
                             connect_changed[sender] => move |entry| {
                                 sender.input(CreateInput::NameChanged(entry.text().to_string()));
                             },
                         },
 
                         adw::ActionRow {
-                            set_title: "Game Version",
+                            #[watch]
+                            set_title: &t!("instances-create-settings-game-version","Game Version"),
                             #[watch]
                             set_subtitle: model.selected_version_label(),
                         },
@@ -324,7 +331,8 @@ impl Component for CreatePage {
                         set_spacing: 8,
                         gtk::SearchEntry {
                             set_hexpand: true,
-                            set_placeholder_text: Some("Search versions..."),
+                            #[watch]
+                            set_placeholder_text: Some(&t!("instances-create-search-versions","Search versions...")),
                             connect_search_changed[sender] => move |entry| {
                                 sender.input(CreateInput::SearchChanged(entry.text().to_string()));
                             },
@@ -338,15 +346,15 @@ impl Component for CreatePage {
 
                             add = adw::Toggle {
                                 set_name: Some(VersionFilter::Release.as_str()),
-                                set_label: Some(VersionFilter::Release.title()),
+                                set_label: Some(&VersionFilter::Release.title()),
                             },
                             add = adw::Toggle {
                                 set_name: Some(VersionFilter::Snapshot.as_str()),
-                                set_label: Some(VersionFilter::Snapshot.title()),
+                                set_label: Some(&VersionFilter::Snapshot.title()),
                             },
                             add = adw::Toggle {
                                 set_name: Some(VersionFilter::Old.as_str()),
-                                set_label: Some(VersionFilter::Old.title()),
+                                set_label: Some(&VersionFilter::Old.title()),
                             },
 
                             set_active_name: Some(VersionFilter::Release.as_str()),
@@ -354,7 +362,8 @@ impl Component for CreatePage {
 
                         gtk::Button {
                             set_icon_name: "view-refresh-symbolic",
-                            set_tooltip_text: Some("Refresh version list"),
+                            #[watch]
+                            set_tooltip_text: Some(&t!("instances-create-refresh-version","Refresh version list")),
                             #[watch]
                             set_sensitive: !model.is_loading,
                             connect_clicked => CreateInput::RefreshVersions,

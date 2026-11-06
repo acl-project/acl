@@ -11,6 +11,7 @@ use crate::{
         instances::{InstancesInit, InstancesPage, InstancesPageOutput},
         settings::{SettingsOutput, SettingsPage},
     },
+    t,
     widgets::ms_login::{MsLoginDialog, MsLoginInit, MsLoginInput, MsLoginOutput},
 };
 use adw::prelude::*;
@@ -47,12 +48,12 @@ impl NavPage {
         }
     }
 
-    fn title(self) -> &'static str {
+    fn title(self) -> String {
         match self {
-            Self::Home => "Home",
-            Self::Instances => "Instances",
-            Self::Accounts => "Accounts",
-            Self::Settings => "Settings",
+            Self::Home => t!("navigation-page-home", "Home"),
+            Self::Instances => t!("navigation-page-instances", "Instances"),
+            Self::Accounts => t!("navigation-page-accounts", "Accounts"),
+            Self::Settings => t!("navigation-page-settings", "Settings"),
         }
     }
 }
@@ -138,7 +139,7 @@ impl SimpleComponent for AppModel {
                     set_content = &NavigationPage {
 
                         #[watch]
-                        set_title: model.current_page.title(),
+                        set_title: &model.current_page.title(),
 
                         #[wrap(Some)]
                         set_child = &adw::ToolbarView {
@@ -149,10 +150,10 @@ impl SimpleComponent for AppModel {
                             #[wrap(Some)]
                             set_content = &adw::ViewStack {
 
-                                add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), NavPage::Home.title(), "go-home-symbolic"),
-                                add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), NavPage::Instances.title(), "view-grid-symbolic"),
-                                add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), NavPage::Accounts.title(), "avatar-default-symbolic"),
-                                add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), NavPage::Settings.title(), "emblem-system-symbolic"),
+                                add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), &NavPage::Home.title(), "go-home-symbolic"),
+                                add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), &NavPage::Instances.title(), "view-grid-symbolic"),
+                                add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), &NavPage::Accounts.title(), "avatar-default-symbolic"),
+                                add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), &NavPage::Settings.title(), "emblem-system-symbolic"),
 
                                 #[watch]
                                 set_visible_child_name: model.current_page.as_str(),

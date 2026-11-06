@@ -13,6 +13,8 @@ use relm4::{SharedState, prelude::*};
 use tracing::error;
 use uuid::Uuid;
 
+use crate::t;
+
 const XBOX_STORE_URL: &str =
     "https://www.xbox.com/games/store/minecraft-java-bedrock-edition-for-pc/9nxp44l49shj";
 
@@ -89,7 +91,8 @@ impl FactoryComponent for AccountRow {
                 set_icon_name: "user-trash-symbolic",
                 set_valign: gtk::Align::Center,
                 add_css_class: "flat",
-                set_tooltip_text: Some("Remove account"),
+                #[watch]
+                set_tooltip_text: Some(&t!("accounts-tooltip-remove","Remove account")),
                 connect_clicked[delete_dialog, row] => move |_| {
                     delete_dialog.present(Some(&row));
                 },
@@ -99,12 +102,10 @@ impl FactoryComponent for AccountRow {
 
         #[name = "delete_dialog"]
         adw::AlertDialog {
-            set_heading: Some("Delete Account"),
-            #[watch]
-            set_body: &format!("Are you sure you want to delete account \"{}\"?", self.account.username),
-
-            add_response: ("cancel", "Cancel"),
-            add_response: ("delete", "Delete"),
+            set_heading: Some(&t!("accounts-delete-dialog-heading","Delete Account")),
+            set_body: &t!("accounts-delete-dialog-body","Are you sure you want to delete account \"{username}\"?", username = self.account.username),
+            add_response: ("cancel", &t!("accounts-delete-dialog-cancel","Cancel")),
+            add_response: ("delete", &t!("accounts-delete-dialog-delete","Delete")),
             set_response_appearance: ("delete", adw::ResponseAppearance::Destructive),
             set_default_response: Some("cancel"),
             set_close_response: "cancel",
@@ -205,12 +206,15 @@ impl Component for AccountsPage {
         #[root]
         #[name = "page"]
         adw::PreferencesPage {
-            set_title: "Accounts",
+            #[watch]
+            set_title: &t!("accounts-page-title","Accounts"),
 
             #[local_ref]
             accounts_group -> adw::PreferencesGroup {
-                set_title: "Accounts",
-                set_description: Some("Select an account to launch Minecraft"),
+                #[watch]
+                set_title: &t!("accounts-group-title","Accounts"),
+                #[watch]
+                set_description: Some(&t!("accounts-group-description","Select an account to launch Minecraft")),
 
                 #[wrap(Some)]
                 set_header_suffix = &gtk::Box {
@@ -221,7 +225,8 @@ impl Component for AccountsPage {
                     gtk::Button {
                         add_css_class: "flat",
                         set_valign: gtk::Align::Center,
-                        set_tooltip_text: Some("Sign in with a Microsoft account"),
+                        #[watch]
+                        set_tooltip_text: Some(&t!("accounts-group-tooltip-sign-in-microsoft","Sign in with a Microsoft account")),
 
                         #[watch]
                         set_sensitive: MICROSOFT_CLIENT_ID.is_some(),
@@ -229,7 +234,8 @@ impl Component for AccountsPage {
 
                         adw::ButtonContent {
                             set_icon_name: "avatar-default-symbolic",
-                            set_label: "Microsoft Login",
+                            #[watch]
+                            set_label: &t!("accounts-group-button-microsoft","Microsoft Login"),
                         }
                     },
 
@@ -237,11 +243,12 @@ impl Component for AccountsPage {
                     gtk::Button {
                         add_css_class: "flat",
                         set_valign: gtk::Align::Center,
-                        set_tooltip_text: Some("Add an offline account"),
+                        #[watch]
+                        set_tooltip_text: Some(&t!("accounts-group-tooltip-add-offline","Add an offline account")),
 
                         adw::ButtonContent {
                             set_icon_name: "list-add-symbolic",
-                            set_label: "Add Offline",
+                            set_label: &t!("accounts-group-button-add-offline","Add Offline"),
                         },
 
                       connect_clicked => AccountsInput::RequestAddOffline,
@@ -256,12 +263,11 @@ impl Component for AccountsPage {
         // Dialog for offline login.
         #[local_ref]
         add_offline_dialog -> adw::AlertDialog {
+            set_heading: Some(&t!("add-offline-dialog-heading","Add Offline Account")),
+            set_body: &t!("add-offline-dialog-body","Enter a Minecraft username (3-16 characters, letters, numbers, and underscores)."),
 
-            set_heading: Some("Add Offline Account"),
-            set_body: "Enter a Minecraft username (3-16 characters, letters, numbers, and underscores).",
-
-            add_response: ("cancel", "Cancel"),
-            add_response: ("add", "Add"),
+            add_response: ("cancel", &t!("add-offline-dialog-cancel","Cancel")),
+            add_response: ("add", &t!("add-offline-dialog-add","Add")),
             set_response_appearance: ("add", adw::ResponseAppearance::Suggested),
             set_default_response: Some("add"),
             set_close_response: "cancel",
@@ -269,7 +275,7 @@ impl Component for AccountsPage {
             #[local_ref]
             #[wrap(Some)]
             set_extra_child = username_entry -> gtk::Entry {
-                set_placeholder_text: Some("Username (e.g. Steve)"),
+                set_placeholder_text: Some(&t!("username-entry-placeholder-text","Username (e.g. Steve)")),
                 set_activates_default: true,
             },
 
@@ -286,11 +292,11 @@ impl Component for AccountsPage {
 
         #[local_ref]
         offline_disabled_dialog -> adw::AlertDialog {
-            set_heading: Some("Offline Mode Unavailable"),
-            set_body: "You must launch the game at least once with an official Microsoft account before adding an offline account.",
+            set_heading: Some(&t!("offline-disabled-dialog-heading","Offline Mode Unavailable")),
+            set_body: &t!("offline-disabled-dialog-body","You must launch the game at least once with an official Microsoft account before adding an offline account."),
 
-            add_response: ("cancel", "Cancel"),
-            add_response: ("store", "Get Minecraft"),
+            add_response: ("cancel", &t!("offline-disabled-dialog-cancel","Cancel")),
+            add_response: ("store", &t!("offline-disabled-dialog-get-minecraft", "Get Minecraft")),
 
             set_close_response: "cancel",
 

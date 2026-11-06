@@ -13,6 +13,8 @@ use relm4::tokio::task::AbortHandle;
 use relm4::{SharedState, prelude::*};
 use tracing::{error, info};
 
+use crate::t;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum MsLoginState {
     #[default]
@@ -131,11 +133,11 @@ impl Component for MsLoginDialog {
     view! {
         #[root]
         adw::AlertDialog {
-            set_heading: Some("Microsoft Login"),
+            set_heading: Some(&t!("ms-login-dialog-heading","Microsoft Login")),
             #[watch]
             set_body: model.login_state.state_text(),
 
-            add_response: ("cancel", "Cancel"),
+            add_response: ("cancel", &t!("ms-login-dialog-cancel","Cancel")),
             set_close_response: "cancel",
 
             #[wrap(Some)]
@@ -172,7 +174,7 @@ impl Component for MsLoginDialog {
 
                     adw::ButtonContent {
                         set_icon_name: "edit-copy-symbolic",
-                        set_label: "Copy Login Link",
+                        set_label: &t!("ms-login-dialog-copy-link","Copy Login Link"),
                     },
 
                 }
@@ -190,15 +192,16 @@ impl Component for MsLoginDialog {
 
         #[local_ref]
         reauth_dialog -> adw::AlertDialog {
-            set_heading: Some("Session Expired"),
+            set_heading: Some(&t!("reauth-dialog-heading","Session Expired")),
             #[watch]
-            set_body: &format!(
-                "The Microsoft session for \"{}\" has expired. Please sign in again.",
-                model.reauth_username
+            set_body: &t!(
+                "reauth-dialog-body",
+                "The Microsoft session for \"{username}\" has expired. Please sign in again.",
+                username = model.reauth_username
             ),
 
-            add_response: ("cancel", "Cancel"),
-            add_response: ("login", "Sign In"),
+            add_response: ("cancel", &t!("reauth-dialog-cancel","Cancel")),
+            add_response: ("login", &t!("reauth-dialog-sign-in","Sign In")),
             set_response_appearance: ("login", adw::ResponseAppearance::Suggested),
 
             set_default_response: Some("login"),
