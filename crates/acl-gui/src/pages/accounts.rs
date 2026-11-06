@@ -248,6 +248,7 @@ impl Component for AccountsPage {
 
                         adw::ButtonContent {
                             set_icon_name: "list-add-symbolic",
+                            #[watch]
                             set_label: &t!("accounts-group-button-add-offline","Add Offline"),
                         },
 
@@ -328,6 +329,8 @@ impl Component for AccountsPage {
             });
 
         init.store
+            .subscribe(sender.input_sender(), |_| AccountsInput::Refresh);
+        init.config
             .subscribe(sender.input_sender(), |_| AccountsInput::Refresh);
 
         let mut model = AccountsPage {

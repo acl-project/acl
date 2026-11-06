@@ -82,6 +82,8 @@ pub struct AppModel {
     settings_page: Controller<SettingsPage>,
     ms_login: Controller<MsLoginDialog>,
 
+    stack: adw::ViewStack,
+
     #[allow(dead_code)]
     config: Arc<SharedState<LauncherConfig>>,
     #[allow(dead_code)]
@@ -98,6 +100,7 @@ pub enum AppMsg {
     ShowToast(String),
     StartMicrosoftLogin,
     PromptReauth(String),
+    Refresh,
     Quit,
 }
 
@@ -130,7 +133,7 @@ impl SimpleComponent for AppModel {
                             add_top_bar = &adw::HeaderBar {},
                             #[wrap(Some)]
                             set_content = &adw::ViewSwitcherSidebar {
-                                set_stack: Some(&stack),
+                                set_stack: Some(stack),
                             },
                         },
                     },
@@ -146,9 +149,9 @@ impl SimpleComponent for AppModel {
 
                             add_top_bar = &adw::HeaderBar {},
 
-                            #[name = "stack"]
                             #[wrap(Some)]
-                            set_content = &adw::ViewStack {
+                            #[local_ref]
+                            set_content = stack ->adw::ViewStack {
 
                                 add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), &NavPage::Home.title(), "go-home-symbolic"),
                                 add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), &NavPage::Instances.title(), "view-grid-symbolic"),
@@ -280,6 +283,8 @@ impl SimpleComponent for AppModel {
                 SettingsOutput::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
+        config_state.subscribe(sender.input_sender(), |_| AppMsg::Refresh);
+
         let toast_overlay = adw::ToastOverlay::new();
         let model = AppModel {
             current_page: NavPage::Home,
@@ -289,6 +294,7 @@ impl SimpleComponent for AppModel {
             accounts_page,
             settings_page,
             ms_login,
+            stack: adw::ViewStack::new(),
             config: config_state,
             accounts: accounts_state,
             instances: instances_state,
@@ -296,9 +302,10 @@ impl SimpleComponent for AppModel {
         };
 
         let toast_overlay = &model.toast_overlay;
+        let stack = &model.stack;
         let widgets = view_output!();
 
-        widgets.stack.connect_visible_child_name_notify({
+        model.stack.connect_visible_child_name_notify({
             let sender = sender.clone();
             let split_view = widgets.split_view.clone();
             move |stack| {
@@ -331,6 +338,20 @@ impl SimpleComponent for AppModel {
             }
             AppMsg::PromptReauth(username) => {
                 self.ms_login.emit(MsLoginInput::PromptReauth { username });
+            }
+            AppMsg::Refresh => {
+                self.stack
+                    .page(self.home_page.widget())
+                    .set_title(Some(&NavPage::Home.title()));
+                self.stack
+                    .page(self.instances_page.widget())
+                    .set_title(Some(&NavPage::Instances.title()));
+                self.stack
+                    .page(self.accounts_page.widget())
+                    .set_title(Some(&NavPage::Accounts.title()));
+                self.stack
+                    .page(self.settings_page.widget())
+                    .set_title(Some(&NavPage::Settings.title()));
             }
         }
     }

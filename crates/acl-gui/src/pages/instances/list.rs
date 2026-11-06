@@ -489,6 +489,9 @@ impl Component for ListPage {
                 InstanceRowOutput::Remove(id) => ListInput::RemoveInstance(id),
             });
 
+        init.config
+            .subscribe(sender.input_sender(), |_| ListInput::Refresh);
+
         let mut model = Self {
             mgr: init.mgr,
             client: init.client,

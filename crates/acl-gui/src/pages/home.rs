@@ -531,7 +531,8 @@ impl Component for HomePage {
             .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
         init.accounts
             .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
-
+        init.config
+            .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
         let model = HomePage {
             mgr: init.mgr,
             accounts: init.accounts,

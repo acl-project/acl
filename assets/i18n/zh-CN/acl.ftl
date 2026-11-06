@@ -186,10 +186,7 @@ ms-login-dialog-cancel = 取消
 # Source: Copy Login Link
 ms-login-dialog-copy-link = 复制登录链接
 # Source: Microsoft Login
-ms-login-dialog-heading =
-    微软登录
-    
-    # Source: Accounts
+ms-login-dialog-heading = 微软登录
 # Source: Accounts
 navigation-page-accounts = 账户
 # Source: Home

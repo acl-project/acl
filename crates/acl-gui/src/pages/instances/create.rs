@@ -148,6 +148,7 @@ pub enum CreateInput {
     RefreshVersions,
     CreateClicked,
     CancelClicked,
+    Refresh,
 }
 
 #[derive(Debug, Clone)]
@@ -434,6 +435,9 @@ impl Component for CreatePage {
             }
         });
 
+        init.config
+            .subscribe(sender.input_sender(), |_| CreateInput::Refresh);
+
         let mut model = Self {
             mgr: init.mgr,
             config: init.config,
@@ -523,6 +527,7 @@ impl Component for CreatePage {
                     }
                 }
             }
+            CreateInput::Refresh => {}
         }
     }
 
