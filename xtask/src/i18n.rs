@@ -406,11 +406,11 @@ pub fn build_ftl_content(
         if let Entry::Message(en_msg) = entry {
             let key = en_msg.id.name.clone();
             let source = entries.get(&key).map(|s| s.as_str()).unwrap_or_default();
-            if let Some(msg) = existing_map.remove(&key) {
+            if let Some(mut msg) = existing_map.remove(&key) {
                 // A translation already exists; keep it as is.
-                body.push(Entry::Comment(Comment {
+                msg.comment = Some(Comment {
                     content: vec![format!("Source: {source}")],
-                }));
+                });
                 body.push(Entry::Message(msg));
             } else {
                 // New keys will be present as comments requiring translation.
