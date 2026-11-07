@@ -36,10 +36,10 @@ pub enum AccountRowOutput {
 }
 
 impl AccountRow {
-    fn account_type_label(&self) -> &'static str {
+    fn account_type_label(&self) -> String {
         match self.account.account_type {
-            AccountType::Offline => "Offline",
-            AccountType::Microsoft => "Microsoft",
+            AccountType::Offline => t!("account-type-offline", "Offline"),
+            AccountType::Microsoft => t!("account-type-microsoft", "Microsoft"),
         }
     }
 }
@@ -59,7 +59,7 @@ impl FactoryComponent for AccountRow {
             #[watch]
             set_title: &self.account.username,
             #[watch]
-            set_subtitle: self.account_type_label(),
+            set_subtitle: &self.account_type_label(),
 
             set_selectable: false,
             set_focus_on_click: false,

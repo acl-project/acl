@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+account-type-microsoft = Microsoft
+account-type-offline = Offline
 accounts-delete-dialog-body = Are you sure you want to delete account "{ $username }"?
 accounts-delete-dialog-cancel = Cancel
 accounts-delete-dialog-delete = Delete
@@ -94,6 +96,8 @@ minecraft-error-zip = Zip archive error at path '{ $path }': { $source }
 ms-login-dialog-cancel = Cancel
 ms-login-dialog-copy-link = Copy Login Link
 ms-login-dialog-heading = Microsoft Login
+ms-login-state-starting = Starting local login session...
+ms-login-state-waiting-browser = Please complete the sign-in in your web browser.
 navigation-page-accounts = Accounts
 navigation-page-home = Home
 navigation-page-instances = Instances

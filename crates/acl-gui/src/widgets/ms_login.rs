@@ -25,11 +25,16 @@ pub enum MsLoginState {
 }
 
 impl MsLoginState {
-    fn state_text(&self) -> &str {
+    fn state_text(&self) -> String {
         match self {
-            MsLoginState::Idle | MsLoginState::Starting => "Starting local login session...",
-            MsLoginState::WaitingBrowser(_) => "Please complete the sign-in in your web browser.",
-            MsLoginState::Failed(err) => err.as_str(),
+            MsLoginState::Idle | MsLoginState::Starting => {
+                t!("ms-login-state-starting", "Starting local login session...")
+            }
+            MsLoginState::WaitingBrowser(_) => t!(
+                "ms-login-state-waiting-browser",
+                "Please complete the sign-in in your web browser."
+            ),
+            MsLoginState::Failed(err) => err.to_owned(),
         }
     }
 
@@ -136,7 +141,7 @@ impl Component for MsLoginDialog {
             #[watch]
             set_heading: Some(&t!("ms-login-dialog-heading","Microsoft Login")),
             #[watch]
-            set_body: model.login_state.state_text(),
+            set_body: &model.login_state.state_text(),
 
             add_response: ("cancel", &t!("ms-login-dialog-cancel","Cancel")),
             #[watch]

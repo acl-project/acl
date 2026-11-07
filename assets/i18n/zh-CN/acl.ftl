@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# Source: Microsoft
+account-type-microsoft = 微软账号
+# Source: Offline
+account-type-offline = 离线账号
 # Source: Are you sure you want to delete account "{ $username }"?
 accounts-delete-dialog-body = 确定要删除账户“{ $username }”吗？
 # Source: Cancel
@@ -152,7 +156,7 @@ instances-list-tooltip-create = 创建实例
 # Source: System
 language-system = 系统默认
 # Source: Authenticating account...
-launch-stage-authenticating = 正在验证账户...
+launch-stage-authenticating = 正在登入...
 # Source: Verifying game files...
 launch-stage-checking-integrity = 正在校验游戏文件...
 # Source: Checking Java runtime...
@@ -187,6 +191,10 @@ ms-login-dialog-cancel = 取消
 ms-login-dialog-copy-link = 复制登录链接
 # Source: Microsoft Login
 ms-login-dialog-heading = 微软登录
+# Source: Starting local login session...
+ms-login-state-starting = 启动登入会话中...
+# Source: Please complete the sign-in in your web browser.
+ms-login-state-waiting-browser = 请在浏览器中完成登入.
 # Source: Accounts
 navigation-page-accounts = 账户
 # Source: Home
