@@ -620,10 +620,14 @@ mod tests {
     #[test]
     fn test_launch_command_memory_limits_and_validation() {
         let mut instance = mock_instance("mem_inst");
-        instance.config.min_memory_mb = Some(2048);
+        instance.config.custom_settings = true;
         instance.config.max_memory_mb = Some(8192);
 
-        let global_config = LauncherConfig::default();
+        let global_config = LauncherConfig {
+            min_memory_mb: 2048,
+            max_memory_mb: 4096,
+            ..Default::default()
+        };
         let dirs = LauncherDirs::with_paths(
             PathBuf::from("/mock/config"),
             PathBuf::from("/mock/data"),
@@ -649,8 +653,7 @@ mod tests {
         assert_eq!(cmd.jvm_args[1], "-Xmx8192M");
 
         // Invalid memory configuration (min > max)
-        instance.config.min_memory_mb = Some(8192);
-        instance.config.max_memory_mb = Some(4096);
+        instance.config.max_memory_mb = Some(1024);
 
         let err = LaunchCommand::build(
             &instance,
@@ -665,11 +668,47 @@ mod tests {
 
         match err {
             CoreError::InvalidMemoryConfig { min_mb, max_mb } => {
-                assert_eq!(min_mb, 8192);
-                assert_eq!(max_mb, 4096);
+                assert_eq!(min_mb, 2048);
+                assert_eq!(max_mb, 1024);
             }
             other => panic!("expected InvalidMemoryConfig, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_launch_command_memory_limits_without_custom_settings() {
+        let mut instance = mock_instance("mem_inst_default");
+        instance.config.custom_settings = false;
+        instance.config.max_memory_mb = Some(8192);
+
+        let global_config = LauncherConfig {
+            min_memory_mb: 1024,
+            max_memory_mb: 4096,
+            ..Default::default()
+        };
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
+        let metadata = mock_version_metadata("1.21.1", false, Some(21));
+        let account = Account::new_offline("Steve").unwrap();
+        let java_path = PathBuf::from("/mock/bin/java");
+        let access_token = "0".to_string();
+
+        let cmd = LaunchCommand::build(
+            &instance,
+            &global_config,
+            &dirs,
+            &metadata,
+            &account,
+            &access_token,
+            java_path,
+        )
+        .expect("memory config should be valid");
+
+        assert_eq!(cmd.jvm_args[0], "-Xms1024M");
+        assert_eq!(cmd.jvm_args[1], "-Xmx4096M");
     }
 
     #[test]
@@ -708,6 +747,7 @@ mod tests {
     #[test]
     fn test_select_java_instance_override() {
         let mut instance = mock_instance("inst");
+        instance.config.custom_settings = true;
         let inst_java = mock_java("/mock/instance/java", 17);
         instance.config.java = Some(inst_java.clone());
 
@@ -721,6 +761,26 @@ mod tests {
         let selected =
             select_java(&instance, &global_config, &metadata).expect("should select instance Java");
         assert_eq!(selected, inst_java);
+    }
+
+    #[test]
+    fn test_select_java_instance_override_ignored_when_custom_settings_disabled() {
+        let mut instance = mock_instance("inst");
+        instance.config.custom_settings = false;
+        let inst_java = mock_java("/mock/instance/java", 17);
+        instance.config.java = Some(inst_java);
+
+        let default_java = mock_java("/mock/default/java", 21);
+        let global_config = LauncherConfig {
+            default_java: Some(default_java.clone()),
+            ..Default::default()
+        };
+
+        let metadata = mock_version_metadata("1.20", false, Some(17));
+
+        let selected = select_java(&instance, &global_config, &metadata)
+            .expect("should fallback to default Java");
+        assert_eq!(selected, default_java);
     }
 
     #[test]
