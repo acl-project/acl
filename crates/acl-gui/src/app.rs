@@ -8,6 +8,9 @@ use crate::{
     pages::{
         accounts::{AccountsInit, AccountsOutput, AccountsPage},
         home::{HomeInit, HomeOutput, HomePage},
+        instance_detail::{
+            InstanceDetail, InstanceDetailInit, InstanceDetailInput, InstanceDetailOutput,
+        },
         instances::{InstancesInit, InstancesPage, InstancesPageOutput},
         settings::{SettingsOutput, SettingsPage},
     },
@@ -28,6 +31,21 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (+https://github.com/acl-project/acl)"
 );
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AppView {
+    #[default]
+    Main,
+    InstanceDetail,
+}
+impl AppView {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::InstanceDetail => "instance-detail",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NavPage {
@@ -74,6 +92,7 @@ impl FromStr for NavPage {
 
 pub struct AppModel {
     current_page: NavPage,
+    current_view: AppView,
     /// Used to pop up hint messages or errors below.
     toast_overlay: adw::ToastOverlay,
     home_page: Controller<HomePage>,
@@ -82,6 +101,7 @@ pub struct AppModel {
     settings_page: Controller<SettingsPage>,
     ms_login: Controller<MsLoginDialog>,
 
+    instance_detail: Controller<InstanceDetail>,
     stack: adw::ViewStack,
 
     #[allow(dead_code)]
@@ -99,7 +119,11 @@ pub enum AppMsg {
     Navigate(NavPage),
     ShowToast(String),
     StartMicrosoftLogin,
+    /// Open the reauth dialog; the String is the expired username.
     PromptReauth(String),
+    /// Open the instance details page; the String is the instance id.
+    OpenInstanceDetail(String),
+    CloseInstanceDetail,
     Refresh,
     Quit,
 }
@@ -121,49 +145,57 @@ impl SimpleComponent for AppModel {
            #[local_ref]
             toast_overlay -> adw::ToastOverlay {
 
-                #[name = "split_view"]
-                adw::NavigationSplitView {
-                    #[wrap(Some)]
-                    set_sidebar = &adw::NavigationPage {
-
-                        set_title: "ACL",
-
+                gtk::Stack  {
+                    set_transition_type: gtk::StackTransitionType::SlideLeftRight,
+                    #[name = "split_view"]
+                    add_named[Some(AppView::Main.as_str())] = &adw::NavigationSplitView {
                         #[wrap(Some)]
-                        set_child = &adw::ToolbarView {
-                            add_top_bar = &adw::HeaderBar {},
+                        set_sidebar = &adw::NavigationPage {
+
+                            set_title: "ACL",
+
                             #[wrap(Some)]
-                            set_content = &adw::ViewSwitcherSidebar {
-                                set_stack: Some(stack),
+                            set_child = &adw::ToolbarView {
+                                add_top_bar = &adw::HeaderBar {},
+                                #[wrap(Some)]
+                                set_content = &adw::ViewSwitcherSidebar {
+                                    set_stack: Some(stack),
+                                },
                             },
                         },
-                    },
-
-                    #[wrap(Some)]
-                    set_content = &NavigationPage {
-
-                        #[watch]
-                        set_title: &model.current_page.title(),
 
                         #[wrap(Some)]
-                        set_child = &adw::ToolbarView {
+                        set_content = &NavigationPage {
 
-                            add_top_bar = &adw::HeaderBar {},
+                            #[watch]
+                            set_title: &model.current_page.title(),
 
                             #[wrap(Some)]
-                            #[local_ref]
-                            set_content = stack ->adw::ViewStack {
+                            set_child = &adw::ToolbarView {
 
-                                add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), &NavPage::Home.title(), "go-home-symbolic"),
-                                add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), &NavPage::Instances.title(), "view-grid-symbolic"),
-                                add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), &NavPage::Accounts.title(), "avatar-default-symbolic"),
-                                add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), &NavPage::Settings.title(), "emblem-system-symbolic"),
+                                add_top_bar = &adw::HeaderBar {},
 
-                                #[watch]
-                                set_visible_child_name: model.current_page.as_str(),
-                            },
+                                #[wrap(Some)]
+                                #[local_ref]
+                                set_content = stack ->adw::ViewStack {
+
+                                    add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), &NavPage::Home.title(), "go-home-symbolic"),
+                                    add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), &NavPage::Instances.title(), "view-grid-symbolic"),
+                                    add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), &NavPage::Accounts.title(), "avatar-default-symbolic"),
+                                    add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), &NavPage::Settings.title(), "emblem-system-symbolic"),
+
+                                    #[watch]
+                                    set_visible_child_name: model.current_page.as_str(),
+                                },
+                            }
                         }
-                    }
 
+                    },
+
+                    add_named[Some(AppView::InstanceDetail.as_str())] = model.instance_detail.widget(),
+
+                    #[watch]
+                    set_visible_child_name: model.current_view.as_str(),
                 },
             },
         }
@@ -253,6 +285,16 @@ impl SimpleComponent for AppModel {
                 MsLoginOutput::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
+        let instance_detail = InstanceDetail::builder()
+            .launch(InstanceDetailInit {
+                config: Arc::clone(&config_state),
+                instances: Arc::clone(&instances_state),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                InstanceDetailOutput::ShowToast(message) => AppMsg::ShowToast(message),
+                InstanceDetailOutput::Back => AppMsg::CloseInstanceDetail,
+            });
+
         let home_page = HomePage::builder()
             .launch(HomeInit {
                 mgr: Arc::clone(&instances_state),
@@ -275,6 +317,7 @@ impl SimpleComponent for AppModel {
             })
             .forward(sender.input_sender(), |msg| match msg {
                 InstancesPageOutput::ShowToast(message) => AppMsg::ShowToast(message),
+                InstancesPageOutput::OpenDetail(id) => AppMsg::OpenInstanceDetail(id),
             });
 
         let accounts_page = AccountsPage::builder()
@@ -300,12 +343,14 @@ impl SimpleComponent for AppModel {
         let toast_overlay = adw::ToastOverlay::new();
         let model = AppModel {
             current_page: NavPage::Home,
+            current_view: AppView::Main,
             toast_overlay,
             home_page,
             instances_page,
             accounts_page,
             settings_page,
             ms_login,
+            instance_detail,
             stack: adw::ViewStack::new(),
             config: config_state,
             accounts: accounts_state,
@@ -365,6 +410,12 @@ impl SimpleComponent for AppModel {
                     .page(self.settings_page.widget())
                     .set_title(Some(&NavPage::Settings.title()));
             }
+            AppMsg::OpenInstanceDetail(id) => {
+                self.instance_detail
+                    .emit(InstanceDetailInput::SetCurrentInstance(id));
+                self.current_view = AppView::InstanceDetail;
+            }
+            AppMsg::CloseInstanceDetail => self.current_view = AppView::Main,
         }
     }
 }

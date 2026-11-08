@@ -151,12 +151,26 @@ install-stage-fetching-asset-index = 正在获取资源索引...
 install-stage-fetching-metadata = 正在获取版本元数据...
 # Source: Preparing runtime...
 install-stage-preparing-runtime = 正在准备运行环境...
+# Source: Back
+instance-detail-button-back = 返回
 # Source: Failed to remove instance: { $err }
 instance-list-error-remove-instance = 移除实例失败：{ $err }
 # Source: Failed to select instance: { $err }
 instance-list-error-select-instance = 选择实例失败：{ $err }
 # Source: Instance "{ $id }" is ready to play
 instance-list-ready-to-play = 实例“{ $id }”已准备就绪
+# Source: Settings
+instance-navigation-page-settings = 设置
+# Source: Base
+instance-settings-base-title = 基础
+# Source: Instance-Specific Settings
+instance-settings-custom-title = 独立实例设置
+# Source: Failed to save instance { $id } configuration: { $err }
+instance-settings-error-save-configuration = 保存实例 { $id } 配置失败：{ $err }
+# Source: Instance Name
+instance-settings-name-title = 实例名称
+# Source: None
+instance-settings-none = 无
 # Source: Back
 instances-create-button-back = 返回
 # Source: Create
@@ -239,6 +253,8 @@ launch-stage-prepare-runtime = 正在准备运行环境...
 launch-stage-waiting-window = 等待游戏窗口出现...
 # Source: Remove instance
 list-tooltip-remove = 移除实例
+# Source: Instance settings
+list-tooltip-settings = 实例设置
 # Source: SHA-1 mismatch for '{ $target }': expected { $expected }, actual { $actual }
 minecraft-error-hash-mismatch = '{ $target }' 的 SHA-1 不匹配：期望 { $expected }，实际 { $actual }
 # Source: HTTP request failed: { $arg0 }

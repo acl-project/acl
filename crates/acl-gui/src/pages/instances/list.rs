@@ -92,6 +92,7 @@ pub enum InstanceRowInput {
 pub enum InstanceRowOutput {
     Select(String),
     Remove(String),
+    OpenDetail(String),
 }
 
 impl InstanceRow {
@@ -122,6 +123,7 @@ impl FactoryComponent for InstanceRow {
         #[root]
         #[name = "row"]
         adw::ActionRow {
+            #[watch]
             set_title: &self.instance.config.name,
             #[watch]
             set_subtitle: &self.subtitle(),
@@ -162,6 +164,19 @@ impl FactoryComponent for InstanceRow {
                 set_can_target: false,
                 #[watch]
                 set_active: self.is_active,
+            },
+
+            add_suffix = &gtk::Button {
+                #[watch]
+                set_visible: !self.stage.is_installing(),
+                set_icon_name: "emblem-system-symbolic",
+                set_valign: gtk::Align::Center,
+                    add_css_class: "flat",
+                    #[watch]
+                    set_tooltip_text: Some(&t!("list-tooltip-settings", "Instance settings")),
+                    connect_clicked[sender, id = self.instance.id().to_owned()] => move |_| {
+                        let _ = sender.output(InstanceRowOutput::OpenDetail(id.clone()));
+                    },
             },
 
             add_suffix = &gtk::Button {
@@ -241,6 +256,7 @@ pub enum ListInput {
     SelectInstance(String),
     RemoveInstance(String),
     StartDownload(String, VersionEntry),
+    OpenDetail(String),
     Refresh,
 }
 
@@ -259,6 +275,7 @@ pub struct ListPage {
 pub enum ListOutput {
     ShowToast(String),
     OpenCreate,
+    OpenDetail(String),
 }
 
 impl ListPage {
@@ -494,6 +511,7 @@ impl Component for ListPage {
             .forward(sender.input_sender(), |output| match output {
                 InstanceRowOutput::Select(id) => ListInput::SelectInstance(id),
                 InstanceRowOutput::Remove(id) => ListInput::RemoveInstance(id),
+                InstanceRowOutput::OpenDetail(id) => ListInput::OpenDetail(id),
             });
 
         init.config
@@ -561,6 +579,9 @@ impl Component for ListPage {
             }
             ListInput::StartDownload(id, entry) => {
                 self.spawn_install(id, entry, &sender);
+            }
+            ListInput::OpenDetail(id) => {
+                let _ = sender.output(ListOutput::OpenDetail(id));
             }
         }
     }

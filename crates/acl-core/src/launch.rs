@@ -156,10 +156,16 @@ impl LaunchCommand {
     ) -> Result<Self> {
         let mut jvm_args = Vec::new();
 
-        let max_mem = instance
-            .config
-            .max_memory_mb
-            .unwrap_or(global_config.max_memory_mb);
+        let custom = instance.config.custom_settings;
+
+        let max_mem = if custom {
+            instance
+                .config
+                .max_memory_mb
+                .unwrap_or(global_config.max_memory_mb)
+        } else {
+            global_config.max_memory_mb
+        };
 
         let min_mem = instance
             .config
@@ -260,11 +266,13 @@ pub fn select_java(
     );
 
     // Try to obtain it from the game-configured Java or the global Java.
-    if let Some(java) = instance
-        .config
-        .java
-        .as_ref()
-        .or(global_config.default_java.as_ref())
+    let preferred_java = if instance.config.custom_settings {
+        instance.config.java.as_ref()
+    } else {
+        global_config.default_java.as_ref()
+    };
+
+    if let Some(java) = preferred_java
         && java.info.major_version >= required_major
     {
         info!(

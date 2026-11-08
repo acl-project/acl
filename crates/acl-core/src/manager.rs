@@ -137,6 +137,14 @@ impl InstanceManager {
         let active_id = self.config.active_id.as_deref()?;
         self.instances.iter_mut().find(|ins| ins.id() == active_id)
     }
+
+    pub fn instance(&self, id: &str) -> Option<&Instance> {
+        self.instances.iter().find(|ins| ins.id() == id)
+    }
+
+    pub fn instance_mut(&mut self, id: &str) -> Option<&mut Instance> {
+        self.instances.iter_mut().find(|ins| ins.id() == id)
+    }
 }
 
 #[cfg(test)]

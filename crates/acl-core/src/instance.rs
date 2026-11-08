@@ -48,6 +48,9 @@ pub struct InstanceConfig {
     pub name: String,
     /// Minecraft version name (e.g., 1.21)
     pub game_version: String,
+    /// Whether instance-specific settings are enabled
+    #[serde(default)]
+    pub custom_settings: bool,
     /// Type of mod loader
     #[serde(default)]
     pub mod_loader: ModLoader,
