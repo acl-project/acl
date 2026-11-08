@@ -13,6 +13,8 @@ use relm4::{SharedState, prelude::*};
 use tracing::error;
 use uuid::Uuid;
 
+use crate::t;
+
 const XBOX_STORE_URL: &str =
     "https://www.xbox.com/games/store/minecraft-java-bedrock-edition-for-pc/9nxp44l49shj";
 
@@ -34,10 +36,10 @@ pub enum AccountRowOutput {
 }
 
 impl AccountRow {
-    fn account_type_label(&self) -> &'static str {
+    fn account_type_label(&self) -> String {
         match self.account.account_type {
-            AccountType::Offline => "Offline",
-            AccountType::Microsoft => "Microsoft",
+            AccountType::Offline => t!("account-type-offline", "Offline"),
+            AccountType::Microsoft => t!("account-type-microsoft", "Microsoft"),
         }
     }
 }
@@ -57,7 +59,7 @@ impl FactoryComponent for AccountRow {
             #[watch]
             set_title: &self.account.username,
             #[watch]
-            set_subtitle: self.account_type_label(),
+            set_subtitle: &self.account_type_label(),
 
             set_selectable: false,
             set_focus_on_click: false,
@@ -89,7 +91,8 @@ impl FactoryComponent for AccountRow {
                 set_icon_name: "user-trash-symbolic",
                 set_valign: gtk::Align::Center,
                 add_css_class: "flat",
-                set_tooltip_text: Some("Remove account"),
+                #[watch]
+                set_tooltip_text: Some(&t!("accounts-tooltip-remove","Remove account")),
                 connect_clicked[delete_dialog, row] => move |_| {
                     delete_dialog.present(Some(&row));
                 },
@@ -99,12 +102,19 @@ impl FactoryComponent for AccountRow {
 
         #[name = "delete_dialog"]
         adw::AlertDialog {
-            set_heading: Some("Delete Account"),
             #[watch]
-            set_body: &format!("Are you sure you want to delete account \"{}\"?", self.account.username),
+            set_heading: Some(&t!("accounts-delete-dialog-heading","Delete Account")),
+            #[watch]
+            set_body: &t!("accounts-delete-dialog-body","Are you sure you want to delete account \"{username}\"?", username = self.account.username),
 
-            add_response: ("cancel", "Cancel"),
-            add_response: ("delete", "Delete"),
+            add_response: ("cancel", &t!("accounts-delete-dialog-cancel","Cancel")),
+            add_response: ("delete", &t!("accounts-delete-dialog-delete","Delete")),
+
+            #[watch]
+            set_response_label: ("cancel", &t!("accounts-delete-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("delete", &t!("accounts-delete-dialog-delete","Delete")),
+
             set_response_appearance: ("delete", adw::ResponseAppearance::Destructive),
             set_default_response: Some("cancel"),
             set_close_response: "cancel",
@@ -176,8 +186,12 @@ pub struct AccountsInit {
 impl AccountsPage {
     fn save_accounts(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.accounts.read().save(&self.accounts_path) {
-            let msg = format!("Failed to save accounts: {err}");
-            error!("{msg}");
+            error!("Failed to save accounts: {err}");
+            let msg = t!(
+                "accounts-error-save-accounts",
+                "Failed to save accounts: {err}",
+                err = err
+            );
             let _ = sender.output(AccountsOutput::ShowToast(msg));
         }
     }
@@ -205,12 +219,15 @@ impl Component for AccountsPage {
         #[root]
         #[name = "page"]
         adw::PreferencesPage {
-            set_title: "Accounts",
+            #[watch]
+            set_title: &t!("accounts-page-title","Accounts"),
 
             #[local_ref]
             accounts_group -> adw::PreferencesGroup {
-                set_title: "Accounts",
-                set_description: Some("Select an account to launch Minecraft"),
+                #[watch]
+                set_title: &t!("accounts-group-title","Accounts"),
+                #[watch]
+                set_description: Some(&t!("accounts-group-description","Select an account to launch Minecraft")),
 
                 #[wrap(Some)]
                 set_header_suffix = &gtk::Box {
@@ -221,7 +238,8 @@ impl Component for AccountsPage {
                     gtk::Button {
                         add_css_class: "flat",
                         set_valign: gtk::Align::Center,
-                        set_tooltip_text: Some("Sign in with a Microsoft account"),
+                        #[watch]
+                        set_tooltip_text: Some(&t!("accounts-group-tooltip-sign-in-microsoft","Sign in with a Microsoft account")),
 
                         #[watch]
                         set_sensitive: MICROSOFT_CLIENT_ID.is_some(),
@@ -229,7 +247,8 @@ impl Component for AccountsPage {
 
                         adw::ButtonContent {
                             set_icon_name: "avatar-default-symbolic",
-                            set_label: "Microsoft Login",
+                            #[watch]
+                            set_label: &t!("accounts-group-button-microsoft","Microsoft Login"),
                         }
                     },
 
@@ -237,11 +256,13 @@ impl Component for AccountsPage {
                     gtk::Button {
                         add_css_class: "flat",
                         set_valign: gtk::Align::Center,
-                        set_tooltip_text: Some("Add an offline account"),
+                        #[watch]
+                        set_tooltip_text: Some(&t!("accounts-group-tooltip-add-offline","Add an offline account")),
 
                         adw::ButtonContent {
                             set_icon_name: "list-add-symbolic",
-                            set_label: "Add Offline",
+                            #[watch]
+                            set_label: &t!("accounts-group-button-add-offline","Add Offline"),
                         },
 
                       connect_clicked => AccountsInput::RequestAddOffline,
@@ -256,12 +277,17 @@ impl Component for AccountsPage {
         // Dialog for offline login.
         #[local_ref]
         add_offline_dialog -> adw::AlertDialog {
+            #[watch]
+            set_heading: Some(&t!("add-offline-dialog-heading","Add Offline Account")),
+            #[watch]
+            set_body: &t!("add-offline-dialog-body","Enter a Minecraft username (3-16 characters, letters, numbers, and underscores)."),
 
-            set_heading: Some("Add Offline Account"),
-            set_body: "Enter a Minecraft username (3-16 characters, letters, numbers, and underscores).",
-
-            add_response: ("cancel", "Cancel"),
-            add_response: ("add", "Add"),
+            add_response: ("cancel", &t!("add-offline-dialog-cancel","Cancel")),
+            add_response: ("add", &t!("add-offline-dialog-add","Add")),
+            #[watch]
+            set_response_label: ("cancel", &t!("add-offline-dialog-cancel", "Cancel")),
+            #[watch]
+            set_response_label: ("add", &t!("add-offline-dialog-add", "Add")),
             set_response_appearance: ("add", adw::ResponseAppearance::Suggested),
             set_default_response: Some("add"),
             set_close_response: "cancel",
@@ -269,7 +295,8 @@ impl Component for AccountsPage {
             #[local_ref]
             #[wrap(Some)]
             set_extra_child = username_entry -> gtk::Entry {
-                set_placeholder_text: Some("Username (e.g. Steve)"),
+                #[watch]
+                set_placeholder_text: Some(&t!("username-entry-placeholder-text","Username (e.g. Steve)")),
                 set_activates_default: true,
             },
 
@@ -286,11 +313,18 @@ impl Component for AccountsPage {
 
         #[local_ref]
         offline_disabled_dialog -> adw::AlertDialog {
-            set_heading: Some("Offline Mode Unavailable"),
-            set_body: "You must launch the game at least once with an official Microsoft account before adding an offline account.",
+            #[watch]
+            set_heading: Some(&t!("offline-disabled-dialog-heading","Offline Mode Unavailable")),
+            #[watch]
+            set_body: &t!("offline-disabled-dialog-body","You must launch the game at least once with an official Microsoft account before adding an offline account."),
 
-            add_response: ("cancel", "Cancel"),
-            add_response: ("store", "Get Minecraft"),
+            add_response: ("cancel", &t!("offline-disabled-dialog-cancel","Cancel")),
+            add_response: ("store", &t!("offline-disabled-dialog-get-minecraft", "Get Minecraft")),
+
+            #[watch]
+            set_response_label: ("cancel", &t!("offline-disabled-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("store", &t!("offline-disabled-dialog-get-minecraft", "Get Minecraft")),
 
             set_close_response: "cancel",
 
@@ -322,6 +356,8 @@ impl Component for AccountsPage {
             });
 
         init.store
+            .subscribe(sender.input_sender(), |_| AccountsInput::Refresh);
+        init.config
             .subscribe(sender.input_sender(), |_| AccountsInput::Refresh);
 
         let mut model = AccountsPage {
@@ -355,8 +391,13 @@ impl Component for AccountsPage {
                 }
 
                 Err(err) => {
-                    let msg = format!("Invalid username: {err}");
-                    error!("{msg}");
+                    error!("Invalid username: {err}");
+                    let msg = t!(
+                        "accounts-error-invalid-username",
+                        "Invalid username: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                 }
             },
@@ -365,8 +406,12 @@ impl Component for AccountsPage {
                 let res = self.accounts.write().set_active_account(uuid).map(|_| ());
 
                 if let Err(err) = res {
-                    let msg = format!("Failed to select account: {err}");
-                    error!("{msg}");
+                    error!("Failed to select account: {err}");
+                    let msg = t!(
+                        "accounts-error-select-account",
+                        "Failed to select account: {err}",
+                        err = err
+                    );
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                     return;
                 }
@@ -382,14 +427,24 @@ impl Component for AccountsPage {
 
             AccountsInput::RemoveAccount(uuid) => {
                 if let Err(err) = CredentialStore::delete(uuid) {
-                    let msg = format!("Failed to remove tokens: {err}");
-                    error!("{msg}");
+                    error!("Failed to remove tokens: {err}");
+                    let msg = t!(
+                        "accounts-error-remove-tokens",
+                        "Failed to remove tokens: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                 }
 
                 if let Err(err) = self.accounts.write().remove_account(uuid) {
-                    let msg = format!("Failed to remove account: {err}");
-                    error!("{msg}");
+                    error!("Failed to remove account: {err}");
+                    let msg = t!(
+                        "accounts-error-remove-account",
+                        "Failed to remove account: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                     return;
                 }
@@ -402,8 +457,13 @@ impl Component for AccountsPage {
                     XBOX_STORE_URL,
                     gtk::gio::AppLaunchContext::NONE,
                 ) {
-                    let msg = format!("Failed to open browser: {err}");
-                    error!("{msg}");
+                    error!("Failed to open browser: {err}");
+                    let msg = t!(
+                        "accounts-error-open-browser",
+                        "Failed to open browser: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                 }
             }

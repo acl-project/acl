@@ -14,6 +14,8 @@ use relm4::{
 };
 use tracing::{error, info};
 
+use crate::t;
+
 /// A single Minecraft version shown in the virtualized version list.
 #[derive(Debug, Clone)]
 pub struct VersionItem {
@@ -84,11 +86,11 @@ impl VersionFilter {
         }
     }
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            VersionFilter::Release => "Release",
-            VersionFilter::Snapshot => "Snapshot",
-            VersionFilter::Old => "Old",
+            VersionFilter::Release => t!("version-filter-release", "Release"),
+            VersionFilter::Snapshot => t!("version-filter-snapshot", "Snapshot"),
+            VersionFilter::Old => t!("version-filter-old", "Old"),
         }
     }
 
@@ -146,6 +148,7 @@ pub enum CreateInput {
     RefreshVersions,
     CreateClicked,
     CancelClicked,
+    Refresh,
 }
 
 #[derive(Debug, Clone)]
@@ -192,10 +195,10 @@ impl CreatePage {
                 .is_some_and(|name| InstanceConfig::validate_instance_id(name).is_ok())
     }
 
-    fn selected_version_label(&self) -> &str {
+    fn selected_version_label(&self) -> String {
         self.selected_version
             .as_ref()
-            .map_or("None", |v| v.id.as_str())
+            .map_or(t!("instances-create-none", "None"), |v| v.id.to_string())
     }
 
     /// Highlight `selected_version` in the list if it is currently visible.
@@ -280,7 +283,8 @@ impl Component for CreatePage {
 
                             adw::ButtonContent {
                                 set_icon_name: "go-previous-symbolic",
-                                set_label: "Back",
+                                #[watch]
+                                set_label: &t!("instances-create-button-back","Back"),
                             },
                         },
 
@@ -294,7 +298,8 @@ impl Component for CreatePage {
 
                             adw::ButtonContent {
                                 set_icon_name: "list-add-symbolic",
-                                set_label: "Create",
+                                #[watch]
+                                set_label: &t!("instances-create-button-create","Create"),
                             },
                         },
                     },
@@ -302,19 +307,22 @@ impl Component for CreatePage {
                     // Instance settings section
 
                     adw::PreferencesGroup {
-                        set_title: "Instance Settings",
+                        #[watch]
+                        set_title: &t!("instances-create-settings-title","Instance Settings"),
 
                         adw::EntryRow {
-                            set_title: "Instance Name",
+                            #[watch]
+                            set_title: &t!("instances-create-settings-instance-name","Instance Name"),
                             connect_changed[sender] => move |entry| {
                                 sender.input(CreateInput::NameChanged(entry.text().to_string()));
                             },
                         },
 
                         adw::ActionRow {
-                            set_title: "Game Version",
                             #[watch]
-                            set_subtitle: model.selected_version_label(),
+                            set_title: &t!("instances-create-settings-game-version","Game Version"),
+                            #[watch]
+                            set_subtitle: &model.selected_version_label(),
                         },
 
                     },
@@ -324,7 +332,8 @@ impl Component for CreatePage {
                         set_spacing: 8,
                         gtk::SearchEntry {
                             set_hexpand: true,
-                            set_placeholder_text: Some("Search versions..."),
+                            #[watch]
+                            set_placeholder_text: Some(&t!("instances-create-search-versions","Search versions...")),
                             connect_search_changed[sender] => move |entry| {
                                 sender.input(CreateInput::SearchChanged(entry.text().to_string()));
                             },
@@ -336,17 +345,23 @@ impl Component for CreatePage {
                                 sender.input(CreateInput::FilterChanged(filter));
                             },
 
-                            add = adw::Toggle {
+                            #[wrap(Clone::clone)]
+                            add = &adw::Toggle {
                                 set_name: Some(VersionFilter::Release.as_str()),
-                                set_label: Some(VersionFilter::Release.title()),
+                                #[watch]
+                                set_label: Some(&VersionFilter::Release.title()),
                             },
-                            add = adw::Toggle {
+                            #[wrap(Clone::clone)]
+                            add = &adw::Toggle {
                                 set_name: Some(VersionFilter::Snapshot.as_str()),
-                                set_label: Some(VersionFilter::Snapshot.title()),
+                                #[watch]
+                                set_label: Some(&VersionFilter::Snapshot.title()),
                             },
-                            add = adw::Toggle {
+                            #[wrap(Clone::clone)]
+                            add = &adw::Toggle {
                                 set_name: Some(VersionFilter::Old.as_str()),
-                                set_label: Some(VersionFilter::Old.title()),
+                                #[watch]
+                                set_label: Some(&VersionFilter::Old.title()),
                             },
 
                             set_active_name: Some(VersionFilter::Release.as_str()),
@@ -354,7 +369,8 @@ impl Component for CreatePage {
 
                         gtk::Button {
                             set_icon_name: "view-refresh-symbolic",
-                            set_tooltip_text: Some("Refresh version list"),
+                            #[watch]
+                            set_tooltip_text: Some(&t!("instances-create-refresh-version","Refresh version list")),
                             #[watch]
                             set_sensitive: !model.is_loading,
                             connect_clicked => CreateInput::RefreshVersions,
@@ -425,6 +441,9 @@ impl Component for CreatePage {
             }
         });
 
+        init.config
+            .subscribe(sender.input_sender(), |_| CreateInput::Refresh);
+
         let mut model = Self {
             mgr: init.mgr,
             config: init.config,
@@ -477,16 +496,18 @@ impl Component for CreatePage {
             // Create version metadata without downloading resource files, file downloads are handled upstream.
             CreateInput::CreateClicked => {
                 let Some(version_entry) = self.selected_version.clone() else {
-                    let _ = sender.output(CreateOutput::ShowToast(
-                        "Please select a Minecraft version".to_string(),
-                    ));
+                    let _ = sender.output(CreateOutput::ShowToast(t!(
+                        "instances-create-error-empty-version",
+                        "Please select a Minecraft version"
+                    )));
                     return;
                 };
 
                 let Some(id) = self.effective_instance_name().map(str::to_string) else {
-                    let _ = sender.output(CreateOutput::ShowToast(
-                        "Please enter an instance name or select a version".to_string(),
-                    ));
+                    let _ = sender.output(CreateOutput::ShowToast(t!(
+                        "instances-create-error-no-name",
+                        "Please enter an instance name or select a version"
+                    )));
                     return;
                 };
 
@@ -498,8 +519,12 @@ impl Component for CreatePage {
                             id, version_entry.id
                         );
                         if let Err(err) = self.mgr.write().refresh() {
-                            let msg = format!("Failed to refresh instances: {err}");
-                            error!("{msg}");
+                            error!("Failed to refresh instances: {err}");
+                            let msg = t!(
+                                "instances-create-error-refresh-instances",
+                                "Failed to refresh instances: {err}",
+                                err = err
+                            );
                             let _ = sender.output(CreateOutput::ShowToast(msg));
                         } else {
                             self.selected_version = None;
@@ -508,12 +533,17 @@ impl Component for CreatePage {
                         }
                     }
                     Err(err) => {
-                        let msg = format!("Failed to create instance: {err}");
-                        error!("{msg}");
+                        error!("Failed to create instance: {err}");
+                        let msg = t!(
+                            "instances-create-error-create-instance",
+                            "Failed to create instance: {err}",
+                            err = err
+                        );
                         let _ = sender.output(CreateOutput::ShowToast(msg));
                     }
                 }
             }
+            CreateInput::Refresh => {}
         }
     }
 
@@ -546,8 +576,12 @@ impl Component for CreatePage {
                     }
 
                     Err(err) => {
-                        let msg = format!("Failed to load version manifest: {err}");
-                        error!("{msg}");
+                        error!("Failed to load version manifest: {err}");
+                        let msg = t!(
+                            "instances-create-error-load-version-manifest",
+                            "Failed to load version manifest: {err}",
+                            err = err
+                        );
                         let _ = sender.output(CreateOutput::ShowToast(msg));
                     }
                 }

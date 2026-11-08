@@ -10,6 +10,8 @@ use libadwaita::prelude::*;
 use relm4::{SharedState, gtk, prelude::*, tokio};
 use tracing::error;
 
+use crate::{i18n::LocalizeError, t};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstallStage {
     /// Normal and usable
@@ -51,13 +53,24 @@ impl InstallStage {
     fn status_text(&self) -> Option<String> {
         match self {
             InstallStage::Idle => None,
-            InstallStage::FetchingMetadata => Some("Fetching metadata...".to_owned()),
-            InstallStage::FetchingAssetIndex => Some("Fetching asset index...".to_owned()),
-            InstallStage::Downloading(p) => Some(format!(
-                "Downloading ({}/{})",
-                p.completed_files, p.total_files
+            InstallStage::FetchingMetadata => Some(t!(
+                "install-stage-fetching-metadata",
+                "Fetching metadata..."
             )),
-            InstallStage::PreparingRuntime => Some("Preparing runtime...".to_owned()),
+            InstallStage::FetchingAssetIndex => Some(t!(
+                "install-stage-fetching-asset-index",
+                "Fetching asset index..."
+            )),
+            InstallStage::Downloading(p) => Some(t!(
+                "install-stage-downloading",
+                "Downloading ({completed}/{total})",
+                completed = p.completed_files,
+                total = p.total_files,
+            )),
+            InstallStage::PreparingRuntime => Some(t!(
+                "install-stage-preparing-runtime",
+                "Preparing runtime..."
+            )),
         }
     }
 }
@@ -158,7 +171,8 @@ impl FactoryComponent for InstanceRow {
                 set_icon_name: "user-trash-symbolic",
                 set_valign: gtk::Align::Center,
                 add_css_class: "flat",
-                set_tooltip_text: Some("Remove instance"),
+                #[watch]
+                set_tooltip_text: Some(&t!("list-tooltip-remove","Remove instance")),
                 connect_clicked[delete_dialog, row] => move |_| {
                     delete_dialog.present(Some(&row));
                 },
@@ -170,12 +184,19 @@ impl FactoryComponent for InstanceRow {
 
         #[name = "delete_dialog"]
         adw::AlertDialog {
-            set_heading: Some("Delete Instance"),
             #[watch]
-            set_body: &format!("Are you sure you want to delete instance \"{}\"?", self.instance.config.name),
+            set_heading: Some(&t!("delete-dialog-heading","Delete Instance")),
+            #[watch]
+            set_body: &t!("delete-dialog-body","Are you sure you want to delete instance \"{name}\"?", name = self.instance.config.name),
 
-            add_response: ("cancel", "Cancel"),
-            add_response: ("delete", "Delete"),
+            add_response: ("cancel", &t!("delete-dialog-cancel","Cancel")),
+            add_response: ("delete",  &t!("delete-dialog-delete","Delete")),
+
+            #[watch]
+            set_response_label: ("cancel", &t!("delete-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("delete",  &t!("delete-dialog-delete","Delete")),
+
             set_response_appearance: ("delete", adw::ResponseAppearance::Destructive),
             set_default_response: Some("cancel"),
             set_close_response: "cancel",
@@ -317,7 +338,7 @@ impl ListPage {
                         let metadata = instance
                             .fetch_metadata(&client, &entry, &dirs, download_source)
                             .await
-                            .map_err(|e| e.to_string())?;
+                            .map_err(|e| e.to_i18n())?;
 
                         // Fetch asset index
                         let _ = out.send(ListCmdOutput::StageChanged {
@@ -331,7 +352,7 @@ impl ListPage {
                             download_source,
                         )
                         .await
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| e.to_i18n())?;
 
                         // Collect download tasks
                         let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
@@ -369,7 +390,7 @@ impl ListPage {
                             Some(tx),
                         )
                         .await
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| e.to_i18n())?;
                         let _ = forward_handle.await; // Ownership of tx has already been moved; tx will be dropped once the download completes.
 
                         let _ = out.send(ListCmdOutput::StageChanged {
@@ -385,7 +406,7 @@ impl ListPage {
                         })
                         .await
                         .map_err(|e| e.to_string())?
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| e.to_i18n())?;
 
                         Ok(())
                     }
@@ -428,22 +449,27 @@ impl Component for ListPage {
         #[root]
         #[name = "page"]
         adw::PreferencesPage {
-            set_title: "Instances",
+            #[watch]
+            set_title: &t!("instances-list-title","Instances"),
 
             #[local_ref]
             instances_group -> adw::PreferencesGroup {
-                set_title: "Instances",
-                set_description: Some("Select an instance to launch Minecraft"),
+                #[watch]
+                set_title: &t!("instances-list-title","Instances"),
+                #[watch]
+                set_description: Some(&t!("instances-list-description","Select an instance to launch Minecraft")),
 
                 #[wrap(Some)]
                 set_header_suffix = &gtk::Button {
                     add_css_class: "flat",
                     set_valign: gtk::Align::Center,
-                    set_tooltip_text: Some("Create an instance"),
+                    #[watch]
+                    set_tooltip_text: Some(&t!("instances-list-tooltip-create","Create an instance")),
 
                     adw::ButtonContent {
                         set_icon_name: "list-add-symbolic",
-                        set_label: "Create",
+                        #[watch]
+                        set_label: &t!("instances-list-button-create","Create"),
                     },
 
                     connect_clicked[sender] => move |_| {
@@ -469,6 +495,9 @@ impl Component for ListPage {
                 InstanceRowOutput::Select(id) => ListInput::SelectInstance(id),
                 InstanceRowOutput::Remove(id) => ListInput::RemoveInstance(id),
             });
+
+        init.config
+            .subscribe(sender.input_sender(), |_| ListInput::Refresh);
 
         let mut model = Self {
             mgr: init.mgr,
@@ -496,8 +525,12 @@ impl Component for ListPage {
                 let res = self.mgr.write().set_active_instance(&id).map(|_| ());
 
                 if let Err(err) = res {
-                    let msg = format!("Failed to select instance: {err}");
-                    error!("{msg}");
+                    error!("Failed to select instance: {err}");
+                    let msg = t!(
+                        "instance-list-error-select-instance",
+                        "Failed to select instance: {err}",
+                        err = err
+                    );
                     let _ = sender.output(ListOutput::ShowToast(msg));
                     return;
                 }
@@ -511,8 +544,12 @@ impl Component for ListPage {
             }
             ListInput::RemoveInstance(id) => {
                 if let Err(err) = self.mgr.write().remove_instance(&id) {
-                    let msg = format!("Failed to remove instance: {err}");
-                    error!("{msg}");
+                    error!("Failed to remove instance: {err}");
+                    let msg = t!(
+                        "instance-list-error-remove-instance",
+                        "Failed to remove instance: {err}",
+                        err = err
+                    );
                     let _ = sender.output(ListOutput::ShowToast(msg));
                     return;
                 }
@@ -544,8 +581,10 @@ impl Component for ListPage {
 
                 match result {
                     Ok(()) => {
-                        let _ = sender.output(ListOutput::ShowToast(format!(
-                            "Instance \"{id}\" is ready to play"
+                        let _ = sender.output(ListOutput::ShowToast(t!(
+                            "instance-list-ready-to-play",
+                            "Instance \"{id}\" is ready to play",
+                            id = id
                         )));
                     }
                     Err(err) => {
@@ -644,7 +683,7 @@ mod tests {
         });
         assert_eq!(
             downloading.status_text(),
-            Some("Downloading (3/10)".to_string())
+            Some("Downloading (\u{2068}3\u{2069}/\u{2068}10\u{2069})".to_string())
         );
     }
 }

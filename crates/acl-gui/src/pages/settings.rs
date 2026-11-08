@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use acl_common::Language;
 use acl_core::LauncherConfig;
 use acl_minecraft::DownloadSource;
 use libadwaita::prelude::*;
@@ -11,11 +12,14 @@ use relm4::{ComponentParts, SimpleComponent};
 use relm4::{SharedState, prelude::*};
 use tracing::error;
 
+use crate::i18n::apply_language;
 use crate::system::memory_info;
+use crate::t;
 pub struct SettingsPage {
     config: Arc<SharedState<LauncherConfig>>,
     config_path: PathBuf,
     java_model: gtk::StringList,
+    language_model: gtk::StringList,
     /// Set when max memory changes; cleared after it has been persisted.
     max_memory_dirty: bool,
 }
@@ -37,13 +41,19 @@ pub enum SettingsInput {
     ScanJava,
     SaveConfig, // Trigger a save when the mouse is released or focus is lost.
     SelectDownloadSource(DownloadSource),
+    SelectLanguage(usize),
+    Refresh,
 }
 
 impl SettingsPage {
     fn save_config(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.config.read().save(&self.config_path) {
-            let msg = format!("Failed to save configuration: {err}");
-            error!("{msg}");
+            error!("Failed to save configuration: {err}");
+            let msg = t!(
+                "settings-error-save-configuration",
+                "Failed to save configuration: {err}",
+                err = err,
+            );
             let _ = sender.output(SettingsOutput::ShowToast(msg));
         }
     }
@@ -52,7 +62,7 @@ impl SettingsPage {
         let cfg = self.config.read();
 
         let mut java_names: Vec<String> = Vec::with_capacity(cfg.java_list.len() + 1);
-        java_names.push("Auto-detect (Recommended)".to_string());
+        java_names.push(t!("settings-java-auto-detect", "Auto-detect (Recommended)"));
         java_names.extend(cfg.java_list.iter().map(|j| {
             let vendor = j.info.vendor.as_deref().unwrap_or("Java");
             format!("{} {}", vendor, j.info.version)
@@ -78,6 +88,24 @@ impl SettingsPage {
                 .unwrap_or(0),
         }
     }
+
+    fn language_label(lang: Language) -> String {
+        match lang {
+            Language::System => t!("language-system", "System"),
+            Language::English => "English (US)".to_string(),
+            Language::SimplifiedChinese => "简体中文".to_string(),
+        }
+    }
+
+    fn refresh_language_model(&mut self) {
+        let mut lang_names: Vec<String> = Vec::with_capacity(Language::ALL.len());
+        for lang in Language::ALL {
+            lang_names.push(Self::language_label(*lang));
+        }
+        let name_refs: Vec<&str> = lang_names.iter().map(|s| s.as_str()).collect();
+        self.language_model
+            .splice(0, self.language_model.n_items(), &name_refs);
+    }
 }
 
 #[relm4::component(pub)]
@@ -89,14 +117,16 @@ impl SimpleComponent for SettingsPage {
     view! {
         adw::PreferencesPage {
             adw::PreferencesGroup {
-                set_title: "Java",
+                #[watch]
+                set_title: &t!("settings-java-title","Java"),
 
                 #[wrap(Some)]
                 set_header_suffix = &gtk::Button {
                     set_icon_name: "view-refresh-symbolic",
                     add_css_class: "flat",
                     set_valign: gtk::Align::Center,
-                    set_tooltip_text: Some("Rescan for installed Java runtimes"),
+                    #[watch]
+                    set_tooltip_text: Some(&t!("settings-java-rescan","Rescan for installed Java runtimes")),
 
                     connect_clicked[sender] => move |_| {
                         sender.input(SettingsInput::ScanJava);
@@ -105,7 +135,8 @@ impl SimpleComponent for SettingsPage {
                 },
 
                 add = &adw::ActionRow {
-                    set_title: "Max Memory",
+                    #[watch]
+                    set_title: &t!("settings-java-max-memory-title","Max Memory"),
                     #[watch]
                     set_subtitle: &format!("{} MB", model.config.read().max_memory_mb),
                     add_suffix = &gtk::Scale {
@@ -150,10 +181,11 @@ impl SimpleComponent for SettingsPage {
 
                 },
                 add = &adw::ComboRow {
-                    set_title: "Java Runtime",
-                   #[watch]
+                    #[watch]
+                    set_title: &t!("settings-java-runtime-title","Java Runtime"),
+                    #[watch]
                     set_subtitle: &model.config.read().default_java.as_ref().map_or_else(
-                        || "Automatically match based on game version".to_string(),
+                        || t!("settings-java-runtime-subtitle","Automatically match based on game version"),
                         |j| j.path.display().to_string(),
                     ),
                     set_model: Some(&java_model),
@@ -170,10 +202,12 @@ impl SimpleComponent for SettingsPage {
             },
 
             adw::PreferencesGroup {
-                set_title: "Downloads",
+                #[watch]
+                set_title: &t!("settings-downloads-title","Downloads"),
 
                 add = &adw::ComboRow {
-                    set_title: "Download Source",
+                    #[watch]
+                    set_title: &t!("settings-downloads-source-title","Download Source"),
                     #[watch]
                     set_subtitle: model.config.read().download_source.label(),
                     set_model: Some(&download_source_model),
@@ -189,8 +223,10 @@ impl SimpleComponent for SettingsPage {
                 },
 
                 add = &adw::SpinRow {
-                    set_title: "Max Concurrent Downloads",
-                    set_subtitle: "How many files can be downloaded at the same time",
+                    #[watch]
+                    set_title: &t!("settings-downloads-concurrent-title","Max Concurrent Downloads"),
+                    #[watch]
+                    set_subtitle: &t!("settings-downloads-concurrent-subtitle","How many files can be downloaded at the same time"),
                     set_digits: 0,
 
                     set_adjustment: Some(&gtk::Adjustment::new(
@@ -211,15 +247,34 @@ impl SimpleComponent for SettingsPage {
             },
 
             adw::PreferencesGroup {
-                set_title: "Launcher",
+                #[watch]
+                set_title: &t!("settings-launcher-title","Launcher"),
                 add = &adw::SwitchRow {
-                    set_title: "Close Launcher On Launch",
+                    #[watch]
+                    set_title: &t!("settings-launcher-close-title","Close Launcher On Launch"),
                     #[watch]
                     set_active: model.config.read().close_launcher_on_launch,
 
                     connect_active_notify[sender] => move |checkbox| {
                         sender.input(SettingsInput::SetCloseOnLaunch(checkbox.is_active()));
                         sender.input(SettingsInput::SaveConfig);
+                    }
+                },
+                add = &adw::ComboRow {
+                    #[watch]
+                    set_title: &t!("settings-launcher-language-title", "Language"),
+                    #[watch]
+                    set_subtitle: &t!("settings-launcher-language-subtitle","Set the display language."),
+
+                    set_model: Some(&language_model),
+                    #[watch]
+                    set_selected: model.config.read().language.to_index(),
+                    connect_selected_notify[sender] => move |row| {
+                        let idx = row.selected();
+                        if idx != gtk::INVALID_LIST_POSITION {
+                            sender.input(SettingsInput::SelectLanguage(idx as usize));
+                            sender.input(SettingsInput::SaveConfig);
+                        }
                     }
                 }
             }
@@ -233,20 +288,27 @@ impl SimpleComponent for SettingsPage {
         sender: relm4::prelude::ComponentSender<Self>,
     ) -> relm4::prelude::ComponentParts<Self> {
         let java_model = gtk::StringList::new(&[]);
+        let language_model = gtk::StringList::new(&[]);
+
         let download_source_model = gtk::StringList::new(
             &DownloadSource::ALL
                 .iter()
                 .map(|s| s.label())
                 .collect::<Vec<_>>(),
         );
+
+        config.subscribe(sender.input_sender(), |_| SettingsInput::Refresh);
+
         let mut model = SettingsPage {
             config,
             config_path,
             java_model: java_model.clone(),
+            language_model: language_model.clone(),
             max_memory_dirty: false,
         };
 
         model.refresh_java_model();
+        model.refresh_language_model();
 
         let widgets = view_output!();
 
@@ -286,15 +348,25 @@ impl SimpleComponent for SettingsPage {
             SettingsInput::ScanJava => {
                 self.config.write().search_java();
                 self.refresh_java_model();
-                let _ = sender.output(SettingsOutput::ShowToast(
-                    "Successfully refreshed the Java list.".to_owned(),
-                ));
+                let _ = sender.output(SettingsOutput::ShowToast(t!(
+                    "settings-toast-refresh-java",
+                    "Successfully refreshed the Java list."
+                )));
             }
             SettingsInput::SaveConfig => {
                 self.save_config(&sender);
             }
             SettingsInput::SelectDownloadSource(source) => {
                 self.config.write().download_source = source;
+            }
+            SettingsInput::SelectLanguage(idx) => {
+                let lang = Language::from_index(idx as u32);
+                apply_language(lang);
+                self.config.write().language = lang;
+            }
+            SettingsInput::Refresh => {
+                self.refresh_java_model();
+                self.refresh_language_model();
             }
         }
     }
@@ -429,5 +501,49 @@ mod tests {
         assert_eq!(DownloadSource::from_index(1), DownloadSource::Bmclapi);
         assert_eq!(DownloadSource::Official.to_index(), 0);
         assert_eq!(DownloadSource::Bmclapi.to_index(), 1);
+    }
+
+    #[test]
+    fn test_select_language_logic() {
+        let mut cfg = LauncherConfig::default();
+        assert_eq!(cfg.language, Language::System);
+
+        let select_language = |cfg: &mut LauncherConfig, idx: usize| {
+            cfg.language = Language::from_index(idx as u32);
+        };
+
+        select_language(&mut cfg, 1);
+        assert_eq!(cfg.language, Language::English);
+
+        select_language(&mut cfg, 2);
+        assert_eq!(cfg.language, Language::SimplifiedChinese);
+
+        select_language(&mut cfg, 0);
+        assert_eq!(cfg.language, Language::System);
+
+        // Out-of-bounds index falls back to System
+        select_language(&mut cfg, 99);
+        assert_eq!(cfg.language, Language::System);
+    }
+
+    #[test]
+    fn test_language_combo_row_mapping() {
+        for (idx, &lang) in Language::ALL.iter().enumerate() {
+            assert_eq!(Language::from_index(idx as u32), lang);
+            assert_eq!(lang.to_index(), idx as u32);
+        }
+    }
+
+    #[test]
+    fn test_language_labels() {
+        assert_eq!(
+            SettingsPage::language_label(Language::English),
+            "English (US)"
+        );
+        assert_eq!(
+            SettingsPage::language_label(Language::SimplifiedChinese),
+            "简体中文"
+        );
+        assert_eq!(SettingsPage::language_label(Language::System), "System");
     }
 }

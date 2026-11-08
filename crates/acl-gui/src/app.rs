@@ -11,6 +11,7 @@ use crate::{
         instances::{InstancesInit, InstancesPage, InstancesPageOutput},
         settings::{SettingsOutput, SettingsPage},
     },
+    t,
     widgets::ms_login::{MsLoginDialog, MsLoginInit, MsLoginInput, MsLoginOutput},
 };
 use adw::prelude::*;
@@ -47,12 +48,12 @@ impl NavPage {
         }
     }
 
-    fn title(self) -> &'static str {
+    fn title(self) -> String {
         match self {
-            Self::Home => "Home",
-            Self::Instances => "Instances",
-            Self::Accounts => "Accounts",
-            Self::Settings => "Settings",
+            Self::Home => t!("navigation-page-home", "Home"),
+            Self::Instances => t!("navigation-page-instances", "Instances"),
+            Self::Accounts => t!("navigation-page-accounts", "Accounts"),
+            Self::Settings => t!("navigation-page-settings", "Settings"),
         }
     }
 }
@@ -81,6 +82,8 @@ pub struct AppModel {
     settings_page: Controller<SettingsPage>,
     ms_login: Controller<MsLoginDialog>,
 
+    stack: adw::ViewStack,
+
     #[allow(dead_code)]
     config: Arc<SharedState<LauncherConfig>>,
     #[allow(dead_code)]
@@ -97,6 +100,7 @@ pub enum AppMsg {
     ShowToast(String),
     StartMicrosoftLogin,
     PromptReauth(String),
+    Refresh,
     Quit,
 }
 
@@ -129,7 +133,7 @@ impl SimpleComponent for AppModel {
                             add_top_bar = &adw::HeaderBar {},
                             #[wrap(Some)]
                             set_content = &adw::ViewSwitcherSidebar {
-                                set_stack: Some(&stack),
+                                set_stack: Some(stack),
                             },
                         },
                     },
@@ -138,21 +142,21 @@ impl SimpleComponent for AppModel {
                     set_content = &NavigationPage {
 
                         #[watch]
-                        set_title: model.current_page.title(),
+                        set_title: &model.current_page.title(),
 
                         #[wrap(Some)]
                         set_child = &adw::ToolbarView {
 
                             add_top_bar = &adw::HeaderBar {},
 
-                            #[name = "stack"]
                             #[wrap(Some)]
-                            set_content = &adw::ViewStack {
+                            #[local_ref]
+                            set_content = stack ->adw::ViewStack {
 
-                                add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), NavPage::Home.title(), "go-home-symbolic"),
-                                add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), NavPage::Instances.title(), "view-grid-symbolic"),
-                                add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), NavPage::Accounts.title(), "avatar-default-symbolic"),
-                                add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), NavPage::Settings.title(), "emblem-system-symbolic"),
+                                add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), &NavPage::Home.title(), "go-home-symbolic"),
+                                add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), &NavPage::Instances.title(), "view-grid-symbolic"),
+                                add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), &NavPage::Accounts.title(), "avatar-default-symbolic"),
+                                add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), &NavPage::Settings.title(), "emblem-system-symbolic"),
 
                                 #[watch]
                                 set_visible_child_name: model.current_page.as_str(),
@@ -175,8 +179,12 @@ impl SimpleComponent for AppModel {
         let config = match LauncherConfig::load_or_recommended(&dirs.config_file()) {
             Ok(cfg) => cfg,
             Err(err) => {
-                let err = format!("Failed to load config, using defaults: {err}");
-                error!("{err}");
+                error!("Failed to load config, using defaults: {err}");
+                let err = t!(
+                    "app-init-error-load-config",
+                    "Failed to load config, using defaults: {err}",
+                    err = err
+                );
                 sender.input(AppMsg::ShowToast(err));
                 LauncherConfig::default()
             }
@@ -191,8 +199,12 @@ impl SimpleComponent for AppModel {
         let store = match AccountStore::load_or_default(&accounts_path) {
             Ok(s) => s,
             Err(err) => {
-                let err_msg = format!("Failed to load accounts, using defaults: {err}");
-                error!("{err_msg}");
+                error!("Failed to load accounts, using defaults: {err}");
+                let err_msg = t!(
+                    "app-init-error-load-accounts",
+                    "Failed to load accounts, using defaults: {err}",
+                    err = err
+                );
                 sender.input(AppMsg::ShowToast(err_msg));
                 AccountStore::default()
             }
@@ -204,8 +216,12 @@ impl SimpleComponent for AppModel {
             match InstanceManager::load(dirs.versions_dir(), dirs.config_dir().to_path_buf()) {
                 Ok(s) => s,
                 Err(err) => {
-                    let err_msg = format!("Failed to load instances, using defaults: {err}");
-                    error!("{err_msg}");
+                    error!("Failed to load instances, using defaults: {err}");
+                    let err_msg = t!(
+                        "app-init-error-load-instances",
+                        "Failed to load instances, using defaults: {err}",
+                        err = err
+                    );
                     sender.input(AppMsg::ShowToast(err_msg));
                     InstanceManager::default()
                 }
@@ -279,6 +295,8 @@ impl SimpleComponent for AppModel {
                 SettingsOutput::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
+        config_state.subscribe(sender.input_sender(), |_| AppMsg::Refresh);
+
         let toast_overlay = adw::ToastOverlay::new();
         let model = AppModel {
             current_page: NavPage::Home,
@@ -288,6 +306,7 @@ impl SimpleComponent for AppModel {
             accounts_page,
             settings_page,
             ms_login,
+            stack: adw::ViewStack::new(),
             config: config_state,
             accounts: accounts_state,
             instances: instances_state,
@@ -295,9 +314,10 @@ impl SimpleComponent for AppModel {
         };
 
         let toast_overlay = &model.toast_overlay;
+        let stack = &model.stack;
         let widgets = view_output!();
 
-        widgets.stack.connect_visible_child_name_notify({
+        model.stack.connect_visible_child_name_notify({
             let sender = sender.clone();
             let split_view = widgets.split_view.clone();
             move |stack| {
@@ -330,6 +350,20 @@ impl SimpleComponent for AppModel {
             }
             AppMsg::PromptReauth(username) => {
                 self.ms_login.emit(MsLoginInput::PromptReauth { username });
+            }
+            AppMsg::Refresh => {
+                self.stack
+                    .page(self.home_page.widget())
+                    .set_title(Some(&NavPage::Home.title()));
+                self.stack
+                    .page(self.instances_page.widget())
+                    .set_title(Some(&NavPage::Instances.title()));
+                self.stack
+                    .page(self.accounts_page.widget())
+                    .set_title(Some(&NavPage::Accounts.title()));
+                self.stack
+                    .page(self.settings_page.widget())
+                    .set_title(Some(&NavPage::Settings.title()));
             }
         }
     }

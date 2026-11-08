@@ -13,6 +13,8 @@ use relm4::tokio::task::AbortHandle;
 use relm4::{SharedState, prelude::*};
 use tracing::{error, info};
 
+use crate::t;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum MsLoginState {
     #[default]
@@ -23,11 +25,16 @@ pub enum MsLoginState {
 }
 
 impl MsLoginState {
-    fn state_text(&self) -> &str {
+    fn state_text(&self) -> String {
         match self {
-            MsLoginState::Idle | MsLoginState::Starting => "Starting local login session...",
-            MsLoginState::WaitingBrowser(_) => "Please complete the sign-in in your web browser.",
-            MsLoginState::Failed(err) => err.as_str(),
+            MsLoginState::Idle | MsLoginState::Starting => {
+                t!("ms-login-state-starting", "Starting local login session...")
+            }
+            MsLoginState::WaitingBrowser(_) => t!(
+                "ms-login-state-waiting-browser",
+                "Please complete the sign-in in your web browser."
+            ),
+            MsLoginState::Failed(err) => err.to_owned(),
         }
     }
 
@@ -88,8 +95,12 @@ pub struct MsLoginDialog {
 impl MsLoginDialog {
     fn save_accounts(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.accounts.read().save(&self.accounts_path) {
-            let msg = format!("Failed to save accounts: {err}");
-            error!("{msg}");
+            let msg = t!(
+                "ms-login-error-save-accounts",
+                "Failed to save accounts: {err}",
+                err = err
+            );
+            error!("Failed to save accounts: {err}");
             let _ = sender.output(MsLoginOutput::ShowToast(msg));
         }
     }
@@ -104,13 +115,19 @@ impl MsLoginDialog {
             let res: Result<MicrosoftLoginResult, String> = async {
                 let session = MicrosoftLoginSession::start(&client_id)
                     .await
-                    .map_err(|err| format!("Failed to start login session: {err}"))?;
+                    .map_err(|err| {
+                        t!(
+                            "ms-login-error-start-session",
+                            "Failed to start login session: {err}",
+                            err = err
+                        )
+                    })?;
 
                 let _ = out.send(MsLoginCmdOutput::OpenBrowser(session.auth_url.to_string()));
 
                 MicrosoftAuth::login(session, &client)
                     .await
-                    .map_err(|e| format!("Authentication failed: {e}"))
+                    .map_err(|e| t!("ms-login-error-auth", "Authentication failed: {e}", e = e))
             }
             .await;
 
@@ -131,11 +148,14 @@ impl Component for MsLoginDialog {
     view! {
         #[root]
         adw::AlertDialog {
-            set_heading: Some("Microsoft Login"),
             #[watch]
-            set_body: model.login_state.state_text(),
+            set_heading: Some(&t!("ms-login-dialog-heading","Microsoft Login")),
+            #[watch]
+            set_body: &model.login_state.state_text(),
 
-            add_response: ("cancel", "Cancel"),
+            add_response: ("cancel", &t!("ms-login-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("cancel", &t!("ms-login-dialog-cancel","Cancel")),
             set_close_response: "cancel",
 
             #[wrap(Some)]
@@ -172,7 +192,8 @@ impl Component for MsLoginDialog {
 
                     adw::ButtonContent {
                         set_icon_name: "edit-copy-symbolic",
-                        set_label: "Copy Login Link",
+                        #[watch]
+                        set_label: &t!("ms-login-dialog-copy-link","Copy Login Link"),
                     },
 
                 }
@@ -190,15 +211,23 @@ impl Component for MsLoginDialog {
 
         #[local_ref]
         reauth_dialog -> adw::AlertDialog {
-            set_heading: Some("Session Expired"),
             #[watch]
-            set_body: &format!(
-                "The Microsoft session for \"{}\" has expired. Please sign in again.",
-                model.reauth_username
+            set_heading: Some(&t!("reauth-dialog-heading","Session Expired")),
+            #[watch]
+            set_body: &t!(
+                "reauth-dialog-body",
+                "The Microsoft session for \"{username}\" has expired. Please sign in again.",
+                username = model.reauth_username
             ),
 
-            add_response: ("cancel", "Cancel"),
-            add_response: ("login", "Sign In"),
+            add_response: ("cancel", &t!("reauth-dialog-cancel","Cancel")),
+            add_response: ("login", &t!("reauth-dialog-sign-in","Sign In")),
+
+            #[watch]
+            set_response_label: ("cancel",  &t!("reauth-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("login", &t!("reauth-dialog-sign-in","Sign In")),
+
             set_response_appearance: ("login", adw::ResponseAppearance::Suggested),
 
             set_default_response: Some("login"),
@@ -245,9 +274,10 @@ impl Component for MsLoginDialog {
             }
             MsLoginInput::Start => {
                 let Some(client_id) = MICROSOFT_CLIENT_ID else {
-                    let _ = sender.output(MsLoginOutput::ShowToast(
-                        "Microsoft Client ID is not configured".to_string(),
-                    ));
+                    let _ = sender.output(MsLoginOutput::ShowToast(t!(
+                        "ms-login-error-client-id-empty",
+                        "Microsoft Client ID is not configured"
+                    )));
                     return;
                 };
 
@@ -274,9 +304,10 @@ impl Component for MsLoginDialog {
                     && let Some(display) = gtk::gdk::Display::default()
                 {
                     display.clipboard().set_text(url);
-                    let _ = sender.output(MsLoginOutput::ShowToast(
-                        "Login link copied to clipboard".to_string(),
-                    ));
+                    let _ = sender.output(MsLoginOutput::ShowToast(t!(
+                        "ms-login-toast-copy-link",
+                        "Login link copied to clipboard"
+                    )));
                 }
             }
         }
@@ -295,8 +326,13 @@ impl Component for MsLoginDialog {
                     &url,
                     gtk::gio::AppLaunchContext::NONE,
                 ) {
-                    let msg = format!("Failed to open browser automatically: {err}");
-                    error!("{msg}");
+                    error!("Failed to open browser automatically: {err}");
+                    let msg = t!(
+                        "ms-login-error-open-browser",
+                        "Failed to open browser automatically: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(MsLoginOutput::ShowToast(msg));
                 }
             }
@@ -316,9 +352,10 @@ impl Component for MsLoginDialog {
 
                             self.accounts.write().add_account(login_res.account);
                             self.save_accounts(&sender);
-                            let _ = sender.output(MsLoginOutput::ShowToast(
-                                "Microsoft account added successfully".to_string(),
-                            ));
+                            let _ = sender.output(MsLoginOutput::ShowToast(t!(
+                                "ms-login-toast-add-account",
+                                "Microsoft account added successfully"
+                            )));
                         }
                     }
                     Err(err) => {
