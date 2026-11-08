@@ -93,4 +93,21 @@ mod tests {
         );
         assert_eq!(de("").expect("deserialize empty string"), Language::System);
     }
+
+    #[test]
+    fn test_language_all_constant() {
+        assert_eq!(
+            Language::ALL,
+            &[
+                Language::System,
+                Language::English,
+                Language::SimplifiedChinese
+            ]
+        );
+        assert_eq!(Language::ALL.len(), 3);
+        for (idx, &lang) in Language::ALL.iter().enumerate() {
+            assert_eq!(lang.to_index(), idx as u32);
+            assert_eq!(Language::from_index(idx as u32), lang);
+        }
+    }
 }

@@ -502,4 +502,48 @@ mod tests {
         assert_eq!(DownloadSource::Official.to_index(), 0);
         assert_eq!(DownloadSource::Bmclapi.to_index(), 1);
     }
+
+    #[test]
+    fn test_select_language_logic() {
+        let mut cfg = LauncherConfig::default();
+        assert_eq!(cfg.language, Language::System);
+
+        let select_language = |cfg: &mut LauncherConfig, idx: usize| {
+            cfg.language = Language::from_index(idx as u32);
+        };
+
+        select_language(&mut cfg, 1);
+        assert_eq!(cfg.language, Language::English);
+
+        select_language(&mut cfg, 2);
+        assert_eq!(cfg.language, Language::SimplifiedChinese);
+
+        select_language(&mut cfg, 0);
+        assert_eq!(cfg.language, Language::System);
+
+        // Out-of-bounds index falls back to System
+        select_language(&mut cfg, 99);
+        assert_eq!(cfg.language, Language::System);
+    }
+
+    #[test]
+    fn test_language_combo_row_mapping() {
+        for (idx, &lang) in Language::ALL.iter().enumerate() {
+            assert_eq!(Language::from_index(idx as u32), lang);
+            assert_eq!(lang.to_index(), idx as u32);
+        }
+    }
+
+    #[test]
+    fn test_language_labels() {
+        assert_eq!(
+            SettingsPage::language_label(Language::English),
+            "English (US)"
+        );
+        assert_eq!(
+            SettingsPage::language_label(Language::SimplifiedChinese),
+            "简体中文"
+        );
+        assert_eq!(SettingsPage::language_label(Language::System), "System");
+    }
 }
