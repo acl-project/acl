@@ -98,11 +98,11 @@ impl SettingsPage {
     }
 
     fn refresh_language_model(&mut self) {
-        let mut java_names: Vec<String> = Vec::with_capacity(Language::ALL.len());
+        let mut lang_names: Vec<String> = Vec::with_capacity(Language::ALL.len());
         for lang in Language::ALL {
-            java_names.push(Self::language_label(*lang));
+            lang_names.push(Self::language_label(*lang));
         }
-        let name_refs: Vec<&str> = java_names.iter().map(|s| s.as_str()).collect();
+        let name_refs: Vec<&str> = lang_names.iter().map(|s| s.as_str()).collect();
         self.language_model
             .splice(0, self.language_model.n_items(), &name_refs);
     }

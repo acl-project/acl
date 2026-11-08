@@ -270,9 +270,9 @@ ms-login-error-save-accounts = 保存账户失败：{ $err }
 # Source: Failed to start login session: { $err }
 ms-login-error-start-session = 启动登录会话失败：{ $err }
 # Source: Starting local login session...
-ms-login-state-starting = 启动登入会话中...
+ms-login-state-starting = 启动登录会话中...
 # Source: Please complete the sign-in in your web browser.
-ms-login-state-waiting-browser = 请在浏览器中完成登入.
+ms-login-state-waiting-browser = 请在浏览器中完成登录。
 # Source: Microsoft account added successfully
 ms-login-toast-add-account = 微软账户添加成功
 # Source: Login link copied to clipboard

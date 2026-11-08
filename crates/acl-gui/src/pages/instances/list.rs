@@ -683,7 +683,7 @@ mod tests {
         });
         assert_eq!(
             downloading.status_text(),
-            Some("Downloading (3/10)".to_string())
+            Some("Downloading (\u{2068}3\u{2069}/\u{2068}10\u{2069})".to_string())
         );
     }
 }
