@@ -133,6 +133,8 @@ delete-dialog-heading = 删除实例
 home-page-button-launching = 正在启动...
 # Source: Start Game
 home-page-button-start-game = 启动游戏
+# Source: Please select a instance
+home-page-error-empty-instance = 请先选择一个实例
 # Source: Failed to save accounts: { $err }
 home-page-error-save-accounts = 保存账户失败：{ $err }
 # Source: No account selected
@@ -143,6 +145,8 @@ home-page-no-instance = 未选择实例
 home-page-status-description = 实例：{ $inst_text } • 账户：{ $acc_text }
 # Source: Adwaita Craft Launcher
 home-page-status-title = Adwaita Craft Launcher
+# Source: Instance settings
+home-page-tooltip-instance-settings = 实例设置
 # Source: Downloading ({ $completed }/{ $total })
 install-stage-downloading = 正在下载 ({ $completed }/{ $total })
 # Source: Fetching asset index...
@@ -151,12 +155,26 @@ install-stage-fetching-asset-index = 正在获取资源索引...
 install-stage-fetching-metadata = 正在获取版本元数据...
 # Source: Preparing runtime...
 install-stage-preparing-runtime = 正在准备运行环境...
+# Source: Back
+instance-detail-button-back = 返回
 # Source: Failed to remove instance: { $err }
 instance-list-error-remove-instance = 移除实例失败：{ $err }
 # Source: Failed to select instance: { $err }
 instance-list-error-select-instance = 选择实例失败：{ $err }
 # Source: Instance "{ $id }" is ready to play
 instance-list-ready-to-play = 实例“{ $id }”已准备就绪
+# Source: Settings
+instance-navigation-page-settings = 设置
+# Source: Base
+instance-settings-base-title = 基础
+# Source: Instance-Specific Settings
+instance-settings-custom-title = 独立实例设置
+# Source: Failed to save instance { $id } configuration: { $err }
+instance-settings-error-save-configuration = 保存实例 { $id } 配置失败：{ $err }
+# Source: Instance Name
+instance-settings-name-title = 实例名称
+# Source: None
+instance-settings-none = 无
 # Source: Back
 instances-create-button-back = 返回
 # Source: Create
@@ -239,6 +257,8 @@ launch-stage-prepare-runtime = 正在准备运行环境...
 launch-stage-waiting-window = 等待游戏窗口出现...
 # Source: Remove instance
 list-tooltip-remove = 移除实例
+# Source: Instance settings
+list-tooltip-settings = 实例设置
 # Source: SHA-1 mismatch for '{ $target }': expected { $expected }, actual { $actual }
 minecraft-error-hash-mismatch = '{ $target }' 的 SHA-1 不匹配：期望 { $expected }，实际 { $actual }
 # Source: HTTP request failed: { $arg0 }

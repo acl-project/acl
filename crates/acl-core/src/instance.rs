@@ -48,6 +48,9 @@ pub struct InstanceConfig {
     pub name: String,
     /// Minecraft version name (e.g., 1.21)
     pub game_version: String,
+    /// Whether instance-specific settings are enabled
+    #[serde(default)]
+    pub custom_settings: bool,
     /// Type of mod loader
     #[serde(default)]
     pub mod_loader: ModLoader,
@@ -540,6 +543,7 @@ mod tests {
         assert_eq!(config.id, "test-inst");
         assert_eq!(config.name, "Test Instance");
         assert_eq!(config.game_version, "1.21");
+        assert!(!config.custom_settings);
         assert_eq!(config.mod_loader, ModLoader::Vanilla);
         assert_eq!(config.mod_loader_version, None);
         assert_eq!(config.java, None);
@@ -562,6 +566,7 @@ mod tests {
             .expect("should create config");
         config.mod_loader = ModLoader::Fabric;
         config.mod_loader_version = Some("0.16.0".to_string());
+        config.custom_settings = true;
         config.min_memory_mb = Some(2048);
         config.max_memory_mb = Some(8192);
         config.extra_jvm_args = vec!["-Xmx8G".to_string(), "-Dfoo=bar".to_string()];
@@ -575,6 +580,7 @@ mod tests {
         assert_eq!(loaded.game_version, "1.21.1");
         assert_eq!(loaded.mod_loader, ModLoader::Fabric);
         assert_eq!(loaded.mod_loader_version.as_deref(), Some("0.16.0"));
+        assert!(loaded.custom_settings);
         assert_eq!(loaded.min_memory_mb, Some(2048));
         assert_eq!(loaded.max_memory_mb, Some(8192));
         assert_eq!(loaded.extra_jvm_args, vec!["-Xmx8G", "-Dfoo=bar"]);

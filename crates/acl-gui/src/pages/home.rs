@@ -109,6 +109,7 @@ pub enum HomeOutput {
     ShowToast(String),
     RequestClose,
     PromptReauth(String),
+    OpenInstanceDetail(String),
 }
 
 #[derive(Debug)]
@@ -116,6 +117,7 @@ pub enum HomeInput {
     LaunchClicked,
     /// Trigger a watch update.
     Refresh,
+    OpenInstanceSettings,
 }
 
 #[derive(Debug)]
@@ -473,7 +475,7 @@ impl Component for HomePage {
 
             gtk::Box {
                 set_orientation: gtk::Orientation::Horizontal,
-                set_spacing: 16,
+                set_spacing: 10,
                 set_valign: gtk::Align::Center,
 
 
@@ -522,6 +524,22 @@ impl Component for HomePage {
                 },
 
                 gtk::Button {
+
+                    set_halign: gtk::Align::End,
+                    set_valign: gtk::Align::Center,
+                    add_css_class: "circular",
+                    set_width_request: 49,
+                    set_height_request: 49,
+                    set_icon_name: "emblem-system-symbolic",
+                    #[watch]
+                    set_tooltip_text: Some(&t!("home-page-tooltip-instance-settings", "Instance settings")),
+                    #[watch]
+                    set_sensitive: !model.stage.is_launching()
+                                && model.mgr.read().active_instance().is_some(),
+                    connect_clicked => HomeInput::OpenInstanceSettings,
+                },
+
+                gtk::Button {
                     set_halign: gtk::Align::End,
                     set_valign: gtk::Align::Center,
                     add_css_class: "suggested-action",
@@ -553,6 +571,7 @@ impl Component for HomePage {
                         },
                     },
                 },
+
             },
         }
     }
@@ -587,6 +606,16 @@ impl Component for HomePage {
                 self.launch(sender);
             }
             HomeInput::Refresh => {}
+            HomeInput::OpenInstanceSettings => {
+                if let Some(ins) = self.mgr.read().active_instance() {
+                    let _ = sender.output(HomeOutput::OpenInstanceDetail(ins.id().to_string()));
+                } else {
+                    let _ = sender.output(HomeOutput::ShowToast(t!(
+                        "home-page-error-empty-instance",
+                        "Please select an instance"
+                    )));
+                }
+            }
         }
     }
 

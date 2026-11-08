@@ -3,6 +3,6 @@
 
 pub mod accounts;
 pub mod home;
+pub mod instance_detail;
 pub mod instances;
-
 pub mod settings;

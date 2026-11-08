@@ -137,6 +137,14 @@ impl InstanceManager {
         let active_id = self.config.active_id.as_deref()?;
         self.instances.iter_mut().find(|ins| ins.id() == active_id)
     }
+
+    pub fn instance(&self, id: &str) -> Option<&Instance> {
+        self.instances.iter().find(|ins| ins.id() == id)
+    }
+
+    pub fn instance_mut(&mut self, id: &str) -> Option<&mut Instance> {
+        self.instances.iter_mut().find(|ins| ins.id() == id)
+    }
 }
 
 #[cfg(test)]
@@ -396,5 +404,37 @@ mod tests {
         mgr.config.active_id = None;
         assert!(mgr.active_instance().is_none());
         assert!(mgr.active_instance_mut().is_none());
+    }
+
+    #[test]
+    fn test_manager_instance_and_instance_mut() {
+        let temp = TempDirGuard::new("instance_lookup");
+        let versions_dir = temp.path().join("versions");
+        let config_dir = temp.path().join("config");
+        fs::create_dir_all(&versions_dir).unwrap();
+        fs::create_dir_all(&config_dir).unwrap();
+
+        Instance::create("inst_1", "Instance One", "1.20.1", &versions_dir).unwrap();
+        Instance::create("inst_2", "Instance Two", "1.21.1", &versions_dir).unwrap();
+
+        let mut mgr = InstanceManager::load(versions_dir, config_dir).unwrap();
+
+        // 1. Existing instance lookup
+        let inst1 = mgr.instance("inst_1");
+        assert!(inst1.is_some());
+        assert_eq!(inst1.map(|i| i.config.name.as_str()), Some("Instance One"));
+
+        // 2. Mutable instance lookup and modification
+        if let Some(inst_mut) = mgr.instance_mut("inst_1") {
+            inst_mut.config.name = "Instance One Renamed".to_string();
+        }
+        assert_eq!(
+            mgr.instance("inst_1").map(|i| i.config.name.as_str()),
+            Some("Instance One Renamed")
+        );
+
+        // 3. Nonexistent instance lookup returns None
+        assert!(mgr.instance("nonexistent").is_none());
+        assert!(mgr.instance_mut("nonexistent").is_none());
     }
 }

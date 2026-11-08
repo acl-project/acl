@@ -40,6 +40,7 @@ pub struct InstancesPage {
 #[derive(Debug, Clone)]
 pub enum InstancesPageOutput {
     ShowToast(String),
+    OpenDetail(String),
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,7 @@ pub enum InstancesPageInput {
     ChangeView(InstancesView),
     ShowToast(String),
     InstanceCreated(String, VersionEntry),
+    OpenDetail(String),
 }
 
 pub struct InstancesInit {
@@ -91,6 +93,7 @@ impl SimpleComponent for InstancesPage {
             .forward(sender.input_sender(), |msg| match msg {
                 ListOutput::ShowToast(message) => InstancesPageInput::ShowToast(message),
                 ListOutput::OpenCreate => InstancesPageInput::ChangeView(InstancesView::Create),
+                ListOutput::OpenDetail(id) => InstancesPageInput::OpenDetail(id),
             });
 
         let create_page = CreatePage::builder()
@@ -129,6 +132,9 @@ impl SimpleComponent for InstancesPage {
                 self.list_page.emit(ListInput::Refresh);
                 self.list_page.emit(ListInput::StartDownload(id, entry));
                 sender.input(InstancesPageInput::ChangeView(InstancesView::List));
+            }
+            InstancesPageInput::OpenDetail(id) => {
+                let _ = sender.output(InstancesPageOutput::OpenDetail(id));
             }
         }
     }
