@@ -264,9 +264,10 @@ impl Component for MsLoginDialog {
             }
             MsLoginInput::Start => {
                 let Some(client_id) = MICROSOFT_CLIENT_ID else {
-                    let _ = sender.output(MsLoginOutput::ShowToast(
-                        "Microsoft Client ID is not configured".to_string(),
-                    ));
+                    let _ = sender.output(MsLoginOutput::ShowToast(t!(
+                        "ms-login-error-client-id-empty",
+                        "Microsoft Client ID is not configured"
+                    )));
                     return;
                 };
 
@@ -293,9 +294,10 @@ impl Component for MsLoginDialog {
                     && let Some(display) = gtk::gdk::Display::default()
                 {
                     display.clipboard().set_text(url);
-                    let _ = sender.output(MsLoginOutput::ShowToast(
-                        "Login link copied to clipboard".to_string(),
-                    ));
+                    let _ = sender.output(MsLoginOutput::ShowToast(t!(
+                        "ms-login-toast-copy-link",
+                        "Login link copied to clipboard"
+                    )));
                 }
             }
         }
@@ -314,8 +316,13 @@ impl Component for MsLoginDialog {
                     &url,
                     gtk::gio::AppLaunchContext::NONE,
                 ) {
-                    let msg = format!("Failed to open browser automatically: {err}");
-                    error!("{msg}");
+                    error!("Failed to open browser automatically: {err}");
+                    let msg = t!(
+                        "ms-login-error-open-browser",
+                        "Failed to open browser automatically: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(MsLoginOutput::ShowToast(msg));
                 }
             }
@@ -335,9 +342,10 @@ impl Component for MsLoginDialog {
 
                             self.accounts.write().add_account(login_res.account);
                             self.save_accounts(&sender);
-                            let _ = sender.output(MsLoginOutput::ShowToast(
-                                "Microsoft account added successfully".to_string(),
-                            ));
+                            let _ = sender.output(MsLoginOutput::ShowToast(t!(
+                                "ms-login-toast-add-account",
+                                "Microsoft account added successfully"
+                            )));
                         }
                     }
                     Err(err) => {

@@ -496,16 +496,18 @@ impl Component for CreatePage {
             // Create version metadata without downloading resource files, file downloads are handled upstream.
             CreateInput::CreateClicked => {
                 let Some(version_entry) = self.selected_version.clone() else {
-                    let _ = sender.output(CreateOutput::ShowToast(
-                        "Please select a Minecraft version".to_string(),
-                    ));
+                    let _ = sender.output(CreateOutput::ShowToast(t!(
+                        "instances-create-error-empty-version",
+                        "Please select a Minecraft version"
+                    )));
                     return;
                 };
 
                 let Some(id) = self.effective_instance_name().map(str::to_string) else {
-                    let _ = sender.output(CreateOutput::ShowToast(
-                        "Please enter an instance name or select a version".to_string(),
-                    ));
+                    let _ = sender.output(CreateOutput::ShowToast(t!(
+                        "instances-create-error-no-name",
+                        "Please enter an instance name or select a version"
+                    )));
                     return;
                 };
 
@@ -517,8 +519,12 @@ impl Component for CreatePage {
                             id, version_entry.id
                         );
                         if let Err(err) = self.mgr.write().refresh() {
-                            let msg = format!("Failed to refresh instances: {err}");
-                            error!("{msg}");
+                            error!("Failed to refresh instances: {err}");
+                            let msg = t!(
+                                "instances-create-error-refresh-instances",
+                                "Failed to refresh instances: {err}",
+                                err = err
+                            );
                             let _ = sender.output(CreateOutput::ShowToast(msg));
                         } else {
                             self.selected_version = None;
@@ -527,8 +533,12 @@ impl Component for CreatePage {
                         }
                     }
                     Err(err) => {
-                        let msg = format!("Failed to create instance: {err}");
-                        error!("{msg}");
+                        error!("Failed to create instance: {err}");
+                        let msg = t!(
+                            "instances-create-error-create-instance",
+                            "Failed to create instance: {err}",
+                            err = err
+                        );
                         let _ = sender.output(CreateOutput::ShowToast(msg));
                     }
                 }
@@ -566,8 +576,12 @@ impl Component for CreatePage {
                     }
 
                     Err(err) => {
-                        let msg = format!("Failed to load version manifest: {err}");
-                        error!("{msg}");
+                        error!("Failed to load version manifest: {err}");
+                        let msg = t!(
+                            "instances-create-error-load-version-manifest",
+                            "Failed to load version manifest: {err}",
+                            err = err
+                        );
                         let _ = sender.output(CreateOutput::ShowToast(msg));
                     }
                 }

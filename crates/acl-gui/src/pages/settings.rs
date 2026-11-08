@@ -344,9 +344,10 @@ impl SimpleComponent for SettingsPage {
             SettingsInput::ScanJava => {
                 self.config.write().search_java();
                 self.refresh_java_model();
-                let _ = sender.output(SettingsOutput::ShowToast(
-                    "Successfully refreshed the Java list.".to_owned(),
-                ));
+                let _ = sender.output(SettingsOutput::ShowToast(t!(
+                    "settings-toast-refresh-java",
+                    "Successfully refreshed the Java list."
+                )));
             }
             SettingsInput::SaveConfig => {
                 self.save_config(&sender);

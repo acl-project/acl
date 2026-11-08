@@ -13,6 +13,16 @@ accounts-delete-dialog-cancel = 取消
 accounts-delete-dialog-delete = 删除
 # Source: Delete Account
 accounts-delete-dialog-heading = 删除账户
+# Source: Invalid username: { $err }
+accounts-error-invalid-username = 无效的用户名：{ $err }
+# Source: Failed to open browser: { $err }
+accounts-error-open-browser = 打开浏览器失败：{ $err }
+# Source: Failed to remove account: { $err }
+accounts-error-remove-account = 移除账户失败：{ $err }
+# Source: Failed to remove tokens: { $err }
+accounts-error-remove-tokens = 移除令牌失败：{ $err }
+# Source: Failed to select account: { $err }
+accounts-error-select-account = 选择账户失败：{ $err }
 # Source: Add Offline
 accounts-group-button-add-offline = 添加离线
 # Source: Microsoft Login
@@ -115,6 +125,8 @@ delete-dialog-heading = 删除实例
 home-page-button-launching = 正在启动...
 # Source: Start Game
 home-page-button-start-game = 启动游戏
+# Source: Failed to save accounts: { $err }
+home-page-error-save-accounts = 保存账户失败：{ $err }
 # Source: No account selected
 home-page-no-account = 未选择账户
 # Source: No instance selected
@@ -131,10 +143,26 @@ install-stage-fetching-asset-index = 正在获取资源索引...
 install-stage-fetching-metadata = 正在获取版本元数据...
 # Source: Preparing runtime...
 install-stage-preparing-runtime = 正在准备运行环境...
+# Source: Failed to remove instance: { $err }
+instance-list-error-remove-instance = 移除实例失败：{ $err }
+# Source: Failed to select instance: { $err }
+instance-list-error-select-instance = 选择实例失败：{ $err }
+# Source: Instance "{ $id }" is ready to play
+instance-list-ready-to-play = 实例“{ $id }”已准备就绪
 # Source: Back
 instances-create-button-back = 返回
 # Source: Create
 instances-create-button-create = 创建
+# Source: Failed to create instance: { $err }
+instances-create-error-create-instance = 创建实例失败：{ $err }
+# Source: Please select a Minecraft version
+instances-create-error-empty-version = 请选择 Minecraft 版本
+# Source: Failed to load version manifest: { $err }
+instances-create-error-load-version-manifest = 加载版本清单失败：{ $err }
+# Source: Please enter an instance name or select a version
+instances-create-error-no-name = 请输入实例名称或选择一个版本
+# Source: Failed to refresh instances: { $err }
+instances-create-error-refresh-instances = 刷新实例列表失败：{ $err }
 # Source: Refresh version list
 instances-create-refresh-version = 刷新版本列表
 # Source: Search versions...
@@ -155,6 +183,36 @@ instances-list-title = 实例
 instances-list-tooltip-create = 创建实例
 # Source: System
 language-system = 系统默认
+# Source: Please select an account first
+launch-error-account-not-select = 请先选择一个账户
+# Source: Failed to verify asset index: { $e }
+launch-error-asset-index = 验证资源索引失败：{ $e }
+# Source: Failed to build launch command: { $e }
+launch-error-build-command = 构建启动命令失败：{ $e }
+# Source: Client ID not set
+launch-error-client-id-empty = 未设置 Client ID
+# Source: Instance "{ $name }" exited with code { $code }
+launch-error-instance-exit-abnormal = 实例“{ $name }”异常退出，退出码：{ $code }
+# Source: Please select an instance first
+launch-error-instance-not-select = 请先选择一个实例
+# Source: Java error: { $e }
+launch-error-java = Java 错误：{ $e }
+# Source: Failed to load version metadata: { $e }
+launch-error-metadata = 加载版本元数据失败：{ $e }
+# Source: Failed to prepare runtime: { $e }
+launch-error-prepare-runtime = 准备运行环境失败：{ $e }
+# Source: Failed to verify resources: { $e }
+launch-error-resources = 验证资源文件失败：{ $e }
+# Source: Runtime task execution error: { $e }
+launch-error-runtime-execution = 运行时任务执行错误：{ $e }
+# Source: Failed to save configuration: { $err }
+launch-error-save-configuration = 保存配置失败：{ $err }
+# Source: Failed to spawn game process: { $e }
+launch-error-spawn-process = 启动游戏进程失败：{ $e }
+# Source: UUIDs do not match
+launch-error-uuid-mismatch = UUID 不匹配
+# Source: Error waiting for instance "{ $name }": { $err }
+launch-error-wait-instance = 等待实例“{ $name }”时出错：{ $err }
 # Source: Authenticating account...
 launch-stage-authenticating = 正在登入...
 # Source: Verifying game files...
@@ -191,10 +249,18 @@ ms-login-dialog-cancel = 取消
 ms-login-dialog-copy-link = 复制登录链接
 # Source: Microsoft Login
 ms-login-dialog-heading = 微软登录
+# Source: Microsoft Client ID is not configured
+ms-login-error-client-id-empty = 未配置微软 Client ID
+# Source: Failed to open browser automatically: { $err }
+ms-login-error-open-browser = 自动打开浏览器失败：{ $err }
 # Source: Starting local login session...
 ms-login-state-starting = 启动登入会话中...
 # Source: Please complete the sign-in in your web browser.
 ms-login-state-waiting-browser = 请在浏览器中完成登入.
+# Source: Microsoft account added successfully
+ms-login-toast-add-account = 微软账户添加成功
+# Source: Login link copied to clipboard
+ms-login-toast-copy-link = 登录链接已复制到剪贴板
 # Source: Accounts
 navigation-page-accounts = 账户
 # Source: Home
@@ -247,6 +313,8 @@ settings-launcher-language-subtitle = 设置显示语言
 settings-launcher-language-title = 语言
 # Source: Launcher
 settings-launcher-title = 启动器
+# Source: Successfully refreshed the Java list.
+settings-toast-refresh-java = 成功刷新 Java 列表。
 # Source: Username (e.g. Steve)
 username-entry-placeholder-text = 用户名（例如 Steve）
 # Source: Old

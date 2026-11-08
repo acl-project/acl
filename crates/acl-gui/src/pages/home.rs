@@ -19,8 +19,7 @@ use thiserror::Error;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use LaunchError::Other;
-
+use crate::i18n::LocalizeError;
 use crate::t;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -231,15 +230,14 @@ impl HomePage {
         match account.account_type {
             AccountType::Offline => Ok("0".to_string()),
             AccountType::Microsoft => {
-                let tokens =
-                    CredentialStore::get(account.uuid).map_err(|err| Other(err.to_string()))?;
+                let tokens = CredentialStore::get(account.uuid).map_err(|err| err.to_i18n())?;
                 // Return directly if the token has not expired
                 if !tokens.is_expired() {
                     return Ok(tokens.access_token);
                 }
 
                 let Some(client_id) = client_id else {
-                    return Err(Other("Client ID not set".to_string()));
+                    return Err(t!("launch-error-client-id-empty", "Client ID not set").into());
                 };
 
                 let res = MicrosoftAuth::refresh(client, client_id, &tokens.refresh_token)
@@ -250,15 +248,14 @@ impl HomePage {
                                 username: account.username.clone(),
                             }
                         }
-                        other => LaunchError::Other(other.to_string()),
+                        other => LaunchError::Other(other.to_i18n()),
                     })?;
 
                 if res.uuid.parse::<Uuid>().ok() != Some(account.uuid) {
-                    return Err(Other("UUIDs do not match".to_string()));
+                    return Err(t!("launch-error-uuid-mismatch", "UUIDs do not match").into());
                 }
 
-                CredentialStore::set(account.uuid, &res.tokens)
-                    .map_err(|err| Other(err.to_string()))?;
+                CredentialStore::set(account.uuid, &res.tokens).map_err(|err| err.to_i18n())?;
 
                 // Update username
                 if account.username != res.username {
@@ -275,9 +272,10 @@ impl HomePage {
         let mut account = match self.accounts.read().active_account().cloned() {
             Some(acc) => acc,
             None => {
-                let _ = sender.output(HomeOutput::ShowToast(
-                    "Please select an account first".to_string(),
-                ));
+                let _ = sender.output(HomeOutput::ShowToast(t!(
+                    "launch-error-account-not-select",
+                    "Please select an account first"
+                )));
                 return;
             }
         };
@@ -286,9 +284,10 @@ impl HomePage {
         let instance = match self.mgr.read().active_instance().cloned() {
             Some(inst) => inst,
             None => {
-                let _ = sender.output(HomeOutput::ShowToast(
-                    "Please select an instance first".to_string(),
-                ));
+                let _ = sender.output(HomeOutput::ShowToast(t!(
+                    "launch-error-instance-not-select",
+                    "Please select an instance first"
+                )));
                 return;
             }
         };
@@ -316,14 +315,18 @@ impl HomePage {
 
                         // Load local version metadata.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::LoadingMetadata));
-                        let metadata = instance
-                            .load_metadata()
-                            .map_err(|e| Other(format!("Failed to load version metadata: {e}")))?;
+                        let metadata = instance.load_metadata().map_err(|e| {
+                            t!(
+                                "launch-error-metadata",
+                                "Failed to load version metadata: {e}",
+                                e = e
+                            )
+                        })?;
 
                         // Validate and select a matching Java runtime.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::CheckingJava));
                         let java = launch::select_java(&instance, &global_config, &metadata)
-                            .map_err(|e| Other(format!("Java error: {e}")))?;
+                            .map_err(|e| t!("launch-error-java", "Java error: {e}", e = e))?;
 
                         // Validate and concurrently compare all files (client.jar, libraries, assets).
                         let _ =
@@ -335,7 +338,13 @@ impl HomePage {
                             global_config.download_source,
                         )
                         .await
-                        .map_err(|e| Other(format!("Failed to verify asset index: {e}")))?;
+                        .map_err(|e| {
+                            t!(
+                                "launch-error-asset-index",
+                                "Failed to verify asset index: {e}",
+                                e = e
+                            )
+                        })?;
 
                         let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
                         let tasks = instance.check_integrity(tasks);
@@ -347,7 +356,13 @@ impl HomePage {
                             None,
                         )
                         .await
-                        .map_err(|e| Other(format!("Failed to verify resources: {e}")))?;
+                        .map_err(|e| {
+                            t!(
+                                "launch-error-resources",
+                                "Failed to verify resources: {e}",
+                                e = e
+                            )
+                        })?;
 
                         // Extract native libraries and prepare legacy asset mappings.
                         let _ =
@@ -359,8 +374,20 @@ impl HomePage {
                             inst_clone.prepare_runtime(&metadata_clone, &asset_index, &dirs_clone)
                         })
                         .await
-                        .map_err(|e| Other(format!("Runtime task execution error: {e}")))?
-                        .map_err(|e| Other(format!("Failed to prepare runtime: {e}")))?;
+                        .map_err(|e| {
+                            t!(
+                                "launch-error-runtime-execution",
+                                "Runtime task execution error: {e}",
+                                e = e
+                            )
+                        })?
+                        .map_err(|e| {
+                            t!(
+                                "launch-error-prepare-runtime",
+                                "Failed to prepare runtime: {e}",
+                                e = e
+                            )
+                        })?;
 
                         // Assemble the launch command and start the game process.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Launching));
@@ -373,14 +400,23 @@ impl HomePage {
                             &access_token,
                             java.path,
                         )
-                        .map_err(|e| Other(format!("Failed to build launch command: {e}")))?;
+                        .map_err(|e| {
+                            t!(
+                                "launch-error-build-command",
+                                "Failed to build launch command: {e}",
+                                e = e
+                            )
+                        })?;
 
                         let spawn_time = SystemTime::now();
 
-                        let process = cmd
-                            .spawn()
-                            .await
-                            .map_err(|e| Other(format!("Failed to spawn game process: {e}")))?;
+                        let process = cmd.spawn().await.map_err(|e| {
+                            t!(
+                                "launch-error-spawn-process",
+                                "Failed to spawn game process: {e}",
+                                e = e
+                            )
+                        })?;
 
                         // A background standalone task monitors the process exit.
                         let inst_name = instance.config.name.clone();
@@ -571,7 +607,7 @@ impl Component for HomePage {
                         }
                         LaunchError::Other(msg) => {
                             error!("Failed to launch game: {msg}");
-                            let _ = sender.output(HomeOutput::ShowToast(msg.to_string()));
+                            let _ = sender.output(HomeOutput::ShowToast(msg));
                         }
                     },
                     Ok(id) => {
@@ -596,8 +632,13 @@ impl Component for HomePage {
                                 self.config.write().enable_offline = true;
                                 if let Err(err) = self.config.read().save(&self.dirs.config_file())
                                 {
-                                    let msg = format!("Failed to save configuration: {err}");
-                                    error!("{msg}");
+                                    error!("Failed to save configuration: {err}");
+                                    let msg = t!(
+                                        "launch-error-save-configuration",
+                                        "Failed to save configuration: {err}",
+                                        err = err
+                                    );
+
                                     let _ = sender.output(HomeOutput::ShowToast(msg));
                                 }
                             }
@@ -622,8 +663,14 @@ impl Component for HomePage {
                         {
                             ins.mark_game_abnormal();
                         }
-                        let msg = format!("Instance \"{name}\" exited with code {:?}", s.code());
-                        error!("{msg}");
+                        error!("Instance \"{name}\" exited with code {:?}", s.code());
+                        let msg = t!(
+                            "launch-error-instance-exit-abnormal",
+                            "Instance \"{name}\" exited with code {code}",
+                            name = name,
+                            code = s.code().unwrap_or_default()
+                        );
+
                         let _ = sender.output(HomeOutput::ShowToast(msg));
                     }
                 }
@@ -637,8 +684,14 @@ impl Component for HomePage {
                     {
                         ins.mark_game_abnormal();
                     }
-                    let msg = format!("Error waiting for instance \"{name}\": {err}");
-                    error!("{msg}");
+
+                    error!("Error waiting for instance \"{name}\": {err}");
+                    let msg = t!(
+                        "launch-error-wait-instance",
+                        "Error waiting for instance \"{name}\": {err}",
+                        name = name,
+                        err = err
+                    );
                     let _ = sender.output(HomeOutput::ShowToast(msg));
                 }
             },
@@ -651,8 +704,13 @@ impl Component for HomePage {
                     info!("Update username {} to {}", account.username, username);
                     account.username = username;
                     if let Err(err) = accounts.save(&self.dirs.accounts_file()) {
-                        let msg = format!("Failed to save accounts: {err}");
-                        error!("{msg}");
+                        error!("Failed to save accounts: {err}");
+                        let msg = t!(
+                            "home-page-error-save-accounts",
+                            "Failed to save accounts: {err}",
+                            err = err
+                        );
+
                         let _ = sender.output(HomeOutput::ShowToast(msg));
                     }
                 }

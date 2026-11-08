@@ -378,8 +378,13 @@ impl Component for AccountsPage {
                 }
 
                 Err(err) => {
-                    let msg = format!("Invalid username: {err}");
-                    error!("{msg}");
+                    error!("Invalid username: {err}");
+                    let msg = t!(
+                        "accounts-error-invalid-username",
+                        "Invalid username: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                 }
             },
@@ -388,8 +393,12 @@ impl Component for AccountsPage {
                 let res = self.accounts.write().set_active_account(uuid).map(|_| ());
 
                 if let Err(err) = res {
-                    let msg = format!("Failed to select account: {err}");
-                    error!("{msg}");
+                    error!("Failed to select account: {err}");
+                    let msg = t!(
+                        "accounts-error-select-account",
+                        "Failed to select account: {err}",
+                        err = err
+                    );
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                     return;
                 }
@@ -405,14 +414,24 @@ impl Component for AccountsPage {
 
             AccountsInput::RemoveAccount(uuid) => {
                 if let Err(err) = CredentialStore::delete(uuid) {
-                    let msg = format!("Failed to remove tokens: {err}");
-                    error!("{msg}");
+                    error!("Failed to remove tokens: {err}");
+                    let msg = t!(
+                        "accounts-error-remove-tokens",
+                        "Failed to remove tokens: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                 }
 
                 if let Err(err) = self.accounts.write().remove_account(uuid) {
-                    let msg = format!("Failed to remove account: {err}");
-                    error!("{msg}");
+                    error!("Failed to remove account: {err}");
+                    let msg = t!(
+                        "accounts-error-remove-account",
+                        "Failed to remove account: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                     return;
                 }
@@ -425,8 +444,13 @@ impl Component for AccountsPage {
                     XBOX_STORE_URL,
                     gtk::gio::AppLaunchContext::NONE,
                 ) {
-                    let msg = format!("Failed to open browser: {err}");
-                    error!("{msg}");
+                    error!("Failed to open browser: {err}");
+                    let msg = t!(
+                        "accounts-error-open-browser",
+                        "Failed to open browser: {err}",
+                        err = err
+                    );
+
                     let _ = sender.output(AccountsOutput::ShowToast(msg));
                 }
             }

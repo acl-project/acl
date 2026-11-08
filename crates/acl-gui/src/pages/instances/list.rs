@@ -10,7 +10,7 @@ use libadwaita::prelude::*;
 use relm4::{SharedState, gtk, prelude::*, tokio};
 use tracing::error;
 
-use crate::t;
+use crate::{i18n::LocalizeError, t};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstallStage {
@@ -331,7 +331,7 @@ impl ListPage {
                         let metadata = instance
                             .fetch_metadata(&client, &entry, &dirs, download_source)
                             .await
-                            .map_err(|e| e.to_string())?;
+                            .map_err(|e| e.to_i18n())?;
 
                         // Fetch asset index
                         let _ = out.send(ListCmdOutput::StageChanged {
@@ -345,7 +345,7 @@ impl ListPage {
                             download_source,
                         )
                         .await
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| e.to_i18n())?;
 
                         // Collect download tasks
                         let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
@@ -383,7 +383,7 @@ impl ListPage {
                             Some(tx),
                         )
                         .await
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| e.to_i18n())?;
                         let _ = forward_handle.await; // Ownership of tx has already been moved; tx will be dropped once the download completes.
 
                         let _ = out.send(ListCmdOutput::StageChanged {
@@ -399,7 +399,7 @@ impl ListPage {
                         })
                         .await
                         .map_err(|e| e.to_string())?
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| e.to_i18n())?;
 
                         Ok(())
                     }
@@ -518,8 +518,12 @@ impl Component for ListPage {
                 let res = self.mgr.write().set_active_instance(&id).map(|_| ());
 
                 if let Err(err) = res {
-                    let msg = format!("Failed to select instance: {err}");
-                    error!("{msg}");
+                    error!("Failed to select instance: {err}");
+                    let msg = t!(
+                        "instance-list-error-select-instance",
+                        "Failed to select instance: {err}",
+                        err = err
+                    );
                     let _ = sender.output(ListOutput::ShowToast(msg));
                     return;
                 }
@@ -533,8 +537,12 @@ impl Component for ListPage {
             }
             ListInput::RemoveInstance(id) => {
                 if let Err(err) = self.mgr.write().remove_instance(&id) {
-                    let msg = format!("Failed to remove instance: {err}");
-                    error!("{msg}");
+                    error!("Failed to remove instance: {err}");
+                    let msg = t!(
+                        "instance-list-error-remove-instance",
+                        "Failed to remove instance: {err}",
+                        err = err
+                    );
                     let _ = sender.output(ListOutput::ShowToast(msg));
                     return;
                 }
@@ -566,8 +574,10 @@ impl Component for ListPage {
 
                 match result {
                     Ok(()) => {
-                        let _ = sender.output(ListOutput::ShowToast(format!(
-                            "Instance \"{id}\" is ready to play"
+                        let _ = sender.output(ListOutput::ShowToast(t!(
+                            "instance-list-ready-to-play",
+                            "Instance \"{id}\" is ready to play",
+                            id = id
                         )));
                     }
                     Err(err) => {
