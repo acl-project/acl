@@ -179,8 +179,12 @@ impl SimpleComponent for AppModel {
         let config = match LauncherConfig::load_or_recommended(&dirs.config_file()) {
             Ok(cfg) => cfg,
             Err(err) => {
-                let err = format!("Failed to load config, using defaults: {err}");
-                error!("{err}");
+                error!("Failed to load config, using defaults: {err}");
+                let err = t!(
+                    "app-init-error-load-config",
+                    "Failed to load config, using defaults: {err}",
+                    err = err
+                );
                 sender.input(AppMsg::ShowToast(err));
                 LauncherConfig::default()
             }
@@ -195,8 +199,12 @@ impl SimpleComponent for AppModel {
         let store = match AccountStore::load_or_default(&accounts_path) {
             Ok(s) => s,
             Err(err) => {
-                let err_msg = format!("Failed to load accounts, using defaults: {err}");
-                error!("{err_msg}");
+                error!("Failed to load accounts, using defaults: {err}");
+                let err_msg = t!(
+                    "app-init-error-load-accounts",
+                    "Failed to load accounts, using defaults: {err}",
+                    err = err
+                );
                 sender.input(AppMsg::ShowToast(err_msg));
                 AccountStore::default()
             }
@@ -208,8 +216,12 @@ impl SimpleComponent for AppModel {
             match InstanceManager::load(dirs.versions_dir(), dirs.config_dir().to_path_buf()) {
                 Ok(s) => s,
                 Err(err) => {
-                    let err_msg = format!("Failed to load instances, using defaults: {err}");
-                    error!("{err_msg}");
+                    error!("Failed to load instances, using defaults: {err}");
+                    let err_msg = t!(
+                        "app-init-error-load-instances",
+                        "Failed to load instances, using defaults: {err}",
+                        err = err
+                    );
                     sender.input(AppMsg::ShowToast(err_msg));
                     InstanceManager::default()
                 }

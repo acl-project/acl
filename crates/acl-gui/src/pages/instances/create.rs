@@ -195,10 +195,10 @@ impl CreatePage {
                 .is_some_and(|name| InstanceConfig::validate_instance_id(name).is_ok())
     }
 
-    fn selected_version_label(&self) -> &str {
+    fn selected_version_label(&self) -> String {
         self.selected_version
             .as_ref()
-            .map_or("None", |v| v.id.as_str())
+            .map_or(t!("instances-create-none", "None"), |v| v.id.to_string())
     }
 
     /// Highlight `selected_version` in the list if it is currently visible.
@@ -322,7 +322,7 @@ impl Component for CreatePage {
                             #[watch]
                             set_title: &t!("instances-create-settings-game-version","Game Version"),
                             #[watch]
-                            set_subtitle: model.selected_version_label(),
+                            set_subtitle: &model.selected_version_label(),
                         },
 
                     },

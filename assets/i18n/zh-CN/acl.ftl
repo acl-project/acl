@@ -21,6 +21,8 @@ accounts-error-open-browser = 打开浏览器失败：{ $err }
 accounts-error-remove-account = 移除账户失败：{ $err }
 # Source: Failed to remove tokens: { $err }
 accounts-error-remove-tokens = 移除令牌失败：{ $err }
+# Source: Failed to save accounts: { $err }
+accounts-error-save-accounts = 保存账户失败：{ $err }
 # Source: Failed to select account: { $err }
 accounts-error-select-account = 选择账户失败：{ $err }
 # Source: Add Offline
@@ -47,6 +49,12 @@ add-offline-dialog-body = 请输入 Minecraft 用户名（3 到 16 个字符，�
 add-offline-dialog-cancel = 取消
 # Source: Add Offline Account
 add-offline-dialog-heading = 添加离线账户
+# Source: Failed to load accounts, using defaults: { $err }
+app-init-error-load-accounts = 加载账户失败，使用默认配置：{ $err }
+# Source: Failed to load config, using defaults: { $err }
+app-init-error-load-config = 加载配置失败，使用默认配置：{ $err }
+# Source: Failed to load instances, using defaults: { $err }
+app-init-error-load-instances = 加载实例失败，使用默认配置：{ $err }
 # Source: The account with UUID '{ $uuid }' does not exist
 auth-error-account-not-found = UUID 为 '{ $uuid }' 的账户不存在
 # Source: Username cannot be empty
@@ -163,6 +171,8 @@ instances-create-error-load-version-manifest = 加载版本清单失败：{ $err
 instances-create-error-no-name = 请输入实例名称或选择一个版本
 # Source: Failed to refresh instances: { $err }
 instances-create-error-refresh-instances = 刷新实例列表失败：{ $err }
+# Source: None
+instances-create-none = 无
 # Source: Refresh version list
 instances-create-refresh-version = 刷新版本列表
 # Source: Search versions...
@@ -249,10 +259,16 @@ ms-login-dialog-cancel = 取消
 ms-login-dialog-copy-link = 复制登录链接
 # Source: Microsoft Login
 ms-login-dialog-heading = 微软登录
+# Source: Authentication failed: { $e }
+ms-login-error-auth = 认证失败：{ $e }
 # Source: Microsoft Client ID is not configured
 ms-login-error-client-id-empty = 未配置微软 Client ID
 # Source: Failed to open browser automatically: { $err }
 ms-login-error-open-browser = 自动打开浏览器失败：{ $err }
+# Source: Failed to save accounts: { $err }
+ms-login-error-save-accounts = 保存账户失败：{ $err }
+# Source: Failed to start login session: { $err }
+ms-login-error-start-session = 启动登录会话失败：{ $err }
 # Source: Starting local login session...
 ms-login-state-starting = 启动登入会话中...
 # Source: Please complete the sign-in in your web browser.
@@ -293,6 +309,8 @@ settings-downloads-concurrent-title = 最大并发下载数
 settings-downloads-source-title = 下载源
 # Source: Downloads
 settings-downloads-title = 下载
+# Source: Failed to save configuration: { $err }
+settings-error-save-configuration = 保存配置失败：{ $err }
 # Source: Auto-detect (Recommended)
 settings-java-auto-detect = 自动检测（推荐）
 # Source: Max Memory

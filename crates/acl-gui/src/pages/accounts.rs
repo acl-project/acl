@@ -102,10 +102,19 @@ impl FactoryComponent for AccountRow {
 
         #[name = "delete_dialog"]
         adw::AlertDialog {
+            #[watch]
             set_heading: Some(&t!("accounts-delete-dialog-heading","Delete Account")),
+            #[watch]
             set_body: &t!("accounts-delete-dialog-body","Are you sure you want to delete account \"{username}\"?", username = self.account.username),
+
             add_response: ("cancel", &t!("accounts-delete-dialog-cancel","Cancel")),
             add_response: ("delete", &t!("accounts-delete-dialog-delete","Delete")),
+
+            #[watch]
+            set_response_label: ("cancel", &t!("accounts-delete-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("delete", &t!("accounts-delete-dialog-delete","Delete")),
+
             set_response_appearance: ("delete", adw::ResponseAppearance::Destructive),
             set_default_response: Some("cancel"),
             set_close_response: "cancel",
@@ -177,8 +186,12 @@ pub struct AccountsInit {
 impl AccountsPage {
     fn save_accounts(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.accounts.read().save(&self.accounts_path) {
-            let msg = format!("Failed to save accounts: {err}");
-            error!("{msg}");
+            error!("Failed to save accounts: {err}");
+            let msg = t!(
+                "accounts-error-save-accounts",
+                "Failed to save accounts: {err}",
+                err = err
+            );
             let _ = sender.output(AccountsOutput::ShowToast(msg));
         }
     }

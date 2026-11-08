@@ -48,8 +48,12 @@ pub enum SettingsInput {
 impl SettingsPage {
     fn save_config(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.config.read().save(&self.config_path) {
-            let msg = format!("Failed to save configuration: {err}");
-            error!("{msg}");
+            error!("Failed to save configuration: {err}");
+            let msg = t!(
+                "settings-error-save-configuration",
+                "Failed to save configuration: {err}",
+                err = err,
+            );
             let _ = sender.output(SettingsOutput::ShowToast(msg));
         }
     }

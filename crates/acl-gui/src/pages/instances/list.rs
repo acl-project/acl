@@ -184,12 +184,19 @@ impl FactoryComponent for InstanceRow {
 
         #[name = "delete_dialog"]
         adw::AlertDialog {
+            #[watch]
             set_heading: Some(&t!("delete-dialog-heading","Delete Instance")),
             #[watch]
             set_body: &t!("delete-dialog-body","Are you sure you want to delete instance \"{name}\"?", name = self.instance.config.name),
 
             add_response: ("cancel", &t!("delete-dialog-cancel","Cancel")),
             add_response: ("delete",  &t!("delete-dialog-delete","Delete")),
+
+            #[watch]
+            set_response_label: ("cancel", &t!("delete-dialog-cancel","Cancel")),
+            #[watch]
+            set_response_label: ("delete",  &t!("delete-dialog-delete","Delete")),
+
             set_response_appearance: ("delete", adw::ResponseAppearance::Destructive),
             set_default_response: Some("cancel"),
             set_close_response: "cancel",

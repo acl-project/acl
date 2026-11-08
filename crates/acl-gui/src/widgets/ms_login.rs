@@ -95,8 +95,12 @@ pub struct MsLoginDialog {
 impl MsLoginDialog {
     fn save_accounts(&self, sender: &ComponentSender<Self>) {
         if let Err(err) = self.accounts.read().save(&self.accounts_path) {
-            let msg = format!("Failed to save accounts: {err}");
-            error!("{msg}");
+            let msg = t!(
+                "ms-login-error-save-accounts",
+                "Failed to save accounts: {err}",
+                err = err
+            );
+            error!("Failed to save accounts: {err}");
             let _ = sender.output(MsLoginOutput::ShowToast(msg));
         }
     }
@@ -111,13 +115,19 @@ impl MsLoginDialog {
             let res: Result<MicrosoftLoginResult, String> = async {
                 let session = MicrosoftLoginSession::start(&client_id)
                     .await
-                    .map_err(|err| format!("Failed to start login session: {err}"))?;
+                    .map_err(|err| {
+                        t!(
+                            "ms-login-error-start-session",
+                            "Failed to start login session: {err}",
+                            err = err
+                        )
+                    })?;
 
                 let _ = out.send(MsLoginCmdOutput::OpenBrowser(session.auth_url.to_string()));
 
                 MicrosoftAuth::login(session, &client)
                     .await
-                    .map_err(|e| format!("Authentication failed: {e}"))
+                    .map_err(|e| t!("ms-login-error-auth", "Authentication failed: {e}", e = e))
             }
             .await;
 
