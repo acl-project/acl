@@ -307,6 +307,7 @@ impl SimpleComponent for AppModel {
                 HomeOutput::ShowToast(message) => AppMsg::ShowToast(message),
                 HomeOutput::RequestClose => AppMsg::Quit,
                 HomeOutput::PromptReauth(username) => AppMsg::PromptReauth(username),
+                HomeOutput::OpenInstanceDetail(id) => AppMsg::OpenInstanceDetail(id),
             });
         let instances_page = InstancesPage::builder()
             .launch(InstancesInit {

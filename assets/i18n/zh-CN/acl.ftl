@@ -133,6 +133,8 @@ delete-dialog-heading = 删除实例
 home-page-button-launching = 正在启动...
 # Source: Start Game
 home-page-button-start-game = 启动游戏
+# Source: Please select a instance
+home-page-error-empty-instance = 请先选择一个实例
 # Source: Failed to save accounts: { $err }
 home-page-error-save-accounts = 保存账户失败：{ $err }
 # Source: No account selected
@@ -143,6 +145,8 @@ home-page-no-instance = 未选择实例
 home-page-status-description = 实例：{ $inst_text } • 账户：{ $acc_text }
 # Source: Adwaita Craft Launcher
 home-page-status-title = Adwaita Craft Launcher
+# Source: Instance settings
+home-page-tooltip-instance-settings = 实例设置
 # Source: Downloading ({ $completed }/{ $total })
 install-stage-downloading = 正在下载 ({ $completed }/{ $total })
 # Source: Fetching asset index...
