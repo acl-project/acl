@@ -612,7 +612,7 @@ impl Component for HomePage {
                 } else {
                     let _ = sender.output(HomeOutput::ShowToast(t!(
                         "home-page-error-empty-instance",
-                        "Please select a instance"
+                        "Please select an instance"
                     )));
                 }
             }

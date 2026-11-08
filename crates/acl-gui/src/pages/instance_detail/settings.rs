@@ -29,6 +29,7 @@ pub enum InstanceSettingsInput {
     SetMaxMemory(u32),
     SelectDefaultJava(usize),
     CommitMaxMemory,
+    Refresh,
 }
 
 pub struct InstanceSettingsInit {
@@ -45,6 +46,7 @@ pub struct InstanceSettings {
 }
 
 impl InstanceSettings {
+    /// Save the settings of the current instance.
     fn save_config(&self, sender: &ComponentSender<Self>) {
         let Some(id) = self.current.as_deref() else {
             return;
@@ -54,7 +56,7 @@ impl InstanceSettings {
             return;
         };
 
-        if let Err(err) = instance.config.save(&instance.config_file()) {
+        if let Err(err) = instance.save_config() {
             error!("Failed to save configuration: {err}");
             let msg = t!(
                 "instance-settings-error-save-configuration",
@@ -293,6 +295,9 @@ impl SimpleComponent for InstanceSettings {
     ) -> ComponentParts<Self> {
         let java_model = gtk::StringList::new(&[]);
 
+        init.config
+            .subscribe(sender.input_sender(), |_| InstanceSettingsInput::Refresh);
+
         let mut model = Self {
             config: init.config,
             instances: init.instances,
@@ -366,6 +371,9 @@ impl SimpleComponent for InstanceSettings {
                 if let Some(ins) = self.instances.write().instance_mut(current) {
                     ins.config.custom_settings = enabled;
                 }
+            }
+            InstanceSettingsInput::Refresh => {
+                self.refresh_java_model();
             }
         }
     }
