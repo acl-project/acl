@@ -1027,4 +1027,214 @@ mod tests {
         );
         assert!(format!("{err1:?}").contains("RefreshTokenExpired"));
     }
+
+    #[test]
+    fn test_home_input_variants_and_debug() {
+        let input_instance = HomeInput::SelectInstance(42);
+        assert_eq!(format!("{input_instance:?}"), "SelectInstance(42)");
+        match input_instance {
+            HomeInput::SelectInstance(idx) => assert_eq!(idx, 42),
+            _ => panic!("Expected SelectInstance"),
+        }
+
+        let input_account = HomeInput::SelectAccount(7);
+        assert_eq!(format!("{input_account:?}"), "SelectAccount(7)");
+        match input_account {
+            HomeInput::SelectAccount(idx) => assert_eq!(idx, 7),
+            _ => panic!("Expected SelectAccount"),
+        }
+
+        assert_eq!(format!("{:?}", HomeInput::LaunchClicked), "LaunchClicked");
+        assert_eq!(format!("{:?}", HomeInput::Refresh), "Refresh");
+        assert_eq!(
+            format!("{:?}", HomeInput::OpenInstanceSettings),
+            "OpenInstanceSettings"
+        );
+    }
+
+    #[test]
+    fn test_home_output_debug() {
+        let toast = HomeOutput::ShowToast("hello".to_string());
+        assert_eq!(format!("{toast:?}"), "ShowToast(\"hello\")");
+
+        let detail = HomeOutput::OpenInstanceDetail("inst_1".to_string());
+        assert_eq!(format!("{detail:?}"), "OpenInstanceDetail(\"inst_1\")");
+
+        let reauth = HomeOutput::PromptReauth("Steve".to_string());
+        assert_eq!(format!("{reauth:?}"), "PromptReauth(\"Steve\")");
+
+        let close = HomeOutput::RequestClose;
+        assert_eq!(format!("{close:?}"), "RequestClose");
+    }
+
+    #[test]
+    fn test_active_instance_index_calculation() {
+        let compute =
+            |instances: &[acl_core::instance::Instance], active_id: Option<&str>| -> u32 {
+                active_id
+                    .and_then(|id| instances.iter().position(|i| i.id() == id))
+                    .map(|pos| pos as u32)
+                    .unwrap_or(gtk::INVALID_LIST_POSITION)
+            };
+
+        let inst1 = acl_core::instance::Instance::new(
+            "inst_1",
+            "Instance One",
+            "1.20.4",
+            Path::new("/mock/instances"),
+        )
+        .unwrap();
+
+        let inst2 = acl_core::instance::Instance::new(
+            "inst_2",
+            "Instance Two",
+            "1.21.1",
+            Path::new("/mock/instances"),
+        )
+        .unwrap();
+
+        let instances = vec![inst1, inst2];
+
+        // When active_id is None
+        assert_eq!(compute(&instances, None), gtk::INVALID_LIST_POSITION);
+
+        // When active_id matches first instance
+        assert_eq!(compute(&instances, Some("inst_1")), 0);
+
+        // When active_id matches second instance
+        assert_eq!(compute(&instances, Some("inst_2")), 1);
+
+        // When active_id does not match any instance
+        assert_eq!(
+            compute(&instances, Some("inst_3")),
+            gtk::INVALID_LIST_POSITION
+        );
+    }
+
+    #[test]
+    fn test_active_account_index_calculation() {
+        let acc1 = Account::new_offline("Steve").unwrap();
+        let acc2 = Account::new_offline("Alex").unwrap();
+        let accounts = vec![acc1.clone(), acc2.clone()];
+
+        let compute = |list: &[Account], active: Option<Uuid>| -> u32 {
+            active
+                .and_then(|uuid| list.iter().position(|a| a.uuid == uuid))
+                .map(|pos| pos as u32)
+                .unwrap_or(gtk::INVALID_LIST_POSITION)
+        };
+
+        // When active UUID is None
+        assert_eq!(compute(&accounts, None), gtk::INVALID_LIST_POSITION);
+
+        // When active UUID matches first account
+        assert_eq!(compute(&accounts, Some(acc1.uuid)), 0);
+
+        // When active UUID matches second account
+        assert_eq!(compute(&accounts, Some(acc2.uuid)), 1);
+
+        // When active UUID is not in the list
+        assert_eq!(
+            compute(&accounts, Some(Uuid::new_v4())),
+            gtk::INVALID_LIST_POSITION
+        );
+    }
+
+    #[test]
+    fn test_home_status_title_and_subtitle() {
+        let dummy_dir = Path::new("/mock/instances");
+        let inst =
+            acl_core::instance::Instance::new("test_id", "My Test Instance", "1.21.1", dummy_dir)
+                .unwrap();
+
+        // When no active instance
+        let no_inst: Option<&acl_core::instance::Instance> = None;
+        let title_none = match no_inst {
+            Some(i) => i.config.name.clone(),
+            None => t!("home-page-no-instance", "No instance selected"),
+        };
+        assert_eq!(title_none, "No instance selected");
+
+        let subtitle_none = no_inst.map(|i| {
+            format!(
+                "Minecraft {} · {}",
+                i.config.game_version,
+                i.config.mod_loader.label()
+            )
+        });
+        assert_eq!(subtitle_none, None);
+
+        // When active instance is present
+        let some_inst = Some(&inst);
+        let title_some = match some_inst {
+            Some(i) => i.config.name.clone(),
+            None => t!("home-page-no-instance", "No instance selected"),
+        };
+        assert_eq!(title_some, "My Test Instance");
+
+        let subtitle_some = some_inst.map(|i| {
+            format!(
+                "Minecraft {} · {}",
+                i.config.game_version,
+                i.config.mod_loader.label()
+            )
+        });
+        assert_eq!(
+            subtitle_some,
+            Some("Minecraft 1.21.1 · Vanilla".to_string())
+        );
+    }
+
+    #[test]
+    fn test_home_page_model_methods_if_gtk_available() {
+        use std::path::PathBuf;
+
+        if gtk::init().is_err() {
+            return;
+        }
+
+        let dummy_dir = Path::new("/mock/instances");
+        let inst =
+            acl_core::instance::Instance::new("inst_1", "Fabric Instance", "1.20.1", dummy_dir)
+                .unwrap();
+
+        let mut mgr = InstanceManager::default();
+        mgr.instances.push(inst);
+        mgr.config.active_id = Some("inst_1".to_string());
+
+        let mut store = AccountStore::new();
+        let acc = Account::new_offline("Steve").unwrap();
+        store.add_account(acc);
+
+        let mgr_state = Arc::new(SharedState::new());
+        *mgr_state.write() = mgr;
+
+        let accounts_state = Arc::new(SharedState::new());
+        *accounts_state.write() = store;
+
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
+
+        let page = HomePage {
+            mgr: mgr_state,
+            accounts: accounts_state,
+            config: Arc::new(SharedState::new()),
+            client: reqwest::Client::new(),
+            dirs,
+            stage: LaunchStage::Idle,
+            instance_model: gtk::StringList::new(&[]),
+            account_model: gtk::StringList::new(&[]),
+        };
+
+        assert_eq!(page.active_instance_index(), 0);
+        assert_eq!(page.active_account_index(), 0);
+        assert_eq!(page.status_title(), "Fabric Instance");
+        assert_eq!(
+            page.status_subtitle(),
+            Some("Minecraft 1.20.1 · Vanilla".to_string())
+        );
+    }
 }
