@@ -149,6 +149,28 @@ install-stage-fetching-metadata = 正在获取版本元数据...
 install-stage-preparing-runtime = 正在准备运行环境...
 # Source: Back
 instance-detail-button-back = 返回
+# Source: Failed to create directory: { $err }
+instance-detail-error-create-directory = 创建目录失败：{ $err }
+# Source: Failed to open directory: { $err }
+instance-detail-error-open-directory = 打开目录失败：{ $err }
+# Source: Open Folder
+instance-detail-tooltip-open-folder = 打开文件夹
+# Source: Logs
+instance-folder-logs = 日志文件夹
+# Source: Mods
+instance-folder-mods = 模组文件夹
+# Source: Resource Packs
+instance-folder-resourcepacks = 资源包文件夹
+# Source: Instance Directory
+instance-folder-root = 实例文件夹
+# Source: Saves
+instance-folder-saves = 存档文件夹
+# Source: Schematics
+instance-folder-schematics = 投影文件夹
+# Source: Screenshots
+instance-folder-screenshots = 截图文件夹
+# Source: Shader Packs
+instance-folder-shaderpacks = 光影包文件夹
 # Source: Failed to remove instance: { $err }
 instance-list-error-remove-instance = 移除实例失败：{ $err }
 # Source: Failed to select instance: { $err }

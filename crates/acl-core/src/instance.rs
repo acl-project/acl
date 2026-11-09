@@ -244,6 +244,22 @@ impl Instance {
         self.dir.join("resourcepacks")
     }
 
+    pub fn shaderpacks_dir(&self) -> PathBuf {
+        self.dir.join("shaderpacks")
+    }
+
+    pub fn schematics_dir(&self) -> PathBuf {
+        self.dir.join("schematics")
+    }
+
+    pub fn screenshots_dir(&self) -> PathBuf {
+        self.dir.join("screenshots")
+    }
+
+    pub fn logs_dir(&self) -> PathBuf {
+        self.dir.join("logs")
+    }
+
     pub fn id(&self) -> &str {
         &self.config.id
     }
