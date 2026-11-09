@@ -11,9 +11,10 @@ use acl_core::launch::LaunchCommand;
 use acl_core::manager::InstanceManager;
 use acl_core::{LauncherConfig, LauncherDirs, launch};
 use acl_minecraft::{AssetIndex, download};
+use adw::prelude::*;
 use gtk::prelude::*;
 use relm4::tokio::time::MissedTickBehavior;
-use relm4::{Component, ComponentParts, ComponentSender, RelmWidgetExt, tokio};
+use relm4::{Component, ComponentParts, ComponentSender, tokio};
 use relm4::{SharedState, adw};
 use thiserror::Error;
 use tracing::{error, info, warn};
@@ -118,6 +119,8 @@ pub enum HomeInput {
     /// Trigger a watch update.
     Refresh,
     OpenInstanceSettings,
+    SelectInstance(usize),
+    SelectAccount(usize),
 }
 
 #[derive(Debug)]
@@ -139,6 +142,9 @@ pub struct HomePage {
     client: reqwest::Client,
     dirs: LauncherDirs,
     stage: LaunchStage,
+
+    instance_model: gtk::StringList,
+    account_model: gtk::StringList,
 }
 
 pub struct HomeInit {
@@ -147,29 +153,6 @@ pub struct HomeInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
     pub dirs: LauncherDirs,
-}
-
-impl HomePage {
-    fn status_description(&self) -> String {
-        let mgr = self.mgr.read();
-        let inst_text = match mgr.active_instance() {
-            Some(inst) => format!("{} ({})", inst.config.name, inst.config.game_version),
-            None => t!("home-page-no-instance", "No instance selected"),
-        };
-
-        let accounts = self.accounts.read();
-        let acc_text = match accounts.active_account() {
-            Some(acc) => acc.username.clone(),
-            None => t!("home-page-no-account", "No account selected"),
-        };
-
-        t!(
-            "home-page-status-description",
-            "Instance: {inst_text} • Account: {acc_text}",
-            inst_text = inst_text,
-            acc_text = acc_text
-        )
-    }
 }
 
 impl HomePage {
@@ -450,6 +433,75 @@ impl HomePage {
                 .drop_on_shutdown()
         });
     }
+
+    /// Top title: displays the name of the currently selected instance; displays a hint when there is no instance.
+    fn status_title(&self) -> String {
+        let mgr = self.mgr.read();
+        match mgr.active_instance() {
+            Some(inst) => inst.config.name.clone(),
+            None => t!("home-page-no-instance", "No instance selected"),
+        }
+    }
+
+    /// Top subtitle: displays e.g. "Minecraft 1.16.5 · Fabric"; returns None when there is no instance.
+    fn status_subtitle(&self) -> Option<String> {
+        let mgr = self.mgr.read();
+        mgr.active_instance().map(|inst| {
+            format!(
+                "Minecraft {} · {}",
+                inst.config.game_version,
+                inst.config.mod_loader.label()
+            )
+        })
+    }
+
+    fn refresh_models(&mut self) {
+        let mgr = self.mgr.read();
+        let inst_names: Vec<&str> = mgr
+            .instances
+            .iter()
+            .map(|i| i.config.name.as_str())
+            .collect();
+        self.instance_model
+            .splice(0, self.instance_model.n_items(), &inst_names);
+        drop(mgr);
+
+        let accounts = self.accounts.read();
+        let acc_labels: Vec<String> = accounts
+            .accounts()
+            .iter()
+            .map(|acc| {
+                let type_label = match acc.account_type {
+                    AccountType::Offline => t!("account-type-offline", "Offline"),
+                    AccountType::Microsoft => t!("account-type-microsoft", "Microsoft"),
+                };
+                format!("{} · {}", acc.username, type_label)
+            })
+            .collect();
+
+        let acc_refs: Vec<&str> = acc_labels.iter().map(|s| s.as_str()).collect();
+        self.account_model
+            .splice(0, self.account_model.n_items(), &acc_refs);
+    }
+
+    fn active_instance_index(&self) -> u32 {
+        let mgr = self.mgr.read();
+        mgr.config
+            .active_id
+            .as_deref()
+            .and_then(|id| mgr.instances.iter().position(|i| i.id() == id))
+            .map(|pos| pos as u32)
+            .unwrap_or(gtk::INVALID_LIST_POSITION)
+    }
+
+    fn active_account_index(&self) -> u32 {
+        let accounts = self.accounts.read();
+        accounts
+            .active_uuid()
+            .and_then(|uuid| accounts.accounts().iter().position(|a| a.uuid == uuid))
+            .map(|pos| pos as u32)
+            .unwrap_or(gtk::INVALID_LIST_POSITION)
+    }
 }
 
 #[relm4::component(pub)]
@@ -460,118 +512,193 @@ impl Component for HomePage {
     type CommandOutput = HomeCmdOutput;
 
     view! {
-        gtk::Box {
-            set_orientation: gtk::Orientation::Vertical,
-            set_margin_all: 24,
+        adw::StatusPage {
+            set_vexpand: true,
+            // Display compactly to prevent icons from becoming too large.
+            add_css_class: "compact",
+            set_icon_name: Some("input-gaming-symbolic"),
 
-            adw::StatusPage {
-                set_vexpand: true,
-                set_icon_name: Some("applications-games-symbolic"),
-                #[watch]
-                set_title: &t!("home-page-status-title","Adwaita Craft Launcher"),
-                #[watch]
-                set_description: Some(&model.status_description()),
-            },
+            #[wrap(Some)]
+            set_child = &adw::Clamp {
+                set_maximum_size: 420,
+                set_tightening_threshold: 360,
 
-            gtk::Box {
-                set_orientation: gtk::Orientation::Horizontal,
-                set_spacing: 10,
-                set_valign: gtk::Align::Center,
+                gtk::Box {
 
-
-                gtk::Revealer {
-                    set_transition_type: gtk::RevealerTransitionType::Crossfade,
-                    set_transition_duration: 200,
-                    set_hexpand: true,
-                    set_valign: gtk::Align::Center,
-                    #[watch]
-                    set_reveal_child: model.stage.is_launching(),
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_spacing: 24,
 
                     gtk::Box {
                         set_orientation: gtk::Orientation::Vertical,
                         set_spacing: 6,
-                        set_valign: gtk::Align::Center,
 
-                        gtk::Box {
-                            set_orientation: gtk::Orientation::Horizontal,
-                            set_spacing: 8,
-
-                            gtk::Label {
-                                set_halign: gtk::Align::Start,
-                                set_hexpand: true,
-                                add_css_class: "caption",
-                                add_css_class: "dim-label",
-                                #[watch]
-                                set_label: model.stage.status_text().as_deref().unwrap_or_default(),
-                            },
-
-                            gtk::Label {
-                                set_halign: gtk::Align::End,
-                                add_css_class: "caption",
-                                add_css_class: "dim-label",
-                                add_css_class: "numeric",
-                                #[watch]
-                                set_label: &format!("{:.0}%", model.stage.fraction() * 100.0),
-                            },
-                        },
-
-                        gtk::ProgressBar {
-                            set_hexpand: true,
-                            #[watch]
-                            set_fraction: model.stage.fraction(),
-                        },
-                    },
-                },
-
-                gtk::Button {
-
-                    set_halign: gtk::Align::End,
-                    set_valign: gtk::Align::Center,
-                    add_css_class: "circular",
-                    set_width_request: 49,
-                    set_height_request: 49,
-                    set_icon_name: "emblem-system-symbolic",
-                    #[watch]
-                    set_tooltip_text: Some(&t!("home-page-tooltip-instance-settings", "Instance settings")),
-                    #[watch]
-                    set_sensitive: !model.stage.is_launching()
-                                && model.mgr.read().active_instance().is_some(),
-                    connect_clicked => HomeInput::OpenInstanceSettings,
-                },
-
-                gtk::Button {
-                    set_halign: gtk::Align::End,
-                    set_valign: gtk::Align::Center,
-                    add_css_class: "suggested-action",
-                    add_css_class: "pill",
-                    #[watch]
-                    set_sensitive: !model.stage.is_launching(),
-                    connect_clicked => HomeInput::LaunchClicked,
-
-                    gtk::Box {
-                        set_spacing: 8,
-                        set_halign: gtk::Align::Center,
-
-                        adw::Spinner {
-                            #[watch]
-                            set_visible: model.stage.is_launching(),
-                        },
-                        gtk::Image {
-                            set_icon_name: Some("media-playback-start-symbolic"),
-                            #[watch]
-                            set_visible: !model.stage.is_launching(),
-                        },
                         gtk::Label {
+                            add_css_class: "title-1",
                             #[watch]
-                            set_label: &if model.stage.is_launching() {
-                                t!("home-page-button-launching","Launching...")
-                            } else {
-                                t!("home-page-button-start-game","Start Game")
-                            },
+                            set_label: &model.status_title(),
+                        },
+
+                        gtk::Label {
+                            add_css_class: "dim-label",
+                            #[watch]
+                            set_visible: model.mgr.read().active_instance().is_some(),
+                            #[watch]
+                            set_label: &model.status_subtitle().unwrap_or_default(),
                         },
                     },
-                },
 
+                    adw::PreferencesGroup {
+                        #[watch]
+                        set_sensitive: !model.stage.is_launching(),
+
+                        add = &adw::ActionRow {
+                            #[watch]
+                            set_title: &t!("navigation-page-instances", "Instances"),
+
+                            add_prefix = &gtk::Image {
+                                set_icon_name: Some("view-grid-symbolic"),
+                            },
+
+
+                            add_suffix = &gtk::Button {
+                                set_valign: gtk::Align::Center,
+                                add_css_class: "flat",
+                                set_icon_name: "emblem-system-symbolic",
+                                #[watch]
+                                set_tooltip_text: Some(&t!("home-page-tooltip-instance-settings", "Instance settings")),
+                                #[watch]
+                                set_sensitive: model.mgr.read().active_instance().is_some(),
+                                connect_clicked => HomeInput::OpenInstanceSettings,
+                            },
+
+                            add_suffix = &gtk::DropDown {
+                                add_css_class: "flat",
+                                set_valign: gtk::Align::Center,
+                                set_model: Some(&instance_model),
+                                #[watch]
+                                set_selected: model.active_instance_index(),
+                                #[watch]
+                                set_sensitive: !model.mgr.read().instances.is_empty(),
+
+                                connect_selected_notify[sender] => move |dropdown| {
+                                    let idx = dropdown.selected();
+                                    if idx != gtk::INVALID_LIST_POSITION {
+                                        sender.input(HomeInput::SelectInstance(idx as usize));
+                                    }
+                                },
+                            },
+
+                        },
+
+                        add = &adw::ActionRow {
+                            #[watch]
+                            set_title: &t!("navigation-page-accounts", "Accounts"),
+
+                            add_prefix = &gtk::Image {
+                                set_icon_name: Some("avatar-default-symbolic"),
+                            },
+
+                            add_suffix = &gtk::DropDown {
+                                add_css_class: "flat",
+                                set_valign: gtk::Align::Center,
+                                set_model: Some(&account_model),
+                                #[watch]
+                                set_selected: model.active_account_index(),
+                                #[watch]
+                                set_sensitive: !model.accounts.read().accounts().is_empty(),
+
+                                connect_selected_notify[sender] => move |dropdown| {
+                                    let idx = dropdown.selected();
+                                    if idx != gtk::INVALID_LIST_POSITION {
+                                        sender.input(HomeInput::SelectAccount(idx as usize));
+                                    }
+                                },
+                            },
+
+                        },
+
+
+                    },
+
+                    // Use a Stack so that the button and the progress card switch in place at the same position.
+                    gtk::Stack {
+                        // Enable vertical equal-height: force the Stack's height to always be locked to the height of the tallest child.
+                        set_vhomogeneous: true,
+                        set_transition_type: gtk::StackTransitionType::Crossfade,
+                        set_transition_duration: 150,
+                        #[watch]
+                        set_visible_child_name: if model.stage.is_launching() { "progress" } else { "button" },
+
+                        add_named[Some("button")] = &gtk::Box {
+                            set_halign: gtk::Align::Center,
+                            set_valign: gtk::Align::Center,
+
+                            set_margin_top: 8,
+                            set_margin_bottom: 8,
+
+                            gtk::Button {
+                                set_halign: gtk::Align::Center,
+                                add_css_class: "suggested-action",
+                                add_css_class: "pill",
+                                connect_clicked => HomeInput::LaunchClicked,
+
+                                gtk::Box {
+                                    set_spacing: 8,
+                                    set_halign: gtk::Align::Center,
+
+                                    gtk::Image {
+                                        set_icon_name: Some("media-playback-start-symbolic"),
+                                    },
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: &t!("home-page-button-start-game", "Start Game"),
+                                    },
+                                },
+                            },
+                        },
+
+                        add_named[Some("progress")] =& gtk::Box {
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 8,
+                            add_css_class: "card",
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Vertical,
+                                set_spacing: 8,
+                                set_margin_top: 14,
+                                set_margin_bottom: 14,
+                                set_margin_start: 16,
+                                set_margin_end: 16,
+
+                                gtk::Box {
+                                    set_orientation: gtk::Orientation::Horizontal,
+                                    set_spacing: 8,
+
+                                    gtk::Label {
+                                        set_halign: gtk::Align::Start,
+                                        set_hexpand: true,
+                                        #[watch]
+                                        set_label: model.stage.status_text().as_deref().unwrap_or_default(),
+                                    },
+
+                                    gtk::Label {
+                                        set_halign: gtk::Align::End,
+                                        add_css_class: "dim-label",
+                                        add_css_class: "numeric",
+                                        #[watch]
+                                        set_label: &format!("{:.0}%", model.stage.fraction() * 100.0),
+                                    },
+
+                                },
+
+                                gtk::ProgressBar {
+                                    set_hexpand: true,
+                                    #[watch]
+                                    set_fraction: model.stage.fraction(),
+                                },
+                            }
+                        }
+                    },
+                },
             },
         }
     }
@@ -581,6 +708,11 @@ impl Component for HomePage {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        // Override the default bold style of the dropdown options and restore the normal weight.
+        relm4::set_global_css(
+            "dropdown.flat, dropdown.flat button, dropdown.flat label, row.combo { font-weight: normal; }",
+        );
+
         // Subscribe to update events.
         init.mgr
             .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
@@ -588,14 +720,23 @@ impl Component for HomePage {
             .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
         init.config
             .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
-        let model = HomePage {
+
+        let instance_model = gtk::StringList::new(&[]);
+        let account_model = gtk::StringList::new(&[]);
+
+        let mut model = HomePage {
             mgr: init.mgr,
             accounts: init.accounts,
             config: init.config,
             client: init.client,
             dirs: init.dirs,
             stage: LaunchStage::Idle,
+            instance_model: instance_model.clone(),
+            account_model: account_model.clone(),
         };
+
+        model.refresh_models();
+
         let widgets = view_output!();
         ComponentParts { model, widgets }
     }
@@ -605,7 +746,9 @@ impl Component for HomePage {
             HomeInput::LaunchClicked => {
                 self.launch(sender);
             }
-            HomeInput::Refresh => {}
+            HomeInput::Refresh => {
+                self.refresh_models();
+            }
             HomeInput::OpenInstanceSettings => {
                 if let Some(ins) = self.mgr.read().active_instance() {
                     let _ = sender.output(HomeOutput::OpenInstanceDetail(ins.id().to_string()));
@@ -614,6 +757,28 @@ impl Component for HomePage {
                         "home-page-error-empty-instance",
                         "Please select an instance"
                     )));
+                }
+            }
+            HomeInput::SelectInstance(idx) => {
+                let mut mgr = self.mgr.write();
+                if let Some(id) = mgr.instances.get(idx).map(|i| i.id().to_owned())
+                    && mgr.config.active_id.as_deref() != Some(id.as_str())
+                {
+                    let _ = mgr.set_active_instance(&id);
+                    if let Err(err) = mgr.save() {
+                        error!("Failed to save instances config: {err}");
+                    }
+                }
+            }
+            HomeInput::SelectAccount(idx) => {
+                let mut accounts = self.accounts.write();
+                if let Some(uuid) = accounts.accounts().get(idx).map(|a| a.uuid)
+                    && accounts.active_uuid() != Some(uuid)
+                {
+                    let _ = accounts.set_active_account(uuid);
+                    if let Err(err) = accounts.save(&self.dirs.accounts_file()) {
+                        error!("Failed to save accounts: {err}");
+                    }
                 }
             }
         }
