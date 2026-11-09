@@ -573,6 +573,7 @@ impl Component for HomePage {
 
                             add_suffix = &gtk::DropDown {
                                 add_css_class: "flat",
+                                add_css_class: "home-selector",
                                 set_valign: gtk::Align::Center,
                                 set_model: Some(&instance_model),
                                 #[watch]
@@ -600,6 +601,7 @@ impl Component for HomePage {
 
                             add_suffix = &gtk::DropDown {
                                 add_css_class: "flat",
+                                add_css_class: "home-selector",
                                 set_valign: gtk::Align::Center,
                                 set_model: Some(&account_model),
                                 #[watch]
@@ -710,7 +712,12 @@ impl Component for HomePage {
     ) -> ComponentParts<Self> {
         // Override the default bold style of the dropdown options and restore the normal weight.
         relm4::set_global_css(
-            "dropdown.flat, dropdown.flat button, dropdown.flat label, row.combo { font-weight: normal; }",
+            "dropdown.home-selector, \
+            dropdown.home-selector button, \
+            dropdown.home-selector label, \
+            dropdown.home-selector popover row.combo { \
+            font-weight: normal; \
+            }",
         );
 
         // Subscribe to update events.
@@ -764,7 +771,10 @@ impl Component for HomePage {
                 if let Some(id) = mgr.instances.get(idx).map(|i| i.id().to_owned())
                     && mgr.config.active_id.as_deref() != Some(id.as_str())
                 {
-                    let _ = mgr.set_active_instance(&id);
+                    if let Err(err) = mgr.set_active_instance(&id) {
+                        error!("Failed to set active instance: {err}");
+                        return;
+                    }
                     if let Err(err) = mgr.save() {
                         error!("Failed to save instances config: {err}");
                     }
