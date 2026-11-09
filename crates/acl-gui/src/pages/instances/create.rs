@@ -311,6 +311,7 @@ impl Component for CreatePage {
                         set_title: &t!("instances-create-settings-title","Instance Settings"),
 
                         adw::EntryRow {
+                            add_css_class: "monospace",
                             #[watch]
                             set_title: &t!("instances-create-settings-instance-name","Instance Name"),
                             connect_changed[sender] => move |entry| {

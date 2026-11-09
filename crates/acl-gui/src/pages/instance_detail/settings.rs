@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use acl_common::string::{format_jvm_args, parse_jvm_args};
 use acl_core::LauncherConfig;
 use acl_core::manager::InstanceManager;
 use gtk::gio::prelude::ListModelExt;
@@ -29,6 +30,7 @@ pub enum InstanceSettingsInput {
     SetMaxMemory(u32),
     SelectDefaultJava(usize),
     CommitMaxMemory,
+    SetExtraJvmArgs(String),
     Refresh,
 }
 
@@ -135,6 +137,23 @@ impl InstanceSettings {
         }
     }
 
+    fn current_game_version(&self) -> String {
+        let Some(current) = self.current.as_deref() else {
+            return t!("instance-settings-none", "None");
+        };
+        self.instances
+            .read()
+            .instance(current)
+            .map(|ins| {
+                format!(
+                    "{} • {}",
+                    ins.config.game_version,
+                    ins.config.mod_loader.label()
+                )
+            })
+            .unwrap_or_else(|| t!("instance-settings-none", "None"))
+    }
+
     fn current_name(&self) -> String {
         let Some(current) = self.current.as_deref() else {
             return t!("instance-settings-none", "None");
@@ -175,6 +194,17 @@ impl InstanceSettings {
             .and_then(|ins| ins.config.max_memory_mb)
             .unwrap_or(global_max)
     }
+
+    fn current_extra_jvm_args(&self) -> String {
+        let Some(current) = self.current.as_deref() else {
+            return String::new();
+        };
+        self.instances
+            .read()
+            .instance(current)
+            .map(|ins| format_jvm_args(&ins.config.extra_jvm_args))
+            .unwrap_or_default()
+    }
 }
 
 #[relm4::component(pub)]
@@ -189,11 +219,42 @@ impl SimpleComponent for InstanceSettings {
                 #[watch]
                 set_title: &t!("instance-settings-base-title","Base"),
 
-                add = &adw::ActionRow {
+                add = &adw::EntryRow {
+                    add_css_class: "monospace",
                     #[watch]
                     set_title: &t!("instance-settings-name-title","Instance Name"),
                     #[watch]
-                    set_subtitle: &model.current_name(),
+                    set_text: &model.current_name(),
+
+                    connect_entry_activated[sender] => move |entry| {
+                        let name = entry.text().trim().to_string();
+                        if !name.is_empty() {
+                            sender.input(InstanceSettingsInput::SetName(name));
+                            sender.input(InstanceSettingsInput::SaveConfig);
+                        }
+                    },
+
+                    // Automatically save when focus leaves
+                    add_controller = gtk::EventControllerFocus {
+                        connect_leave[sender] => move |controller| {
+                            if let Some(entry) = controller.widget().and_then(|w| w.downcast::<adw::EntryRow>().ok()) {
+                                let name = entry.text().trim().to_string();
+                                if !name.is_empty() {
+                                    sender.input(InstanceSettingsInput::SetName(name));
+                                    sender.input(InstanceSettingsInput::SaveConfig);
+                                }
+                            }
+                        }
+                },
+
+                 },
+
+                add = &adw::ActionRow {
+                    add_css_class: "property",
+                    #[watch]
+                    set_title: &t!("instance-settings-version-title", "Game Version"),
+                     #[watch]
+                    set_subtitle: &model.current_game_version(),
                 },
 
                 add = &adw::SwitchRow {
@@ -281,7 +342,30 @@ impl SimpleComponent for InstanceSettings {
                             sender.input(InstanceSettingsInput::SaveConfig);
                         }
                     }
-                }
+                },
+                add = &adw::EntryRow {
+                    add_css_class: "monospace",
+                    #[watch]
+                    set_title: &t!("instance-settings-extra-jvm-args-title", "Extra JVM Arguments"),
+                    #[watch]
+                    set_text: &model.current_extra_jvm_args(),
+
+                    connect_entry_activated[sender] => move |entry| {
+                        let text = entry.text().trim().to_string();
+                        sender.input(InstanceSettingsInput::SetExtraJvmArgs(text));
+                        sender.input(InstanceSettingsInput::SaveConfig);
+                    },
+
+                    add_controller = gtk::EventControllerFocus {
+                        connect_leave[sender] => move |controller| {
+                            if let Some(entry) = controller.widget().and_then(|w| w.downcast::<adw::EntryRow>().ok()) {
+                                let text = entry.text().trim().to_string();
+                                sender.input(InstanceSettingsInput::SetExtraJvmArgs(text));
+                                sender.input(InstanceSettingsInput::SaveConfig);
+                            }
+                        }
+                    },
+                },
             },
 
 
@@ -374,6 +458,15 @@ impl SimpleComponent for InstanceSettings {
             }
             InstanceSettingsInput::Refresh => {
                 self.refresh_java_model();
+            }
+            InstanceSettingsInput::SetExtraJvmArgs(raw) => {
+                let Some(current) = self.current.as_deref() else {
+                    return;
+                };
+                let args = parse_jvm_args(&raw);
+                if let Some(ins) = self.instances.write().instance_mut(current) {
+                    ins.config.extra_jvm_args = args;
+                }
             }
         }
     }

@@ -163,10 +163,14 @@ instance-settings-base-title = 基础
 instance-settings-custom-title = 独立实例设置
 # Source: Failed to save instance { $id } configuration: { $err }
 instance-settings-error-save-configuration = 保存实例 { $id } 配置失败：{ $err }
+# Source: Extra JVM Arguments
+instance-settings-extra-jvm-args-title = 额外 JVM 参数
 # Source: Instance Name
 instance-settings-name-title = 实例名称
 # Source: None
 instance-settings-none = 无
+# Source: Game Version
+instance-settings-version-title = 游戏版本
 # Source: Back
 instances-create-button-back = 返回
 # Source: Create

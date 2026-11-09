@@ -39,16 +39,30 @@ impl NavPage {
 
 pub struct InstanceDetail {
     current_page: NavPage,
-
+    current: Option<String>,
     stack: adw::ViewStack,
-
+    instances: Arc<SharedState<InstanceManager>>,
     settings: Controller<InstanceSettings>,
+}
+
+impl InstanceDetail {
+    fn current_name(&self) -> String {
+        let Some(current) = self.current.as_deref() else {
+            return t!("instance-settings-none", "None");
+        };
+        self.instances
+            .read()
+            .instance(current)
+            .map(|ins| ins.config.name.clone())
+            .unwrap_or(t!("instance-settings-none", "None"))
+    }
 }
 
 #[derive(Debug)]
 pub enum InstanceDetailInput {
     ShowToast(String),
     SetCurrentInstance(String),
+    Refresh,
 }
 
 #[derive(Debug)]
@@ -74,9 +88,8 @@ impl SimpleComponent for InstanceDetail {
             #[wrap(Some)]
             set_sidebar = &adw::NavigationPage {
 
-                set_title: "ACL",
-
-
+                #[watch]
+                set_title: &model.current_name(),
 
                 #[wrap(Some)]
                 set_child = &adw::ToolbarView {
@@ -131,16 +144,22 @@ impl SimpleComponent for InstanceDetail {
         let settings = InstanceSettings::builder()
             .launch(InstanceSettingsInit {
                 config: init.config,
-                instances: init.instances,
+                instances: Arc::clone(&init.instances),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 InstanceSettingsOutput::ShowToast(message) => {
                     InstanceDetailInput::ShowToast(message)
                 }
             });
+
+        init.instances
+            .subscribe(sender.input_sender(), |_| InstanceDetailInput::Refresh);
+
         let model = Self {
             current_page: NavPage::Settings,
+            current: None,
             stack: adw::ViewStack::new(),
+            instances: init.instances,
             settings,
         };
 
@@ -157,9 +176,11 @@ impl SimpleComponent for InstanceDetail {
                 let _ = sender.output(InstanceDetailOutput::ShowToast(message));
             }
             InstanceDetailInput::SetCurrentInstance(id) => {
+                self.current = Some(id.clone());
                 self.settings
                     .emit(InstanceSettingsInput::SetCurrentInstance(id));
             }
+            InstanceDetailInput::Refresh => {}
         }
     }
 }
