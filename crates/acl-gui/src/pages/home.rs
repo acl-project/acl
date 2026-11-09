@@ -628,8 +628,6 @@ impl Component for HomePage {
                         set_vhomogeneous: true,
                         set_transition_type: gtk::StackTransitionType::Crossfade,
                         set_transition_duration: 150,
-                        #[watch]
-                        set_visible_child_name: if model.stage.is_launching() { "progress" } else { "button" },
 
                         add_named[Some("button")] = &gtk::Box {
                             set_halign: gtk::Align::Center,
@@ -698,7 +696,12 @@ impl Component for HomePage {
                                     set_fraction: model.stage.fraction(),
                                 },
                             }
-                        }
+                        },
+
+                        #[watch]
+                        set_visible_child_name: if model.stage.is_launching() { "progress" } else { "button" },
+
+
                     },
                 },
             },
