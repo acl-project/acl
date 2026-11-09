@@ -129,22 +129,14 @@ delete-dialog-cancel = 取消
 delete-dialog-delete = 删除
 # Source: Delete Instance
 delete-dialog-heading = 删除实例
-# Source: Launching...
-home-page-button-launching = 正在启动...
 # Source: Start Game
 home-page-button-start-game = 启动游戏
-# Source: Please select a instance
+# Source: Please select an instance
 home-page-error-empty-instance = 请先选择一个实例
 # Source: Failed to save accounts: { $err }
 home-page-error-save-accounts = 保存账户失败：{ $err }
-# Source: No account selected
-home-page-no-account = 未选择账户
 # Source: No instance selected
 home-page-no-instance = 未选择实例
-# Source: Instance: { $inst_text } • Account: { $acc_text }
-home-page-status-description = 实例：{ $inst_text } • 账户：{ $acc_text }
-# Source: Adwaita Craft Launcher
-home-page-status-title = Adwaita Craft Launcher
 # Source: Instance settings
 home-page-tooltip-instance-settings = 实例设置
 # Source: Downloading ({ $completed }/{ $total })
@@ -242,7 +234,7 @@ launch-error-uuid-mismatch = UUID 不匹配
 # Source: Error waiting for instance "{ $name }": { $err }
 launch-error-wait-instance = 等待实例“{ $name }”时出错：{ $err }
 # Source: Authenticating account...
-launch-stage-authenticating = 正在登入...
+launch-stage-authenticating = 正在登录...
 # Source: Verifying game files...
 launch-stage-checking-integrity = 正在校验游戏文件...
 # Source: Checking Java runtime...
