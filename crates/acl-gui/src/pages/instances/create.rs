@@ -138,7 +138,6 @@ impl Component for CreatePage {
                     loader_version,
                 },
                 ConfigureOutput::OpenLoader(loader) => CreateInput::OpenLoader(loader),
-                ConfigureOutput::ShowToast(message) => CreateInput::ShowToast(message),
             });
 
         let loader_select = LoaderSelectPage::builder()
@@ -199,7 +198,14 @@ impl Component for CreatePage {
                         if loader != ModLoader::Vanilla {
                             instance.config.mod_loader = loader;
                             instance.config.mod_loader_version = loader_version;
-                            let _ = instance.save_config();
+                            if let Err(err) = instance.save_config() {
+                                error!("Failed to save instance config: {err}");
+                                let _ = sender.output(CreateOutput::ShowToast(t!(
+                                    "instances-create-error-save-config",
+                                    "Failed to save instance config: {err}",
+                                    err = err
+                                )));
+                            }
                         }
                         info!(
                             "Created instance '{}' with version '{}'",

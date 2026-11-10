@@ -170,7 +170,10 @@ impl LoaderSelectPage {
                         .collect()
                 })
                 .map_err(|err| err.to_i18n()),
-                _ => Err("not implemented or unsupported loader".to_string()),
+                _ => Err(t!(
+                    "instances-create-error-unsupported-loader",
+                    "Not implemented or unsupported loader"
+                )),
             };
 
             let _ = out.send(LoaderSelectCmdOutput::Finish(result));
@@ -221,15 +224,13 @@ impl Component for LoaderSelectPage {
                             },
                         },
 
-
                         gtk::Button {
                             set_hexpand: true,
                             set_halign: gtk::Align::End,
-                            add_css_class: "suggested-action",
 
                             connect_clicked => LoaderSelectInput::ClearSelection,
                             adw::ButtonContent {
-                                set_icon_name: "go-next-symbolic",
+                                set_icon_name: "edit-clear-symbolic",
                                 #[watch]
                                 set_label: &t!("instances-create-button-clear", "Clear"),
                             },
@@ -362,8 +363,8 @@ impl Component for LoaderSelectPage {
                 self.spawn_fetch_loader(&sender);
             }
             LoaderSelectInput::SearchChanged(q) => {
-                if let Ok(mut quary) = self.query.try_borrow_mut() {
-                    *quary = q;
+                if let Ok(mut query) = self.query.try_borrow_mut() {
+                    *query = q;
                 }
                 self.version_list.notify_filter_changed(0);
             }

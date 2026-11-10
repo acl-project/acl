@@ -195,18 +195,26 @@ instance-settings-none = 无
 instance-settings-version-title = 游戏版本
 # Source: Back
 instances-create-button-back = 返回
+# Source: Clear
+instances-create-button-clear = 清除
 # Source: Create
 instances-create-button-create = 创建
+# Source: Next
+instances-create-button-next = 下一步
 # Source: Failed to create instance: { $err }
 instances-create-error-create-instance = 创建实例失败：{ $err }
 # Source: Please select a Minecraft version
 instances-create-error-empty-version = 请选择 Minecraft 版本
 # Source: Failed to load version manifest: { $err }
 instances-create-error-load-version-manifest = 加载版本清单失败：{ $err }
-# Source: Please enter an instance name or select a version
-instances-create-error-no-name = 请输入实例名称或选择一个版本
 # Source: Failed to refresh instances: { $err }
 instances-create-error-refresh-instances = 刷新实例列表失败：{ $err }
+# Source: Failed to save instance config: { $err }
+instances-create-error-save-config = 保存实例配置失败：{ $err }
+# Source: Not implemented or unsupported loader
+instances-create-error-unsupported-loader = 未实现或不支持的模组加载器
+# Source: { $candidate } is incompatible with { $selected }
+instances-create-loader-incompatible = { $candidate } 与 { $selected } 不兼容
 # Source: None
 instances-create-none = 无
 # Source: Refresh version list
@@ -217,6 +225,8 @@ instances-create-search-versions = 搜索版本...
 instances-create-settings-game-version = 游戏版本
 # Source: Instance Name
 instances-create-settings-instance-name = 实例名称
+# Source: Mod Loader
+instances-create-settings-loader-title = 模组加载器
 # Source: Instance Settings
 instances-create-settings-title = 实例设置
 # Source: Create
@@ -277,6 +287,10 @@ launch-stage-waiting-window = 等待游戏窗口出现...
 list-tooltip-remove = 移除实例
 # Source: Instance settings
 list-tooltip-settings = 实例设置
+# Source: Beta
+loader-stability-beta = 测试版
+# Source: Stable
+loader-stability-stable = 稳定版
 # Source: SHA-1 mismatch for '{ $target }': expected { $expected }, actual { $actual }
 minecraft-error-hash-mismatch = '{ $target }' 的 SHA-1 不匹配：期望 { $expected }，实际 { $actual }
 # Source: HTTP request failed: { $arg0 }

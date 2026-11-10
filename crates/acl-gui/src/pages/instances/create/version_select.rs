@@ -440,7 +440,7 @@ impl Component for VersionSelectPage {
                     let _ = sender.output(VersionSelectOutput::Selected(entry.clone()));
                 }
             }
-            VersionSelectInput::Refresh => todo!(),
+            VersionSelectInput::Refresh => {}
         }
     }
 

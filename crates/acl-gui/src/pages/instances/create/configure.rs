@@ -30,8 +30,6 @@ pub enum ConfigureOutput {
         loader: ModLoader,
         loader_version: Option<String>,
     },
-    #[allow(dead_code)]
-    ShowToast(String),
 }
 
 #[derive(Debug, Clone)]
