@@ -47,6 +47,10 @@ fn main() -> ExitCode {
     };
 
     let app = relm4::RelmApp::new("com.acl-project.adwaita-craft-launcher");
+
+    // Load the global stylesheet embedded at compile time.
+    relm4::set_global_css(include_str!("style.css"));
+
     app.run::<AppModel>(dirs);
 
     ExitCode::SUCCESS

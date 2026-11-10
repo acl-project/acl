@@ -4,5 +4,6 @@
 pub mod fs;
 pub mod language;
 pub mod region;
+pub mod string;
 
 pub use language::Language;

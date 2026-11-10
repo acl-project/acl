@@ -1,0 +1,16 @@
+/* SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+/* Override the default bold style of the home dropdown options. */
+dropdown.home-selector,
+dropdown.home-selector button,
+dropdown.home-selector label,
+dropdown.home-selector popover row.combo {
+    font-weight: normal;
+}
+
+/* Override the default bold style of the instance folder menu. */
+popover.folder-menu button,
+popover.folder-menu label {
+    font-weight: normal;
+}

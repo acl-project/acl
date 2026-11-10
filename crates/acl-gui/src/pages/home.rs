@@ -713,16 +713,6 @@ impl Component for HomePage {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        // Override the default bold style of the dropdown options and restore the normal weight.
-        relm4::set_global_css(
-            "dropdown.home-selector, \
-            dropdown.home-selector button, \
-            dropdown.home-selector label, \
-            dropdown.home-selector popover row.combo { \
-            font-weight: normal; \
-            }",
-        );
-
         // Subscribe to update events.
         init.mgr
             .subscribe(sender.input_sender(), |_| HomeInput::Refresh);
