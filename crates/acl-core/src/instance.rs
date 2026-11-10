@@ -10,6 +10,7 @@ use std::{
 use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
 use acl_minecraft::{
     AssetIndex, DownloadSource, VersionEntry, VersionMetadata, download::DownloadTask,
+    version::VersionPatch,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -264,6 +265,10 @@ impl Instance {
         &self.config.id
     }
 
+    pub fn loader_json(&self) -> PathBuf {
+        self.dir.join("loader.json")
+    }
+
     pub fn create(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -414,10 +419,23 @@ impl Instance {
     }
 
     /// Load the cached version metadata from `<id>.json`.
+    /// Automatically load loader.json and patch metadata
     pub fn load_metadata(&self) -> Result<VersionMetadata> {
         let path = self.version_json();
         let content = fs::read_to_string(&path).map_err(|source| CoreError::Io { path, source })?;
-        let metadata = serde_json::from_str(&content)?;
+        let mut metadata: VersionMetadata = serde_json::from_str(&content)?;
+
+        let loader_path = self.loader_json();
+        if loader_path.exists() {
+            let loader_content =
+                fs::read_to_string(&loader_path).map_err(|source| CoreError::Io {
+                    path: loader_path,
+                    source,
+                })?;
+            let patch: VersionPatch = serde_json::from_str(&loader_content)?;
+            metadata.apply_patch(patch);
+        }
+
         Ok(metadata)
     }
 
@@ -449,7 +467,15 @@ impl Instance {
         tasks
             .into_iter()
             .filter(|task| match fs::metadata(&task.destination) {
-                Ok(meta) => !(meta.is_file() && meta.len() == task.size),
+                Ok(meta) => {
+                    // The mod loader may not have a size field
+                    // For example, fabric-loader does not provide size
+                    if task.size == 0 {
+                        meta.len() == 0
+                    } else {
+                        meta.len() != task.size
+                    }
+                }
                 Err(_) => true,
             })
             .collect()
@@ -833,6 +859,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         VersionMetadata {
@@ -1097,6 +1126,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         }];
 
         // Pre-create an old native file and abnormal mark to verify cleanup
@@ -1258,5 +1290,111 @@ mod tests {
         instance.mark_game_abnormal();
         let filtered_abnormal = instance.check_integrity(tasks);
         assert_eq!(filtered_abnormal.len(), 3);
+
+        // 3. Size 0 handling (mod loaders like Fabric without size field)
+        instance.clear_game_abnormal();
+        let path_zero_non_empty = files_dir.join("zero_non_empty.jar");
+        fs::write(&path_zero_non_empty, b"fabric-loader-bytes").expect("failed to write file");
+        let path_zero_empty = files_dir.join("zero_empty.jar");
+        fs::write(&path_zero_empty, b"").expect("failed to write empty file");
+        let path_zero_missing = files_dir.join("zero_missing.jar");
+
+        let task_zero_non_empty = DownloadTask {
+            name: "zero_non_empty.jar".to_string(),
+            url: "https://example.com/zero1.jar".to_string(),
+            destination: path_zero_non_empty,
+            sha1: "".to_string(),
+            size: 0,
+        };
+        let task_zero_empty = DownloadTask {
+            name: "zero_empty.jar".to_string(),
+            url: "https://example.com/zero2.jar".to_string(),
+            destination: path_zero_empty,
+            sha1: "".to_string(),
+            size: 0,
+        };
+        let task_zero_missing = DownloadTask {
+            name: "zero_missing.jar".to_string(),
+            url: "https://example.com/zero3.jar".to_string(),
+            destination: path_zero_missing,
+            sha1: "".to_string(),
+            size: 0,
+        };
+
+        let zero_tasks = vec![task_zero_non_empty, task_zero_empty, task_zero_missing];
+        let filtered_zero = instance.check_integrity(zero_tasks);
+        assert_eq!(filtered_zero.len(), 2);
+        assert!(filtered_zero.iter().any(|t| t.name == "zero_empty.jar"));
+        assert!(filtered_zero.iter().any(|t| t.name == "zero_missing.jar"));
+        assert!(!filtered_zero.iter().any(|t| t.name == "zero_non_empty.jar"));
+    }
+
+    #[test]
+    fn test_instance_load_metadata_with_and_without_loader() {
+        let temp = TempDirGuard::new("instance_load_metadata");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+
+        let instance = Instance::create(
+            "test_load_meta",
+            "Load Meta Test",
+            "1.21.1",
+            &dirs.versions_dir(),
+        )
+        .expect("should create instance");
+
+        let base_meta = sample_version_metadata();
+        fs::write(
+            instance.version_json(),
+            serde_json::to_string(&base_meta).expect("serialize base_meta"),
+        )
+        .expect("write version json");
+
+        // 1. Without loader.json
+        let loaded = instance
+            .load_metadata()
+            .expect("load_metadata without loader.json");
+        assert_eq!(loaded.main_class, "net.minecraft.client.main.Main");
+        assert_eq!(loaded.libraries.len(), 1);
+
+        // 2. With loader.json
+        let patch = acl_minecraft::VersionPatch {
+            id: "fabric-loader-test".to_string(),
+            inherits_from: Some("1.21.1".to_string()),
+            main_class: Some("net.fabricmc.loader.impl.launch.knot.KnotClient".to_string()),
+            minecraft_arguments: None,
+            arguments: None,
+            libraries: vec![acl_minecraft::Library {
+                name: "net.fabricmc:fabric-loader:0.16.10".to_string(),
+                downloads: None,
+                natives: None,
+                rules: None,
+                extract: None,
+                url: Some("https://maven.fabricmc.net/".to_string()),
+                sha1: None,
+                size: None,
+            }],
+        };
+        fs::write(
+            instance.loader_json(),
+            serde_json::to_string(&patch).expect("serialize patch"),
+        )
+        .expect("write loader json");
+
+        let loaded_patched = instance
+            .load_metadata()
+            .expect("load_metadata with loader.json");
+        assert_eq!(
+            loaded_patched.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
+        assert_eq!(loaded_patched.libraries.len(), 2);
+        assert_eq!(
+            loaded_patched.libraries[1].name,
+            "net.fabricmc:fabric-loader:0.16.10"
+        );
     }
 }

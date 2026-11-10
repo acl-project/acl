@@ -27,8 +27,10 @@ name = "acl-common"
 version = "0.1.0"
 dependencies = [
  "iana-time-zone",
+ "semver",
  "serde",
  "sys-locale",
+ "version-compare",
 ]
 
 [[package]]

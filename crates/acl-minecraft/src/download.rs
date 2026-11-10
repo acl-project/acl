@@ -36,7 +36,7 @@ pub async fn download_and_verify_file(
     if task.destination.exists() {
         match tokio::fs::read(&task.destination).await {
             Ok(bytes) => {
-                if verify_sha1(&bytes, &task.sha1, &task.name).is_ok() {
+                if task.sha1.is_empty() || verify_sha1(&bytes, &task.sha1, &task.name).is_ok() {
                     debug!(
                         "Verified existing file for '{}' at {}",
                         task.name,
@@ -72,7 +72,12 @@ pub async fn download_and_verify_file(
             let response = client.get(&url).send().await?.error_for_status()?;
             let bytes = response.bytes().await?;
 
-            verify_sha1(&bytes, &task.sha1, &task.name)?;
+            // Only verify if it exists; otherwise skip
+            // Because mod loaders may not have a sha1, such as fabric-loader and the like
+            if !task.sha1.is_empty() {
+                verify_sha1(&bytes, &task.sha1, &task.name)?;
+            }
+
             Ok(bytes)
         }
         .await;

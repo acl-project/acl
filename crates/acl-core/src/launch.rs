@@ -130,6 +130,11 @@ impl LaunchCommand {
             ("${user_type}", user_type),
             ("${version_type}", version_type.to_string()),
             ("${user_properties}", "{}".to_string()),
+            (
+                "${library_directory}",
+                dirs.libraries_dir().to_string_lossy().into_owned(),
+            ),
+            ("${classpath_separator}", ":".to_owned()),
         ]
     }
 

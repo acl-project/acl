@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use acl_common::version::is_newer_version;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -67,6 +68,10 @@ pub struct ExtractRules {
 pub struct Library {
     pub name: String,
     pub downloads: Option<LibraryDownloads>,
+    /// Maven repository root address (Fabric/Quilt/legacy Forge format, e.g. "https://maven.fabricmc.net/")
+    pub url: Option<String>,
+    pub sha1: Option<String>,
+    pub size: Option<u64>,
     pub natives: Option<HashMap<String, String>>,
     pub rules: Option<Vec<Rule>>,
     pub extract: Option<ExtractRules>,
@@ -113,6 +118,28 @@ impl Library {
             .nth(3)
             .is_some_and(|classifier| classifier == "natives-linux")
     }
+
+    /// Resolve primary artifact from `downloads.artifact` or flat Maven fields.
+    pub fn resolved_artifact(&self) -> Option<LibraryArtifact> {
+        if let Some(downloads) = &self.downloads {
+            return downloads.artifact.clone();
+        }
+
+        let path = self.maven_artifact_path()?;
+        let base_url = self
+            .url
+            .as_deref()
+            .unwrap_or("https://libraries.minecraft.net/");
+
+        let url = format!("{}/{path}", base_url.trim_end_matches('/'));
+
+        Some(LibraryArtifact {
+            path: Some(path),
+            sha1: self.sha1.clone().unwrap_or_default(),
+            size: self.size.unwrap_or(0),
+            url,
+        })
+    }
 }
 
 /// To handle compatibility with fields that may be either a single value or an array.
@@ -156,6 +183,20 @@ impl ArgumentEntry {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionPatch {
+    pub id: String,
+    #[serde(rename = "inheritsFrom")]
+    pub inherits_from: Option<String>,
+    #[serde(rename = "mainClass")]
+    pub main_class: Option<String>,
+    #[serde(rename = "minecraftArguments")]
+    pub minecraft_arguments: Option<String>,
+    pub arguments: Option<Arguments>,
+    #[serde(default)]
+    pub libraries: Vec<Library>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,16 +261,18 @@ impl VersionMetadata {
 
     /// Resolve game arguments for Linux (supports both modern `arguments.game` and legacy `minecraftArguments`).
     pub fn resolve_game_arguments(&self) -> Vec<String> {
+        let mut result = Vec::new();
+
+        // Collect both the old and new formats at the same time to ensure nothing is missed
         if let Some(args) = &self.arguments {
-            args.game
-                .iter()
-                .flat_map(ArgumentEntry::resolve_for_linux)
-                .collect()
-        } else if let Some(legacy) = &self.minecraft_arguments {
-            legacy.split_whitespace().map(str::to_string).collect()
-        } else {
-            Vec::new()
+            result.extend(args.game.iter().flat_map(ArgumentEntry::resolve_for_linux));
         }
+
+        if let Some(legacy) = &self.minecraft_arguments {
+            result.extend(legacy.split_whitespace().map(str::to_string));
+        }
+
+        result
     }
 
     /// Resolve JVM arguments for Linux.
@@ -262,26 +305,28 @@ impl VersionMetadata {
         }
     }
 
+    /// Collect download links for all libraries
+    /// Different versions will also be downloaded together
     pub fn library_download_tasks(&self, libraries_dir: &Path) -> Vec<DownloadTask> {
         let mut tasks = Vec::new();
-        let mut seen_hashed = HashSet::new();
-        for lib in self.active_libraries() {
-            let Some(downloads) = &lib.downloads else {
-                continue;
-            };
+        let mut seen_path = HashSet::new();
 
-            if let Some(artifact) = &downloads.artifact
-                && seen_hashed.insert(artifact.sha1.clone())
-            {
+        for lib in self.active_libraries() {
+            if let Some(artifact) = &lib.resolved_artifact() {
                 let rel_path = lib.artifact_relative_path(artifact);
+
                 if let Some(rel_path) = rel_path {
-                    tasks.push(DownloadTask {
-                        name: lib.name.clone(),
-                        url: artifact.url.clone(),
-                        destination: libraries_dir.join(rel_path),
-                        sha1: artifact.sha1.clone(),
-                        size: artifact.size,
-                    });
+                    let destination = libraries_dir.join(&rel_path);
+
+                    if seen_path.insert(destination.clone()) {
+                        tasks.push(DownloadTask {
+                            name: lib.name.clone(),
+                            url: artifact.url.clone(),
+                            destination,
+                            sha1: artifact.sha1.clone(),
+                            size: artifact.size,
+                        });
+                    }
                 } else {
                     warn!(
                         "Skipping library '{}' with invalid Maven coordinate",
@@ -293,19 +338,21 @@ impl VersionMetadata {
             // Mojang's braindead legacy design: a library is written twice and only the second entry has native download URLs.
             // Therefore, even if the primary artifact is a duplicate, we still need to process the classifiers below.
 
-            if let (Some(natives), Some(classifiers)) = (&lib.natives, &downloads.classifiers)
+            if let Some(downloads) = &lib.downloads
+                && let (Some(natives), Some(classifiers)) = (&lib.natives, &downloads.classifiers)
                 && let Some(classifier_key) = natives.get("linux")
                 && let Some(native_artifact) = classifiers.get(classifier_key)
                 && let Some(rel_path) = &native_artifact.path
             {
-                if !seen_hashed.insert(native_artifact.sha1.clone()) {
+                let destination = libraries_dir.join(rel_path);
+                if !seen_path.insert(destination.clone()) {
                     continue;
                 }
 
                 tasks.push(DownloadTask {
                     name: format!("{}:{classifier_key}", lib.name),
                     url: native_artifact.url.clone(),
-                    destination: libraries_dir.join(rel_path),
+                    destination,
                     sha1: native_artifact.sha1.clone(),
                     size: native_artifact.size,
                 });
@@ -368,32 +415,70 @@ impl VersionMetadata {
         crate::native::extract_all_natives(&archives, natives_dir)
     }
 
+    /// Split group:artifact:version[:classifier] into (key, version).
+    fn split_maven_key_version(name: &str) -> Option<(String, &str)> {
+        let mut parts = name.split(':');
+        let group = parts.next()?;
+        let artifact = parts.next()?;
+        let version = parts.next()?;
+
+        let key = match parts.next() {
+            Some(classifier) => format!("{group}:{artifact}:{classifier}"),
+            None => format!("{group}:{artifact}"),
+        };
+
+        Some((key, version))
+    }
+
     /// Build the ordered list of classpath jar paths (all active library artifacts + client jar).
+    /// If the same library appears, automatically select the newer version of the library.
     pub fn classpath_entries(
         &self,
         libraries_dir: &Path,
         instance_id: &str,
         versions_dir: &Path,
     ) -> Vec<PathBuf> {
+        let active_libs = self.active_libraries();
+
+        // Use a map to collect the highest version number retained for each library
+        // the key is the name, and the value is the version number.
+        let mut latest_versions: HashMap<String, &str> = HashMap::new();
+
+        for lib in &active_libs {
+            if let Some((key, version)) = Self::split_maven_key_version(&lib.name) {
+                match latest_versions.get(&key) {
+                    Some(&existing) if !is_newer_version(version, existing) => {}
+                    _ => {
+                        latest_versions.insert(key, version);
+                    }
+                }
+            }
+        }
+
         let mut entries = Vec::new();
         let mut seen_paths = HashSet::new();
 
-        for lib in self.active_libraries() {
-            let Some(downloads) = &lib.downloads else {
+        for lib in active_libs {
+            let Some(artifact) = lib.resolved_artifact() else {
                 continue;
             };
 
-            if let Some(artifact) = &downloads.artifact {
-                if let Some(rel_path) = lib.artifact_relative_path(artifact) {
-                    let full_path = libraries_dir.join(rel_path);
-                    if seen_paths.insert(full_path.clone()) {
-                        entries.push(full_path);
-                    }
-                } else {
-                    warn!(
-                        "Skipping library '{}' in classpath with invalid Maven coordinate",
-                        lib.name
-                    );
+            let Some((key, version)) = Self::split_maven_key_version(&lib.name) else {
+                warn!(
+                    "Skipping library '{}' in classpath with invalid Maven coordinate",
+                    lib.name
+                );
+                continue;
+            };
+
+            if latest_versions.get(&key) != Some(&version) {
+                continue;
+            }
+
+            if let Some(rel_path) = lib.artifact_relative_path(&artifact) {
+                let full_path = libraries_dir.join(rel_path);
+                if seen_paths.insert(full_path.clone()) {
+                    entries.push(full_path);
                 }
             }
         }
@@ -404,6 +489,30 @@ impl VersionMetadata {
                 .join(format!("{instance_id}.jar")),
         );
         entries
+    }
+
+    pub fn apply_patch(&mut self, patch: VersionPatch) {
+        if let Some(main_class) = patch.main_class {
+            self.main_class = main_class;
+        }
+
+        if let Some(legacy_args) = patch.minecraft_arguments {
+            self.minecraft_arguments = Some(legacy_args);
+        }
+
+        if let Some(patch_args) = patch.arguments {
+            match &mut self.arguments {
+                Some(args) => {
+                    args.game.extend(patch_args.game);
+                    args.jvm.extend(patch_args.jvm);
+                }
+                None => {
+                    self.arguments = Some(patch_args);
+                }
+            }
+        }
+
+        self.libraries.extend(patch.libraries);
     }
 }
 
@@ -417,6 +526,9 @@ mod tests {
         let standard_lib = Library {
             name: "com.mojang:authlib:1.5.25".to_string(),
             downloads: None,
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: None,
             extract: None,
@@ -429,6 +541,9 @@ mod tests {
         let classifier_lib = Library {
             name: "org.lwjgl:lwjgl:3.3.3:natives-linux".to_string(),
             downloads: None,
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: None,
             extract: None,
@@ -441,6 +556,9 @@ mod tests {
         let invalid_lib = Library {
             name: "invalid-name".to_string(),
             downloads: None,
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: None,
             extract: None,
@@ -507,6 +625,9 @@ mod tests {
         let linux_lib = Library {
             name: "org.lwjgl:lwjgl-linux:3.3.3".to_string(),
             downloads: None,
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: Some(vec![Rule {
                 action: RuleAction::Allow,
@@ -522,6 +643,9 @@ mod tests {
         let windows_lib = Library {
             name: "org.lwjgl:lwjgl-windows:3.3.3".to_string(),
             downloads: None,
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: Some(vec![Rule {
                 action: RuleAction::Allow,
@@ -537,6 +661,9 @@ mod tests {
         let common_lib = Library {
             name: "com.google.guava:guava:32.1.2-jre".to_string(),
             downloads: None,
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: None,
             extract: None,
@@ -790,6 +917,9 @@ mod tests {
                 }),
                 classifiers: None,
             }),
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: None,
             extract: None,
@@ -807,6 +937,9 @@ mod tests {
                 }),
                 classifiers: None,
             }),
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: None,
             extract: None,
@@ -831,6 +964,9 @@ mod tests {
                 artifact: None,
                 classifiers: Some(classifiers_map),
             }),
+            url: None,
+            sha1: None,
+            size: None,
             natives: Some(natives_map),
             rules: None,
             extract: None,
@@ -848,6 +984,9 @@ mod tests {
                 }),
                 classifiers: None,
             }),
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: None,
             extract: None,
@@ -865,6 +1004,9 @@ mod tests {
                 }),
                 classifiers: None,
             }),
+            url: None,
+            sha1: None,
+            size: None,
             natives: None,
             rules: Some(vec![Rule {
                 action: RuleAction::Allow,
@@ -954,6 +1096,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
         let artifact_explicit = LibraryArtifact {
             path: Some("explicit/path/to/lib.jar".to_string()),
@@ -983,6 +1128,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
         assert_eq!(lib_invalid.artifact_relative_path(&artifact_fallback), None);
 
@@ -992,6 +1140,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
         assert!(modern_native.is_modern_linux_native());
 
@@ -1001,6 +1152,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
         assert!(!modern_windows.is_modern_linux_native());
 
@@ -1010,6 +1164,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
         assert!(!standard_lib.is_modern_linux_native());
     }
@@ -1045,6 +1202,9 @@ mod tests {
             extract: Some(ExtractRules {
                 exclude: Some(vec!["META-INF/".to_string()]),
             }),
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         // 2. Modern native library (1.19+)
@@ -1062,6 +1222,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         // 3. Modern native with fallback path
@@ -1079,6 +1242,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         // 4. Windows-only library
@@ -1103,6 +1269,9 @@ mod tests {
                 features: None,
             }]),
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         // 5. Duplicate of lib_modern (should be deduplicated)
@@ -1192,6 +1361,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         let lib2 = Library {
@@ -1208,6 +1380,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         // Disallowed on Linux
@@ -1232,6 +1407,9 @@ mod tests {
                 features: None,
             }]),
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         // Duplicate of lib1 (same path, should be deduplicated)
@@ -1249,6 +1427,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         let metadata = VersionMetadata {
@@ -1362,6 +1543,9 @@ mod tests {
             natives: None,
             rules: None,
             extract: None,
+            url: None,
+            sha1: None,
+            size: None,
         };
 
         let metadata = VersionMetadata {
@@ -1398,6 +1582,299 @@ mod tests {
             std::fs::read(natives_dir.join("liblwjgl.so"))
                 .expect("extracted liblwjgl.so should exist"),
             b"ELF_NATIVE_CONTENT"
+        );
+    }
+
+    #[test]
+    fn test_library_resolved_artifact() {
+        // 1. Library with explicit downloads.artifact
+        let lib_downloads = Library {
+            name: "net.minecraft:test:1.0".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some("net/minecraft/test/1.0/test-1.0.jar".to_string()),
+                    sha1: "sha_downloads".to_string(),
+                    size: 100,
+                    url: "https://example.com/test.jar".to_string(),
+                }),
+                classifiers: None,
+            }),
+            url: None,
+            sha1: None,
+            size: None,
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        let artifact = lib_downloads
+            .resolved_artifact()
+            .expect("downloads artifact should exist");
+        assert_eq!(artifact.sha1, "sha_downloads");
+        assert_eq!(artifact.size, 100);
+        assert_eq!(artifact.url, "https://example.com/test.jar");
+
+        // 2. Flat Maven library (Fabric style) with custom url
+        let lib_flat_custom_url = Library {
+            name: "net.fabricmc:fabric-loader:0.16.10".to_string(),
+            downloads: None,
+            url: Some("https://maven.fabricmc.net/".to_string()),
+            sha1: Some("sha_fabric".to_string()),
+            size: Some(500),
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        let artifact = lib_flat_custom_url
+            .resolved_artifact()
+            .expect("flat maven artifact should resolve");
+        assert_eq!(
+            artifact.path,
+            Some("net/fabricmc/fabric-loader/0.16.10/fabric-loader-0.16.10.jar".to_string())
+        );
+        assert_eq!(artifact.sha1, "sha_fabric");
+        assert_eq!(artifact.size, 500);
+        assert_eq!(
+            artifact.url,
+            "https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.16.10/fabric-loader-0.16.10.jar"
+        );
+
+        // 3. Flat Maven library with default url and no sha1/size
+        let lib_flat_default = Library {
+            name: "org.ow2.asm:asm:9.6".to_string(),
+            downloads: None,
+            url: None,
+            sha1: None,
+            size: None,
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        let artifact = lib_flat_default
+            .resolved_artifact()
+            .expect("default maven artifact should resolve");
+        assert_eq!(artifact.sha1, "");
+        assert_eq!(artifact.size, 0);
+        assert_eq!(
+            artifact.url,
+            "https://libraries.minecraft.net/org/ow2/asm/asm/9.6/asm-9.6.jar"
+        );
+
+        // 4. Invalid coordinate
+        let lib_invalid = Library {
+            name: "invalid-name".to_string(),
+            downloads: None,
+            url: None,
+            sha1: None,
+            size: None,
+            natives: None,
+            rules: None,
+            extract: None,
+        };
+        assert!(lib_invalid.resolved_artifact().is_none());
+    }
+
+    #[test]
+    fn test_version_metadata_apply_patch() {
+        let mut base_metadata = VersionMetadata {
+            id: "1.21.1".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: Some(Arguments {
+                game: vec![ArgumentEntry::Simple("--username".to_string())],
+                jvm: vec![ArgumentEntry::Simple("-Xmx2G".to_string())],
+            }),
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "sha_client".to_string(),
+                    size: 1000,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries: vec![Library {
+                name: "com.mojang:authlib:6.0.55".to_string(),
+                downloads: None,
+                natives: None,
+                rules: None,
+                extract: None,
+                url: None,
+                sha1: None,
+                size: None,
+            }],
+        };
+
+        let patch = VersionPatch {
+            id: "fabric-loader-0.16.10-1.21.1".to_string(),
+            inherits_from: Some("1.21.1".to_string()),
+            main_class: Some("net.fabricmc.loader.impl.launch.knot.KnotClient".to_string()),
+            minecraft_arguments: Some("--legacy-arg".to_string()),
+            arguments: Some(Arguments {
+                game: vec![ArgumentEntry::Simple("--fabric".to_string())],
+                jvm: vec![ArgumentEntry::Simple("-Dfabric.test=1".to_string())],
+            }),
+            libraries: vec![Library {
+                name: "net.fabricmc:fabric-loader:0.16.10".to_string(),
+                downloads: None,
+                natives: None,
+                rules: None,
+                extract: None,
+                url: Some("https://maven.fabricmc.net/".to_string()),
+                sha1: None,
+                size: None,
+            }],
+        };
+
+        base_metadata.apply_patch(patch);
+
+        assert_eq!(
+            base_metadata.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
+        assert_eq!(
+            base_metadata.minecraft_arguments,
+            Some("--legacy-arg".to_string())
+        );
+
+        let args = base_metadata.arguments.expect("arguments should exist");
+        assert_eq!(
+            args.game,
+            vec![
+                ArgumentEntry::Simple("--username".to_string()),
+                ArgumentEntry::Simple("--fabric".to_string())
+            ]
+        );
+        assert_eq!(
+            args.jvm,
+            vec![
+                ArgumentEntry::Simple("-Xmx2G".to_string()),
+                ArgumentEntry::Simple("-Dfabric.test=1".to_string())
+            ]
+        );
+
+        assert_eq!(base_metadata.libraries.len(), 2);
+        assert_eq!(base_metadata.libraries[0].name, "com.mojang:authlib:6.0.55");
+        assert_eq!(
+            base_metadata.libraries[1].name,
+            "net.fabricmc:fabric-loader:0.16.10"
+        );
+
+        // Test apply patch when base has None arguments
+        let mut base_no_args = VersionMetadata {
+            id: "1.12.2".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: None,
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "sha_client".to_string(),
+                    size: 1000,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries: vec![],
+        };
+        let patch_args = VersionPatch {
+            id: "loader".to_string(),
+            inherits_from: None,
+            main_class: None,
+            minecraft_arguments: None,
+            arguments: Some(Arguments {
+                game: vec![ArgumentEntry::Simple("--game-patch".to_string())],
+                jvm: vec![],
+            }),
+            libraries: vec![],
+        };
+        base_no_args.apply_patch(patch_args);
+        assert_eq!(
+            base_no_args.arguments,
+            Some(Arguments {
+                game: vec![ArgumentEntry::Simple("--game-patch".to_string())],
+                jvm: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn test_classpath_entries_version_deduplication() {
+        let libraries_dir = Path::new("/mock/libraries");
+        let versions_dir = Path::new("/mock/versions");
+
+        let lib_old = Library {
+            name: "org.ow2.asm:asm:9.3".to_string(),
+            downloads: None,
+            natives: None,
+            rules: None,
+            extract: None,
+            url: None,
+            sha1: None,
+            size: None,
+        };
+
+        let lib_new = Library {
+            name: "org.ow2.asm:asm:9.6".to_string(),
+            downloads: None,
+            natives: None,
+            rules: None,
+            extract: None,
+            url: None,
+            sha1: None,
+            size: None,
+        };
+
+        let metadata = VersionMetadata {
+            id: "1.21.1".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: None,
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "sha_client".to_string(),
+                    size: 1000,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries: vec![lib_old, lib_new],
+        };
+
+        let cp = metadata.classpath_entries(libraries_dir, "1.21.1", versions_dir);
+        assert_eq!(
+            cp,
+            vec![
+                libraries_dir.join("org/ow2/asm/asm/9.6/asm-9.6.jar"),
+                versions_dir.join("1.21.1").join("1.21.1.jar"),
+            ]
         );
     }
 }
