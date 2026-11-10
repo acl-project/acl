@@ -25,4 +25,5 @@ pub use rule::{OsRule, Rule, RuleAction};
 pub use version::{
     ArgumentEntry, Arguments, AssetIndexInfo, DownloadFile, ExtractRules, JavaVersionInfo, Library,
     LibraryArtifact, LibraryDownloads, StringOrVec, VersionDownloads, VersionMetadata,
+    VersionPatch,
 };

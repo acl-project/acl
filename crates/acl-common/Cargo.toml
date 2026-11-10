@@ -7,3 +7,5 @@ edition.workspace = true
 sys-locale = { workspace = true }
 iana-time-zone = { workspace = true }
 serde = { workspace = true }
+version-compare = { workspace = true }
+semver = { workspace = true }

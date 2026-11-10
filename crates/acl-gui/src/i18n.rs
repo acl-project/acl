@@ -140,7 +140,13 @@ mod tests {
         ];
 
         for lang in variants {
-            apply_language(lang);
+            let requested: Vec<LanguageIdentifier> = match lang.tag() {
+                Some(tag) => tag.parse().into_iter().collect(),
+                None => DesktopLanguageRequester::requested_languages(),
+            };
+            let loader = fluent_language_loader!();
+            let _ = loader.load_fallback_language(&Localizations);
+            let _ = i18n_embed::select(&loader, &Localizations, &requested);
         }
     }
 
