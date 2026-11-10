@@ -409,7 +409,7 @@ impl Component for LoaderSelectPage {
                         self.version_list.extend_from_iter(items);
                     }
                     Err(err) => {
-                        error!("{err}");
+                        error!("Failed to fetch loader entries: {err}");
                         let _ = sender.output(LoaderSelectOutput::ShowToast(err));
                     }
                 }

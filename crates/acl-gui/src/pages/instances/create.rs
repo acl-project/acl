@@ -221,6 +221,7 @@ impl Component for CreatePage {
                             let _ = sender.output(CreateOutput::ShowToast(msg));
                         } else {
                             self.selected_version = None;
+                            self.step = CreateStep::SelectVersion;
                             let _ = sender.output(CreateOutput::Created(name, version_entry));
                         }
                     }

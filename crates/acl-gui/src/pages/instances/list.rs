@@ -373,6 +373,8 @@ impl ListPage {
                                     .map_err(|e| e.to_i18n())?;
 
                                     metadata.apply_patch(patch);
+                                } else {
+                                    warn!("Mod loader Fabric is configured without loader version for instance {}", id);
                                 }
                             }
                             _ => {

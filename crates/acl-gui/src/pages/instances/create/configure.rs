@@ -43,6 +43,7 @@ pub struct ConfigurePage {
     instance_name: String,
     selected_loader: ModLoader,
     selected_loader_version: Option<String>,
+    name_entry: adw::EntryRow,
 }
 
 impl ConfigurePage {
@@ -148,7 +149,8 @@ impl SimpleComponent for ConfigurePage {
                         #[watch]
                         set_title: &t!("instances-create-settings-title", "Instance Settings"),
 
-                        adw::EntryRow {
+                        #[local_ref]
+                        name_entry -> adw::EntryRow {
                             add_css_class: "monospace",
                             #[watch]
                             set_title: &t!("instances-create-settings-instance-name", "Instance Name"),
@@ -206,7 +208,10 @@ impl SimpleComponent for ConfigurePage {
             instance_name: String::new(),
             selected_loader: ModLoader::Vanilla,
             selected_loader_version: None,
+            name_entry: adw::EntryRow::new(),
         };
+
+        let name_entry = model.name_entry.clone();
 
         let widgets = view_output!();
 
@@ -235,6 +240,7 @@ impl SimpleComponent for ConfigurePage {
                 self.instance_name = String::new();
                 self.selected_loader = ModLoader::Vanilla;
                 self.selected_loader_version = None;
+                self.name_entry.set_text("");
             }
             ConfigureInput::SetLoader(loader, version) => {
                 self.selected_loader = loader;
