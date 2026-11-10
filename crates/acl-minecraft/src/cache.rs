@@ -351,4 +351,38 @@ mod tests {
         assert_eq!(parsed["name"], "test_entry");
         assert_eq!(parsed["count"], 42);
     }
+
+    #[test]
+    fn test_verify_sha1_empty_expected_skips_check() {
+        let content = b"arbitrary mod loader profile json bytes";
+        assert!(verify_sha1(content, "", "test-target").is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_cached_json_from_fresh_local_cache() {
+        let temp = TempDirGuard::new("fetch_cached_valid");
+        let dummy_url = "https://example.com/test_data.json";
+        let cache_key = cache_key_for_url(dummy_url);
+        let cache_path = temp.path().join(cache_key);
+
+        let data = vec!["entry1".to_string(), "entry2".to_string()];
+        let cached =
+            Cached::new(data.clone(), Duration::from_secs(3600)).expect("failed to create cached");
+        cached
+            .save_to_file(&cache_path)
+            .expect("failed to save cache");
+
+        let client = reqwest::Client::new();
+        let loaded: Vec<String> = fetch_cached_json(
+            &client,
+            dummy_url,
+            temp.path(),
+            Duration::from_secs(3600),
+            crate::mirror::DownloadSource::Official,
+        )
+        .await
+        .expect("should load from fresh cache without network");
+
+        assert_eq!(loaded, data);
+    }
 }

@@ -90,3 +90,188 @@ impl FabricLoaderEntry {
         .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "acl_test_fabric_{}_{}_{}",
+                name,
+                std::process::id(),
+                id
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("failed to create temp test dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_fabric_urls() {
+        assert_eq!(
+            FabricLoaderEntry::list_url(FABRIC_META_BASE_URL, "1.20.1"),
+            "https://meta.fabricmc.net/v2/versions/loader/1.20.1"
+        );
+        assert_eq!(
+            FabricLoaderEntry::list_url("https://meta.fabricmc.net/", "1.20.1"),
+            "https://meta.fabricmc.net/v2/versions/loader/1.20.1"
+        );
+
+        assert_eq!(
+            FabricLoaderEntry::profile_url(FABRIC_META_BASE_URL, "1.20.1", "0.16.10"),
+            "https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.16.10/profile/json"
+        );
+        assert_eq!(
+            FabricLoaderEntry::profile_url("https://meta.fabricmc.net/", "1.20.1", "0.16.10"),
+            "https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.16.10/profile/json"
+        );
+    }
+
+    #[test]
+    fn test_fabric_loader_entry_deserialization() {
+        let sample_json = r#"[
+            {
+                "loader": {
+                    "separator": ".",
+                    "build": 1610,
+                    "maven": "net.fabricmc:fabric-loader:0.16.10",
+                    "version": "0.16.10",
+                    "stable": true
+                },
+                "intermediary": {
+                    "maven": "net.fabricmc:intermediary:1.20.1",
+                    "version": "1.20.1",
+                    "stable": true
+                }
+            }
+        ]"#;
+
+        let entries: Vec<FabricLoaderEntry> =
+            serde_json::from_str(sample_json).expect("failed to deserialize FabricLoaderEntry");
+        assert_eq!(entries.len(), 1);
+
+        let entry = &entries[0];
+        assert_eq!(entry.loader.version, "0.16.10");
+        assert_eq!(entry.loader.build, 1610);
+        assert_eq!(entry.loader.separator, ".");
+        assert_eq!(entry.loader.maven, "net.fabricmc:fabric-loader:0.16.10");
+        assert!(entry.loader.stable);
+
+        assert_eq!(entry.intermediary.version, "1.20.1");
+        assert_eq!(entry.intermediary.maven, "net.fabricmc:intermediary:1.20.1");
+        assert!(entry.intermediary.stable);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_profile_from_local_cache() {
+        let temp = TempDirGuard::new("fabric_profile_cached");
+        let loader_json_path = temp.path().join("loader.json");
+
+        let patch_json = r#"{
+            "id": "fabric-loader-0.16.10-1.20.1",
+            "inheritsFrom": "1.20.1",
+            "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+            "arguments": {
+                "game": [],
+                "jvm": []
+            },
+            "libraries": [
+                {
+                    "name": "net.fabricmc:fabric-loader:0.16.10",
+                    "url": "https://maven.fabricmc.net/"
+                }
+            ]
+        }"#;
+
+        fs::write(&loader_json_path, patch_json).expect("failed to write mock profile");
+
+        let client = reqwest::Client::new();
+        let patch = FabricLoaderEntry::fetch_profile(
+            &client,
+            "1.20.1",
+            "0.16.10",
+            &loader_json_path,
+            DownloadSource::Official,
+        )
+        .await
+        .expect("should load from local profile without hitting network");
+
+        assert_eq!(patch.id, "fabric-loader-0.16.10-1.20.1");
+        assert_eq!(patch.inherits_from.as_deref(), Some("1.20.1"));
+        assert_eq!(
+            patch.main_class.as_deref(),
+            Some("net.fabricmc.loader.impl.launch.knot.KnotClient")
+        );
+        assert_eq!(patch.libraries.len(), 1);
+        assert_eq!(
+            patch.libraries[0].name,
+            "net.fabricmc:fabric-loader:0.16.10"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_list_with_cache_from_local_cache() {
+        let temp = TempDirGuard::new("fabric_list_cached");
+        let upstream_url = FabricLoaderEntry::list_url(FABRIC_META_BASE_URL, "1.20.1");
+        let cache_key = crate::cache::cache_key_for_url(&upstream_url);
+        let cache_file = temp.path().join(cache_key);
+
+        let sample_entry = FabricLoaderEntry {
+            loader: FabricLoaderInfo {
+                separator: ".".to_string(),
+                build: 1610,
+                maven: "net.fabricmc:fabric-loader:0.16.10".to_string(),
+                version: "0.16.10".to_string(),
+                stable: true,
+            },
+            intermediary: FabricIntermediaryInfo {
+                maven: "net.fabricmc:intermediary:1.20.1".to_string(),
+                version: "1.20.1".to_string(),
+                stable: true,
+            },
+        };
+
+        let cached = crate::cache::Cached::new(
+            vec![sample_entry.clone()],
+            std::time::Duration::from_secs(3600),
+        )
+        .expect("failed to create cached");
+        cached
+            .save_to_file(&cache_file)
+            .expect("failed to save cache");
+
+        let client = reqwest::Client::new();
+        let loaded = FabricLoaderEntry::fetch_list_with_cache(
+            &client,
+            "1.20.1",
+            temp.path(),
+            DownloadSource::Official,
+        )
+        .await
+        .expect("should load from local cache without hitting network");
+
+        assert_eq!(loaded, vec![sample_entry]);
+    }
+}
