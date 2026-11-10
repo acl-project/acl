@@ -101,88 +101,90 @@ impl SimpleComponent for ConfigurePage {
                 set_margin_top: 24,
                 set_margin_start: 12,
                 set_margin_end: 12,
-
-                // Top bar
                 gtk::Box {
                     set_orientation: gtk::Orientation::Vertical,
                     set_spacing: 12,
 
+                    // Top bar
                     gtk::Box {
-                        set_orientation: gtk::Orientation::Horizontal,
+                        set_orientation: gtk::Orientation::Vertical,
+                        set_spacing: 12,
 
-                        gtk::Button {
-                            connect_clicked => ConfigureInput::BackClicked,
-                            adw::ButtonContent {
-                                set_icon_name: "go-previous-symbolic",
+                        gtk::Box {
+                            set_orientation: gtk::Orientation::Horizontal,
+
+                            gtk::Button {
+                                connect_clicked => ConfigureInput::BackClicked,
+                                adw::ButtonContent {
+                                    set_icon_name: "go-previous-symbolic",
+                                    #[watch]
+                                    set_label: &t!("instances-create-button-back", "Back"),
+                                },
+                            },
+
+                            gtk::Button {
+                                set_hexpand: true,
+                                set_halign: gtk::Align::End,
+                                add_css_class: "suggested-action",
                                 #[watch]
-                                set_label: &t!("instances-create-button-back", "Back"),
+                                set_sensitive: model.can_create(),
+                                connect_clicked => ConfigureInput::CreateClicked,
+                                adw::ButtonContent {
+                                    set_icon_name: "list-add-symbolic",
+                                    #[watch]
+                                    set_label: &t!("instances-create-button-create", "Create"),
+                                },
                             },
                         },
 
-                        gtk::Button {
-                            set_hexpand: true,
-                            set_halign: gtk::Align::End,
-                            add_css_class: "suggested-action",
+                    },
+
+                    // Base settings group
+                    adw::PreferencesGroup {
+                        #[watch]
+                        set_title: &t!("instances-create-settings-title", "Instance Settings"),
+
+                        adw::EntryRow {
+                            add_css_class: "monospace",
                             #[watch]
-                            set_sensitive: model.can_create(),
-                            connect_clicked => ConfigureInput::CreateClicked,
-                            adw::ButtonContent {
-                                set_icon_name: "list-add-symbolic",
-                                #[watch]
-                                set_label: &t!("instances-create-button-create", "Create"),
+                            set_title: &t!("instances-create-settings-instance-name", "Instance Name"),
+                            connect_changed[sender] => move |entry| {
+                                sender.input(ConfigureInput::NameChanged(entry.text().to_string()));
                             },
                         },
-                    },
 
-                },
-
-                // Base settings group
-                adw::PreferencesGroup {
-                    #[watch]
-                    set_title: &t!("instances-create-settings-title", "Instance Settings"),
-
-                    adw::EntryRow {
-                        add_css_class: "monospace",
-                        #[watch]
-                        set_title: &t!("instances-create-settings-instance-name", "Instance Name"),
-                        connect_changed[sender] => move |entry| {
-                            sender.input(ConfigureInput::NameChanged(entry.text().to_string()));
+                        adw::ActionRow {
+                            #[watch]
+                            set_title: &t!("instances-create-settings-game-version", "Game Version"),
+                            #[watch]
+                            set_subtitle: &model.game_version,
                         },
+
                     },
 
-                    adw::ActionRow {
+                    // Mod Loader settings group
+                    adw::PreferencesGroup {
                         #[watch]
-                        set_title: &t!("instances-create-settings-game-version", "Game Version"),
-                        #[watch]
-                        set_subtitle: &model.game_version,
-                    },
+                        set_title: &t!("instances-create-settings-loader-title","Mod Loader"),
 
-                },
+                        adw::ActionRow {
+                            // No translation needed
+                            set_title: "Fabric",
 
-                // Mod Loader settings group
-                adw::PreferencesGroup {
-                    #[watch]
-                    set_title: &t!("instances-create-settings-loader-title","Mod Loader"),
+                            #[watch]
+                            set_subtitle: &model.loader_subtitle(ModLoader::Fabric),
+                            #[watch]
+                            set_activatable: model.is_loader_compatible(ModLoader::Fabric),
 
-                    adw::ActionRow {
-                        // No translation needed
-                        set_title: "Fabric",
+                            connect_activated[sender] => move |_| {
+                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Fabric));
+                            },
+                            add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
 
-                        #[watch]
-                        set_subtitle: &model.loader_subtitle(ModLoader::Fabric),
-                        #[watch]
-                        set_activatable: model.is_loader_compatible(ModLoader::Fabric),
-
-                        connect_activated[sender] => move |_| {
-                            let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Fabric));
-                        },
-                        add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
-
+                        }
                     }
-                }
-
+                },
             }
-
         }
 
     }

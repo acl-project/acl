@@ -326,24 +326,26 @@ impl Component for VersionSelectPage {
                     },
 
                 },
+
             },
+            // Virtualized version list: only visible rows are instantiated
+            gtk::ScrolledWindow {
+                set_vexpand: true,
+                set_hscrollbar_policy: gtk::PolicyType::Never,
+                set_margin_top: 12,
+                set_margin_bottom: 24,
+
+                #[name = "list_clamp"]
+                adw::ClampScrollable {
+                    set_maximum_size: 720,
+                    set_margin_start: 12,
+                    set_margin_end: 12,
+                },
+
+            }
         },
 
-        // Virtualized version list: only visible rows are instantiated
-        gtk::ScrolledWindow {
-            set_vexpand: true,
-            set_hscrollbar_policy: gtk::PolicyType::Never,
-            set_margin_top: 12,
-            set_margin_bottom: 24,
 
-            #[name = "list_clamp"]
-            adw::ClampScrollable {
-                set_maximum_size: 720,
-                set_margin_start: 12,
-                set_margin_end: 12,
-            },
-
-        }
     }
 
     fn init(
