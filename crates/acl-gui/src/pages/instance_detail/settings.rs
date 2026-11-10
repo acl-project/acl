@@ -245,15 +245,14 @@ impl SimpleComponent for InstanceSettings {
                                 }
                             }
                         }
+                    },
                 },
-
-                 },
 
                 add = &adw::ActionRow {
                     add_css_class: "property",
                     #[watch]
                     set_title: &t!("instance-settings-version-title", "Game Version"),
-                     #[watch]
+                    #[watch]
                     set_subtitle: &model.current_game_version(),
                 },
 

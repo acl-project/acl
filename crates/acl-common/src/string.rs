@@ -74,10 +74,17 @@ pub fn parse_jvm_args(raw: &str) -> Vec<String> {
     args
 }
 
+/// Formats a list of JVM arguments into a single-line string suitable for
+/// shell-like lexical parsing via [`parse_jvm_args`].
 pub fn format_jvm_args(args: &[String]) -> String {
     args.iter()
         .map(|arg| {
-            if arg.contains(' ') || arg.contains('\t') || arg.contains('"') {
+            let needs_quotes = arg.is_empty()
+                || arg
+                    .chars()
+                    .any(|c| c.is_whitespace() || c == '"' || c == '\'' || c == '\\');
+
+            if needs_quotes {
                 let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"");
                 format!("\"{escaped}\"")
             } else {
