@@ -68,6 +68,10 @@ impl<T: Serialize + DeserializeOwned> Cached<T> {
 }
 
 pub fn verify_sha1(bytes: &[u8], expected_sha1: &str, target: &str) -> Result<()> {
+    // Mod loaders such as Fabric do not provide a SHA-1 for profile JSON
+    if expected_sha1.is_empty() {
+        return Ok(());
+    }
     let mut hasher = Sha1::new();
     hasher.update(bytes);
     let actual = hex::encode(hasher.finalize());
@@ -129,6 +133,63 @@ pub async fn fetch_verified_json<T: DeserializeOwned>(
     }
 
     Ok(parsed)
+}
+
+/// Fetch JSON data with TTL caching per download source and offline fallback to expired cache.
+pub async fn fetch_cached_json<T>(
+    client: &reqwest::Client,
+    url: &str,
+    cache_dir: &Path,
+    ttl: Duration,
+    download_source: crate::mirror::DownloadSource,
+) -> Result<T>
+where
+    T: Serialize + DeserializeOwned + Clone,
+{
+    // Store the cache separately for each download source.
+    // This ensures that when a download source has not synchronized the latest version, the version list will not show unsupported versions.
+    let url = download_source.rewrite_url(url);
+    let file_name = cache_key_for_url(&url);
+    let cache_path = cache_dir.join(file_name);
+
+    let cached = Cached::<T>::load_from_file(&cache_path).ok();
+
+    // If a clock anomaly occurs, unwrap_or(false) ensures that it does not abort early and instead continues to issue the network request below.
+    if let Some(ref entry) = cached
+        && entry.is_fresh().unwrap_or(false)
+    {
+        debug!("Using fresh cache from {}", cache_path.display());
+        return Ok(entry.data.clone());
+    }
+
+    let fetch_result: Result<T> = async {
+        let response = client.get(&url).send().await?.error_for_status()?;
+        Ok(response.json().await?)
+    }
+    .await;
+
+    match fetch_result {
+        Ok(data) => {
+            if let Err(err) =
+                Cached::new(data.clone(), ttl).and_then(|entry| entry.save_to_file(&cache_path))
+            {
+                warn!("Failed to save cache to {}: {err}", cache_path.display());
+            }
+            Ok(data)
+        }
+        Err(err) => {
+            // Fallback to expired cache when offline or network fails
+            if let Some(entry) = cached {
+                warn!(
+                    "Network fetch failed ({err}), falling back to expired cache from {}",
+                    cache_path.display()
+                );
+                Ok(entry.data)
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

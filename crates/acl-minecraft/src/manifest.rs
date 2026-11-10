@@ -4,12 +4,12 @@
 use std::{path::Path, time::Duration};
 
 use crate::{
-    cache::{Cached, DEFAULT_MANIFEST_TTL, cache_key_for_url},
+    cache::{Cached, DEFAULT_MANIFEST_TTL, cache_key_for_url, fetch_cached_json},
     error::Result,
     mirror::DownloadSource,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::warn;
 pub const VERSION_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
@@ -94,45 +94,7 @@ impl VersionManifest {
         ttl: Duration,
         download_source: DownloadSource,
     ) -> Result<Self> {
-        // Store the manifest cache separately for each download source.
-        // This ensures that when a download source has not synchronized the latest version, the version list will not show unsupported versions.
-        let url = download_source.rewrite_url(url);
-
-        let file_name = cache_key_for_url(&url);
-
-        let cache_path = cache_dir.join(file_name);
-
-        let cached = Cached::<Self>::load_from_file(&cache_path).ok();
-
-        // If a clock anomaly occurs, unwrap_or(false) ensures that it does not abort early and instead continues to issue the network request below.
-        if let Some(ref entry) = cached
-            && entry.is_fresh().unwrap_or(false)
-        {
-            debug!(
-                "Using fresh version manifest cache from {}",
-                cache_path.display()
-            );
-            return Ok(entry.data.clone());
-        }
-        match Self::fetch_from_url(client, &url).await {
-            Ok(manifest) => {
-                manifest.save_cache(cache_dir, &url, ttl);
-                Ok(manifest)
-            }
-
-            Err(err) => {
-                // Fallback to expired cache when offline or network fails
-                if let Some(entry) = cached {
-                    warn!(
-                        "Network fetch failed ({err}), falling back to expired manifest cache from {}",
-                        cache_path.display()
-                    );
-                    Ok(entry.data)
-                } else {
-                    Err(err)
-                }
-            }
-        }
+        fetch_cached_json(client, url, cache_dir, ttl, download_source).await
     }
 
     /// Cache the manifest at the default TTL.
