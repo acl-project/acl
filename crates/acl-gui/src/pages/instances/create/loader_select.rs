@@ -137,7 +137,7 @@ pub struct LoaderSelectPage {
 }
 
 impl LoaderSelectPage {
-    fn spawn_fetch_loader(&mut self, sender: &ComponentSender<Self>) {
+    fn spawn_fetch_loader(&mut self, sender: &ComponentSender<Self>, force_refresh: bool) {
         self.is_loading = true;
         let loader = self.current_loader;
         let game_version = self.current_game_version.clone();
@@ -153,6 +153,7 @@ impl LoaderSelectPage {
                     &game_version,
                     &cache_dir,
                     download_source,
+                    force_refresh,
                 )
                 .await
                 .map(|entries| {
@@ -363,7 +364,7 @@ impl Component for LoaderSelectPage {
                 if let Some(handle) = self.loading_abort.take() {
                     handle.abort();
                 }
-                self.spawn_fetch_loader(&sender);
+                self.spawn_fetch_loader(&sender, true);
             }
             LoaderSelectInput::SearchChanged(q) => {
                 if let Ok(mut query) = self.query.try_borrow_mut() {
@@ -388,7 +389,7 @@ impl Component for LoaderSelectPage {
                     handle.abort();
                 }
                 self.version_list.clear();
-                self.spawn_fetch_loader(&sender);
+                self.spawn_fetch_loader(&sender, false);
             }
         }
     }

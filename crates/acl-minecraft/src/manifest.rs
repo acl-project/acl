@@ -74,27 +74,20 @@ impl VersionManifest {
     /// Fetch version manifest with caching using default TTL.
     pub async fn fetch_with_cache(
         client: &reqwest::Client,
+        url: &str,
         cache_dir: &Path,
         download_source: DownloadSource,
+        force_refresh: bool,
     ) -> Result<Self> {
-        Self::fetch_with_cache_from_url(
+        fetch_cached_json(
             client,
-            VERSION_MANIFEST_URL,
+            url,
             cache_dir,
             DEFAULT_MANIFEST_TTL,
             download_source,
+            force_refresh,
         )
         .await
-    }
-
-    pub async fn fetch_with_cache_from_url(
-        client: &reqwest::Client,
-        url: &str,
-        cache_dir: &Path,
-        ttl: Duration,
-        download_source: DownloadSource,
-    ) -> Result<Self> {
-        fetch_cached_json(client, url, cache_dir, ttl, download_source).await
     }
 
     /// Cache the manifest at the default TTL.
@@ -276,7 +269,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_with_cache_from_url_uses_cache() {
+    async fn test_fetch_with_cache_uses_cache() {
         let temp = TempDirGuard::new("cached_fetch");
         let manifest = sample_manifest();
         let dummy_url = "https://example.com/mock_manifest.json";
@@ -291,12 +284,12 @@ mod tests {
             .expect("failed to save cache");
 
         let client = reqwest::Client::new();
-        let loaded = VersionManifest::fetch_with_cache_from_url(
+        let loaded = VersionManifest::fetch_with_cache(
             &client,
             dummy_url,
             temp.path(),
-            Duration::from_secs(3600),
             DownloadSource::Official,
+            false,
         )
         .await
         .expect("should load from fresh cache without network");
@@ -305,7 +298,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_with_cache_from_url_isolated_per_download_source() {
+    async fn test_fetch_with_cache_isolated_per_download_source() {
         let temp = TempDirGuard::new("cached_fetch_isolated");
         let mut manifest_official = sample_manifest();
         manifest_official.latest.release = "1.20.4".to_string();
@@ -333,22 +326,22 @@ mod tests {
             .expect("failed to save bmclapi cache");
 
         let client = reqwest::Client::new();
-        let loaded_official = VersionManifest::fetch_with_cache_from_url(
+        let loaded_official = VersionManifest::fetch_with_cache(
             &client,
             official_url,
             temp.path(),
-            Duration::from_secs(3600),
             DownloadSource::Official,
+            false,
         )
         .await
         .expect("should load from official cache");
 
-        let loaded_bmclapi = VersionManifest::fetch_with_cache_from_url(
+        let loaded_bmclapi = VersionManifest::fetch_with_cache(
             &client,
             official_url,
             temp.path(),
-            Duration::from_secs(3600),
             DownloadSource::Bmclapi,
+            false,
         )
         .await
         .expect("should load from bmclapi cache");

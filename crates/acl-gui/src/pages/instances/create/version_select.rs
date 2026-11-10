@@ -178,20 +178,15 @@ impl VersionSelectPage {
         let download_source = self.config.read().download_source;
         let url = download_source.rewrite_url(VERSION_MANIFEST_URL);
         sender.oneshot_command(async move {
-            let result = if force_refresh {
-                match VersionManifest::fetch_from_url(&client, &url).await {
-                    Ok(manifest) => {
-                        manifest.cache_from_url(&cache_dir, &url);
-                        Ok(manifest)
-                    }
-
-                    Err(err) => Err(err.to_string()),
-                }
-            } else {
-                VersionManifest::fetch_with_cache(&client, &cache_dir, download_source)
-                    .await
-                    .map_err(|err| err.to_string())
-            };
+            let result = VersionManifest::fetch_with_cache(
+                &client,
+                &url,
+                &cache_dir,
+                download_source,
+                force_refresh,
+            )
+            .await
+            .map_err(|err| err.to_string());
 
             VersionSelectCmdOutput::ManifestLoaded(result)
         });

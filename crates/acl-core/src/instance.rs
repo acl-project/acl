@@ -434,6 +434,12 @@ impl Instance {
                 })?;
             let patch: VersionPatch = serde_json::from_str(&loader_content)?;
             metadata.apply_patch(patch);
+        } else if self.config.mod_loader != ModLoader::Vanilla {
+            warn!(
+                "Instance {} mod loader is {}, but loader.json does not exist",
+                self.id(),
+                self.config.mod_loader.label()
+            );
         }
 
         Ok(metadata)

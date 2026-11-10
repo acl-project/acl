@@ -58,6 +58,7 @@ impl FabricLoaderEntry {
         game_version: &str,
         cache_dir: &Path,
         download_source: DownloadSource,
+        force_refresh: bool,
     ) -> Result<Vec<Self>> {
         let upstream_url = Self::list_url(FABRIC_META_BASE_URL, game_version);
         fetch_cached_json(
@@ -66,6 +67,7 @@ impl FabricLoaderEntry {
             cache_dir,
             DEFAULT_MANIFEST_TTL,
             download_source,
+            force_refresh,
         )
         .await
     }
@@ -268,6 +270,7 @@ mod tests {
             "1.20.1",
             temp.path(),
             DownloadSource::Official,
+            false,
         )
         .await
         .expect("should load from local cache without hitting network");

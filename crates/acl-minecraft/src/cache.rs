@@ -142,6 +142,7 @@ pub async fn fetch_cached_json<T>(
     cache_dir: &Path,
     ttl: Duration,
     download_source: crate::mirror::DownloadSource,
+    force_refresh: bool,
 ) -> Result<T>
 where
     T: Serialize + DeserializeOwned + Clone,
@@ -154,12 +155,15 @@ where
 
     let cached = Cached::<T>::load_from_file(&cache_path).ok();
 
-    // If a clock anomaly occurs, unwrap_or(false) ensures that it does not abort early and instead continues to issue the network request below.
-    if let Some(ref entry) = cached
-        && entry.is_fresh().unwrap_or(false)
-    {
-        debug!("Using fresh cache from {}", cache_path.display());
-        return Ok(entry.data.clone());
+    // Only when it is not a forced refresh should a valid fresh cache be returned directly
+    if !force_refresh {
+        // If a clock anomaly occurs, unwrap_or(false) ensures that it does not abort early and instead continues to issue the network request below.
+        if let Some(ref entry) = cached
+            && entry.is_fresh().unwrap_or(false)
+        {
+            debug!("Using fresh cache from {}", cache_path.display());
+            return Ok(entry.data.clone());
+        }
     }
 
     let fetch_result: Result<T> = async {
@@ -379,6 +383,7 @@ mod tests {
             temp.path(),
             Duration::from_secs(3600),
             crate::mirror::DownloadSource::Official,
+            false,
         )
         .await
         .expect("should load from fresh cache without network");

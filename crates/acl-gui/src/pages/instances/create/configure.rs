@@ -46,18 +46,29 @@ pub struct ConfigurePage {
 }
 
 impl ConfigurePage {
-    fn effective_name(&self) -> &str {
+    fn effective_name(&self) -> String {
         let trimmed = self.instance_name.trim();
         if !trimmed.is_empty() {
-            trimmed
+            trimmed.to_string()
         } else {
-            &self.game_version
+            if self.selected_loader != ModLoader::Vanilla {
+                format!(
+                    "{}-{}-{}",
+                    self.game_version,
+                    self.selected_loader.label(),
+                    self.selected_loader_version
+                        .clone()
+                        .unwrap_or("unknown".to_string())
+                )
+            } else {
+                self.game_version.to_string()
+            }
         }
     }
 
     fn can_create(&self) -> bool {
         !self.game_version.is_empty()
-            && InstanceConfig::validate_instance_id(self.effective_name()).is_ok()
+            && InstanceConfig::validate_instance_id(&self.effective_name()).is_ok()
     }
 
     fn loader_subtitle(&self, loader: ModLoader) -> String {

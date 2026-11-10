@@ -3,12 +3,12 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use acl_core::{Instance, LauncherConfig, LauncherDirs, manager::InstanceManager};
+use acl_core::{Instance, LauncherConfig, LauncherDirs, ModLoader, manager::InstanceManager};
 
-use acl_minecraft::{AssetIndex, VersionEntry, download::DownloadProgress};
+use acl_minecraft::{AssetIndex, FabricLoaderEntry, VersionEntry, download::DownloadProgress};
 use libadwaita::prelude::*;
 use relm4::{SharedState, gtk, prelude::*, tokio};
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::{i18n::LocalizeError, t};
 
@@ -352,10 +352,36 @@ impl ListPage {
                             id: id.clone(),
                             stage: InstallStage::FetchingMetadata,
                         });
-                        let metadata = instance
+                        let mut metadata = instance
                             .fetch_metadata(&client, &entry, &dirs, download_source)
                             .await
                             .map_err(|e| e.to_i18n())?;
+
+                        // Handle mod loader
+                        match instance.config.mod_loader {
+                            ModLoader::Vanilla => {}
+                            ModLoader::Fabric => {
+                                if let Some(loader_ver) = &instance.config.mod_loader_version {
+                                    let patch = FabricLoaderEntry::fetch_profile(
+                                        &client,
+                                        &entry.id,
+                                        loader_ver,
+                                        &instance.loader_json(),
+                                        download_source,
+                                    )
+                                    .await
+                                    .map_err(|e| e.to_i18n())?;
+
+                                    metadata.apply_patch(patch);
+                                }
+                            }
+                            _ => {
+                                warn!(
+                                    "Mod loader {} is not supported yet",
+                                    instance.config.mod_loader.label()
+                                );
+                            }
+                        }
 
                         // Fetch asset index
                         let _ = out.send(ListCmdOutput::StageChanged {
