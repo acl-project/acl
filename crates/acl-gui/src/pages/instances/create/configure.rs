@@ -52,14 +52,7 @@ impl ConfigurePage {
             trimmed.to_string()
         } else {
             if self.selected_loader != ModLoader::Vanilla {
-                format!(
-                    "{}-{}-{}",
-                    self.game_version,
-                    self.selected_loader.label(),
-                    self.selected_loader_version
-                        .clone()
-                        .unwrap_or("unknown".to_string())
-                )
+                format!("{}-{}", self.game_version, self.selected_loader.label(),)
             } else {
                 self.game_version.to_string()
             }
