@@ -94,3 +94,92 @@ pub fn format_jvm_args(args: &[String]) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_jvm_args_empty_and_whitespace() {
+        assert_eq!(parse_jvm_args(""), Vec::<String>::new());
+        assert_eq!(parse_jvm_args("   \t\n\r  "), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_parse_jvm_args_basic() {
+        assert_eq!(parse_jvm_args("-Xmx2G -Xms1G"), vec!["-Xmx2G", "-Xms1G"]);
+        assert_eq!(
+            parse_jvm_args("  -Xmx2G    -Xms1G  "),
+            vec!["-Xmx2G", "-Xms1G"]
+        );
+    }
+
+    #[test]
+    fn test_parse_jvm_args_quotes_and_escapes() {
+        assert_eq!(
+            parse_jvm_args(r#"-Dfoo="bar baz" -Dtest='hello world'"#),
+            vec!["-Dfoo=bar baz", "-Dtest=hello world"]
+        );
+        assert_eq!(
+            parse_jvm_args(r#"-Dpath="C:\\Program Files\\App""#),
+            vec![r"-Dpath=C:\Program Files\App"]
+        );
+        assert_eq!(
+            parse_jvm_args(r#"-Dquote="\"escaped\"""#),
+            vec![r#"-Dquote="escaped""#]
+        );
+        assert_eq!(parse_jvm_args(r"-Dfoo=bar\ baz"), vec!["-Dfoo=bar baz"]);
+    }
+
+    #[test]
+    fn test_parse_jvm_args_unclosed_quotes_and_trailing_backslash() {
+        assert_eq!(parse_jvm_args(r#"-Dfoo="bar"#), vec!["-Dfoo=bar"]);
+        assert_eq!(parse_jvm_args(r"-Dfoo=bar\"), vec![r"-Dfoo=bar\"]);
+        assert_eq!(parse_jvm_args(r#"-Dfoo="bar\"#), vec![r"-Dfoo=bar\"]);
+    }
+
+    #[test]
+    fn test_format_jvm_args_basic() {
+        assert_eq!(
+            format_jvm_args(&["-Xmx2G".to_string(), "-Xms1G".to_string()]),
+            "-Xmx2G -Xms1G"
+        );
+        assert_eq!(
+            format_jvm_args(&[
+                "-Dfoo=bar baz".to_string(),
+                r"-Dpath=C:\test\app".to_string(),
+                "".to_string(),
+            ]),
+            r#""-Dfoo=bar baz" "-Dpath=C:\\test\\app" """#
+        );
+    }
+
+    #[test]
+    fn test_jvm_args_roundtrip() {
+        let test_cases = vec![
+            vec!["-Xmx2G".to_string(), "-Xms1G".to_string()],
+            vec![r"-Dpath=C:\test\app".to_string(), "".to_string()],
+            vec![
+                r"-Dmessage=it's ok".to_string(),
+                r#"-Dname="hello""#.to_string(),
+            ],
+            vec!["".to_string(), "foo".to_string(), "".to_string()],
+            vec![
+                r"a\b\c".to_string(),
+                "hello world".to_string(),
+                "tab\there".to_string(),
+            ],
+            vec![r#"foo "bar" baz"#.to_string()],
+            vec!["--add-opens=java.base/java.lang=ALL-UNNAMED".to_string()],
+        ];
+
+        for original in test_cases {
+            let formatted = format_jvm_args(&original);
+            let parsed = parse_jvm_args(&formatted);
+            assert_eq!(
+                original, parsed,
+                "Roundtrip failed for formatted string: {formatted}"
+            );
+        }
+    }
+}

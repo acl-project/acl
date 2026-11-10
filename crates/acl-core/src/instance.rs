@@ -634,6 +634,19 @@ mod tests {
             instance.resourcepacks_dir(),
             base_dir.join("inst-1").join("resourcepacks")
         );
+        assert_eq!(
+            instance.shaderpacks_dir(),
+            base_dir.join("inst-1").join("shaderpacks")
+        );
+        assert_eq!(
+            instance.schematics_dir(),
+            base_dir.join("inst-1").join("schematics")
+        );
+        assert_eq!(
+            instance.screenshots_dir(),
+            base_dir.join("inst-1").join("screenshots")
+        );
+        assert_eq!(instance.logs_dir(), base_dir.join("inst-1").join("logs"));
         let expected_natives = format!(
             "natives-{}-{}",
             std::env::consts::OS,
