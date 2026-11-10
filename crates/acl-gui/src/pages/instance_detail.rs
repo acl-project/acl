@@ -183,6 +183,7 @@ impl SimpleComponent for InstanceDetail {
 
         #[name = "folder_popover"]
         gtk::Popover {
+            add_css_class: "folder-menu",
             gtk::Box {
                 set_orientation: gtk::Orientation::Vertical,
                 set_spacing: 4,
