@@ -417,3 +417,36 @@ impl Component for LoaderSelectPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_matches_version_entry() {
+        let entry = LoaderVersionItem {
+            loader: ModLoader::Fabric,
+            version: "0.16.10".to_string(),
+            stability: LoaderStability::Stable,
+        };
+
+        // Empty and whitespace queries
+        assert!(matches_version_entry(&entry, ""));
+        assert!(matches_version_entry(&entry, "   "));
+
+        // Substring and case insensitivity
+        assert!(matches_version_entry(&entry, "0.16"));
+        assert!(matches_version_entry(&entry, "16.10"));
+        assert!(matches_version_entry(&entry, "0.16.10"));
+
+        // Non-matching
+        assert!(!matches_version_entry(&entry, "0.15"));
+        assert!(!matches_version_entry(&entry, "fabric"));
+    }
+
+    #[test]
+    fn test_loader_stability_label() {
+        assert_eq!(LoaderStability::Stable.label(), "Stable");
+        assert_eq!(LoaderStability::Beta.label(), "Beta");
+    }
+}

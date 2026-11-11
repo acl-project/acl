@@ -390,4 +390,67 @@ mod tests {
 
         assert_eq!(loaded, data);
     }
+
+    #[tokio::test]
+    async fn test_fetch_cached_json_force_refresh_bypasses_cache() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let temp = TempDirGuard::new("fetch_cached_force_refresh");
+
+        // 1. Start a local mock server returning new data
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let local_addr = listener.local_addr().expect("get local addr");
+        let url = format!("http://{local_addr}/new_data.json");
+        let cache_key = cache_key_for_url(&url);
+        let cache_path = temp.path().join(cache_key);
+
+        // 2. Pre-seed local cache with old data (still fresh!)
+        let old_data = vec!["cached_old_entry".to_string()];
+        let cached =
+            Cached::new(old_data.clone(), Duration::from_secs(3600)).expect("create cached");
+        cached.save_to_file(&cache_path).expect("save cache");
+
+        let server_handle = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf).await;
+                let payload = br#"["fresh_network_entry"]"#;
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    payload.len()
+                );
+                let _ = stream.write_all(header.as_bytes()).await;
+                let _ = stream.write_all(payload).await;
+                let _ = stream.flush().await;
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("create test client");
+        // 3. fetch with force_refresh = true: should bypass fresh cache and fetch from server
+        let loaded: Vec<String> = fetch_cached_json(
+            &client,
+            &url,
+            temp.path(),
+            Duration::from_secs(3600),
+            crate::mirror::DownloadSource::Official,
+            true,
+        )
+        .await
+        .expect("should fetch from mock server when force_refresh is true");
+
+        let _ = server_handle.await;
+
+        assert_eq!(loaded, vec!["fresh_network_entry".to_string()]);
+
+        // 4. Verify that the cache file on disk was updated with the fresh data
+        let reloaded: Cached<Vec<String>> =
+            Cached::load_from_file(&cache_path).expect("load updated cache");
+        assert_eq!(reloaded.data, vec!["fresh_network_entry".to_string()]);
+    }
 }

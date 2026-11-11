@@ -1403,4 +1403,40 @@ mod tests {
             "net.fabricmc:fabric-loader:0.16.10"
         );
     }
+
+    #[test]
+    fn test_instance_resolve_metadata_mod_loader_without_loader_json() {
+        let temp = TempDirGuard::new("metadata_no_loader_json");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+
+        let mut instance = Instance::create(
+            "modded_missing_loader",
+            "Modded Missing Loader",
+            "1.21.1",
+            &dirs.versions_dir(),
+        )
+        .expect("should create instance");
+
+        instance.config.mod_loader = ModLoader::Fabric;
+        instance.config.mod_loader_version = Some("0.16.10".to_string());
+
+        let base_meta = sample_version_metadata();
+        fs::write(
+            instance.version_json(),
+            serde_json::to_string(&base_meta).expect("serialize base_meta"),
+        )
+        .expect("write version json");
+
+        // loader.json does not exist, but mod_loader != Vanilla
+        // should log warning and return base metadata successfully without error
+        let loaded = instance
+            .load_metadata()
+            .expect("load_metadata should succeed even if loader.json is missing");
+        assert_eq!(loaded.main_class, "net.minecraft.client.main.Main");
+        assert_eq!(loaded.libraries.len(), 1);
+    }
 }

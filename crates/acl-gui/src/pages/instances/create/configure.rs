@@ -249,3 +249,65 @@ impl SimpleComponent for ConfigurePage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_configure_page_logic() {
+        if gtk::init().is_err() {
+            return;
+        }
+
+        let mut page = ConfigurePage {
+            game_version: String::new(),
+            instance_name: String::new(),
+            selected_loader: ModLoader::Vanilla,
+            selected_loader_version: None,
+            name_entry: adw::EntryRow::new(),
+        };
+
+        // 1. effective_name tests
+        page.game_version = "1.21.1".to_string();
+
+        page.instance_name = "  My Custom Instance  ".to_string();
+        assert_eq!(page.effective_name(), "My Custom Instance");
+
+        page.instance_name = "   ".to_string();
+        page.selected_loader = ModLoader::Vanilla;
+        assert_eq!(page.effective_name(), "1.21.1");
+
+        page.selected_loader = ModLoader::Fabric;
+        assert_eq!(page.effective_name(), "1.21.1-Fabric");
+
+        // 2. can_create tests
+        page.game_version = "".to_string();
+        page.instance_name = "valid-name".to_string();
+        assert!(!page.can_create());
+
+        page.game_version = "1.21.1".to_string();
+        assert!(page.can_create());
+
+        page.instance_name = "invalid/name".to_string();
+        assert!(!page.can_create());
+
+        page.instance_name = "..".to_string();
+        assert!(!page.can_create());
+
+        // 3. loader compatibility and subtitle tests
+        page.selected_loader = ModLoader::Vanilla;
+        assert!(page.is_loader_compatible(ModLoader::Fabric));
+        assert!(page.is_loader_compatible(ModLoader::Vanilla));
+        assert_eq!(page.loader_subtitle(ModLoader::Fabric), "None");
+
+        page.selected_loader = ModLoader::Fabric;
+        page.selected_loader_version = Some("0.16.10".to_string());
+        assert!(page.is_loader_compatible(ModLoader::Fabric));
+        assert_eq!(page.loader_subtitle(ModLoader::Fabric), "0.16.10");
+
+        assert!(!page.is_loader_compatible(ModLoader::Forge));
+        assert!(page.loader_subtitle(ModLoader::Forge).contains("Forge"));
+        assert!(page.loader_subtitle(ModLoader::Forge).contains("Fabric"));
+    }
+}
