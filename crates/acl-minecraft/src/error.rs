@@ -39,6 +39,21 @@ pub enum MinecraftError {
         #[source]
         source: zip::result::ZipError,
     },
+
+    #[error("Invalid Maven coordinate: '{coordinate}'")]
+    InvalidMavenCoordinate { coordinate: String },
+
+    #[error("Main-Class attribute not found in manifest of jar '{jar_path}'")]
+    MissingMainClass { jar_path: PathBuf },
+
+    #[error("Modern Forge install profile is missing version.json")]
+    ForgeMissingVersionJson,
+
+    #[error("Forge processor '{jar}' failed with exit code {exit_code}")]
+    ProcessorFailed { jar: String, exit_code: i32 },
+
+    #[error("Failed to construct classpath: {0}")]
+    Classpath(#[from] std::env::JoinPathsError),
 }
 
 pub type Result<T> = std::result::Result<T, MinecraftError>;
