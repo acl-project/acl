@@ -3,6 +3,7 @@
 
 use std::{collections::HashMap, path::Path};
 
+use acl_common::maven::coordinate_to_path;
 use serde::{Deserialize, Serialize};
 
 use crate::DEFAULT_MANIFEST_TTL;
@@ -157,6 +158,36 @@ impl ForgeProcessor {
             None => true,
         }
     }
+
+    pub fn resolve_args(
+        &self,
+        data_map: &HashMap<String, String>,
+        libraries_dir: &Path,
+    ) -> Vec<String> {
+        self.args
+            .iter()
+            .map(|raw_arg| {
+                let mut arg = raw_arg.clone();
+                //  Replace [Maven coordinates]
+                if arg.starts_with('[') && arg.ends_with(']') {
+                    let coord = &arg[1..arg.len() - 1];
+                    if let Some(rel_path) = coordinate_to_path(coord) {
+                        return libraries_dir.join(rel_path).to_string_lossy().to_string();
+                    }
+                }
+
+                // Replace {key}
+                for (k, v) in data_map {
+                    let placeholder = format!("{{{k}}}");
+                    if arg.contains(&placeholder) {
+                        arg = arg.replace(&placeholder, v);
+                    }
+                }
+
+                arg
+            })
+            .collect()
+    }
 }
 
 /// Modern profile after 1.8
@@ -172,6 +203,79 @@ pub struct ModernInstallProfile {
     pub data: HashMap<String, SidedDataEntry>,
     #[serde(default)]
     pub processors: Vec<ForgeProcessor>,
+}
+
+impl ModernInstallProfile {
+    pub fn build_data_map(
+        &self,
+        installer_path: &Path,
+        minecraft_jar: &Path,
+        libraries_dir: &Path,
+        temp_dir: &Path,
+    ) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+
+        // Fixed constant
+        map.insert("SIDE".to_string(), "client".to_string());
+        map.insert(
+            "MINECRAFT_JAR".to_string(),
+            minecraft_jar.to_string_lossy().to_string(),
+        );
+        map.insert(
+            "ROOT".to_string(),
+            libraries_dir
+                .parent()
+                .unwrap_or(libraries_dir)
+                .to_string_lossy()
+                .to_string(),
+        );
+        map.insert(
+            "INSTALLER".to_string(),
+            installer_path.to_string_lossy().to_string(),
+        );
+        map.insert(
+            "LIBRARY_DIR".to_string(),
+            libraries_dir.to_string_lossy().to_string(),
+        );
+
+        for (key, entry) in &self.data {
+            let raw_val = entry.client();
+            let resolved = if raw_val.starts_with('[') && raw_val.ends_with(']') {
+                let coord = &raw_val[1..raw_val.len() - 1];
+
+                if let Some(rel_path) = coordinate_to_path(coord) {
+                    let full_path = libraries_dir.join(rel_path);
+
+                    // Ensure the directory exists
+                    if let Some(parent) = full_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+
+                    full_path.to_string_lossy().to_string()
+                } else {
+                    raw_val.to_string()
+                }
+            } else if raw_val.starts_with('/') {
+                // Installer built-in data file (absolute path extracted to the temporary directory)
+                let temp_path = temp_dir.join(raw_val.trim_start_matches('/'));
+
+                if let Some(parent) = temp_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+
+                temp_path.to_string_lossy().to_string()
+            } else if raw_val.starts_with('\'') && raw_val.ends_with('\'') {
+                // String literal (remove single quotes)
+                raw_val[1..raw_val.len() - 1].to_string()
+            } else {
+                raw_val.to_string()
+            };
+
+            map.insert(key.clone(), resolved);
+        }
+
+        map
+    }
 }
 
 fn default_version_json() -> String {
