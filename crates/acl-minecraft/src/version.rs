@@ -300,7 +300,7 @@ impl VersionMetadata {
                 let rel_path = lib.artifact_relative_path(artifact);
 
                 if let Some(rel_path) = rel_path {
-                    // Forge's local libaray will not provide a URL, so skip it directly.
+                    // Forge's local library will not provide a URL, so skip it directly.
                     if artifact.url.is_empty() {
                         continue;
                     }

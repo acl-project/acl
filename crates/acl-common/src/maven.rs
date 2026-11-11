@@ -82,16 +82,15 @@ pub fn coordinate_to_path(coordinate: &str) -> Option<String> {
     } else {
         (coordinate, "jar")
     };
-    let parts: Vec<&str> = name.split(':').collect();
-    if parts.len() < 3 {
-        return None;
-    }
+    let mut parts = name.split(':');
 
-    let group_path = parts[0].replace('.', "/");
-    let artifact = parts[1];
-    let version = parts[2];
+    let group = parts.next()?;
+    let artifact = parts.next()?;
+    let version = parts.next()?;
+    let classifier = parts.next();
+    let group_path = group.replace('.', "/");
 
-    let file_name = if let Some(classifier) = parts.get(3) {
+    let file_name = if let Some(classifier) = classifier {
         format!("{artifact}-{version}-{classifier}.{ext}")
     } else {
         format!("{artifact}-{version}.{ext}")

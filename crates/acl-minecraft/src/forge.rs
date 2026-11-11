@@ -174,11 +174,12 @@ impl ForgeProcessor {
             .map(|raw_arg| {
                 let mut arg = raw_arg.clone();
                 //  Replace [Maven coordinates]
-                if arg.starts_with('[') && arg.ends_with(']') {
-                    let coord = &arg[1..arg.len() - 1];
-                    if let Some(rel_path) = coordinate_to_path(coord) {
-                        return libraries_dir.join(rel_path).to_string_lossy().to_string();
-                    }
+                if arg.starts_with('[')
+                    && arg.ends_with(']')
+                    && let Some(coord) = arg.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
+                    && let Some(rel_path) = coordinate_to_path(coord)
+                {
+                    return libraries_dir.join(rel_path).to_string_lossy().to_string();
                 }
 
                 // Replace {key}
@@ -246,14 +247,17 @@ impl ModernInstallProfile {
         for (key, entry) in &self.data {
             let raw_val = entry.client();
             let resolved = if raw_val.starts_with('[') && raw_val.ends_with(']') {
-                let coord = &raw_val[1..raw_val.len() - 1];
+                let Some(coord) = raw_val.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
+                else {
+                    continue;
+                };
 
                 if let Some(rel_path) = coordinate_to_path(coord) {
                     let full_path = libraries_dir.join(rel_path);
 
                     // Ensure the directory exists
                     if let Some(parent) = full_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
+                        let _ = fs::create_dir_all(parent);
                     }
 
                     full_path.to_string_lossy().to_string()
@@ -265,13 +269,20 @@ impl ModernInstallProfile {
                 let temp_path = temp_dir.join(raw_val.trim_start_matches('/'));
 
                 if let Some(parent) = temp_path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
+                    let _ = fs::create_dir_all(parent);
                 }
 
                 temp_path.to_string_lossy().to_string()
             } else if raw_val.starts_with('\'') && raw_val.ends_with('\'') {
                 // String literal (remove single quotes)
-                raw_val[1..raw_val.len() - 1].to_string()
+                if let Some(stripped) = raw_val
+                    .strip_prefix('\'')
+                    .and_then(|s| s.strip_suffix('\''))
+                {
+                    stripped.to_string()
+                } else {
+                    continue;
+                }
             } else {
                 raw_val.to_string()
             };
@@ -471,7 +482,7 @@ pub fn extract_installer(
         };
 
         if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| MinecraftError::Io {
+            fs::create_dir_all(parent).map_err(|source| MinecraftError::Io {
                 path: parent.to_path_buf(),
                 source,
             })?;
