@@ -533,3 +533,556 @@ fn read_main_class(jar_path: &Path) -> Result<String> {
         jar_path: jar_path.to_path_buf(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use zip::write::{SimpleFileOptions, ZipWriter};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "acl_test_forge_{}_{}_{}",
+                name,
+                std::process::id(),
+                id
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("failed to create temp test dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn create_test_zip(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = File::create(path).expect("failed to create zip file");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+
+        for (name, content) in entries {
+            if name.ends_with('/') {
+                zip.add_directory(*name, options)
+                    .expect("failed to add directory to zip");
+            } else {
+                zip.start_file(*name, options)
+                    .expect("failed to start zip file");
+                zip.write_all(content)
+                    .expect("failed to write zip file content");
+            }
+        }
+        zip.finish().expect("failed to finish zip file");
+    }
+
+    #[test]
+    fn test_forge_promos_deserialization_and_methods() {
+        let json = r#"{
+            "homepage": "https://files.minecraftforge.net/net/minecraftforge/forge/",
+            "promos": {
+                "1.20.1-latest": "47.3.0",
+                "1.20.1-recommended": "47.3.0",
+                "1.12.2-latest": "14.23.5.2860"
+            }
+        }"#;
+
+        let promos: ForgePromos =
+            serde_json::from_str(json).expect("failed to deserialize ForgePromos");
+        assert_eq!(promos.stable("1.20.1").as_deref(), Some("47.3.0"));
+        assert_eq!(promos.latest("1.20.1").as_deref(), Some("47.3.0"));
+        assert_eq!(promos.stable("1.12.2"), None);
+        assert_eq!(promos.latest("1.12.2").as_deref(), Some("14.23.5.2860"));
+        assert_eq!(promos.stable("1.19"), None);
+        assert_eq!(promos.latest("1.19"), None);
+    }
+
+    #[test]
+    fn test_forge_manifest_deserialization_and_download_url() {
+        let json = r#"{
+            "1.20.1": [
+                "1.20.1-47.0.0",
+                "1.20.1-47.3.0"
+            ],
+            "1.12.2": [
+                "1.12.2-14.23.5.2860"
+            ]
+        }"#;
+
+        let manifest: ForgeManifest =
+            serde_json::from_str(json).expect("failed to deserialize ForgeManifest");
+        let v_1201 = manifest
+            .mc_to_forge
+            .get("1.20.1")
+            .expect("1.20.1 must exist");
+        assert_eq!(v_1201, &vec!["1.20.1-47.0.0", "1.20.1-47.3.0"]);
+
+        let v_1122 = manifest
+            .mc_to_forge
+            .get("1.12.2")
+            .expect("1.12.2 must exist");
+        assert_eq!(v_1122, &vec!["1.12.2-14.23.5.2860"]);
+
+        assert_eq!(
+            ForgeManifest::download_url("1.20.1-47.3.0"),
+            "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.3.0/forge-1.20.1-47.3.0-installer.jar"
+        );
+    }
+
+    #[test]
+    fn test_forge_install_profile_legacy_and_modern_deserialization() {
+        let legacy_json = r#"{
+            "install": {
+                "profileName": "Forge",
+                "target": "1.7.10-Forge10.13.4.1614-1.7.10",
+                "path": "net.minecraftforge:forge:1.7.10-10.13.4.1614-1.7.10",
+                "version": "Forge 10.13.4.1614-1.7.10",
+                "filePath": "forge-1.7.10-10.13.4.1614-1.7.10-universal.jar"
+            },
+            "versionInfo": {
+                "id": "1.7.10-Forge10.13.4.1614-1.7.10",
+                "mainClass": "net.minecraft.launchwrapper.Launch",
+                "minecraftArguments": "--username ${auth_player_name}",
+                "libraries": []
+            }
+        }"#;
+
+        let legacy_profile: ForgeInstallProfile =
+            serde_json::from_str(legacy_json).expect("failed to deserialize legacy profile");
+        match legacy_profile {
+            ForgeInstallProfile::Legacy(legacy) => {
+                assert_eq!(
+                    legacy.install.file_path,
+                    "forge-1.7.10-10.13.4.1614-1.7.10-universal.jar"
+                );
+                assert_eq!(
+                    legacy.install.path,
+                    "net.minecraftforge:forge:1.7.10-10.13.4.1614-1.7.10"
+                );
+                assert_eq!(legacy.version_info.id, "1.7.10-Forge10.13.4.1614-1.7.10");
+            }
+            ForgeInstallProfile::Modern(_) => panic!("expected Legacy variant"),
+        }
+
+        let modern_json = r#"{
+            "spec": 1,
+            "profile": "forge",
+            "version": "1.20.1-forge-47.3.0",
+            "json": "/version.json",
+            "data": {
+                "MAPPINGS": {
+                    "client": "[de.oceanlabs.mcp:mcp_config:1.20.1-20230612.114412:mappings@txt]"
+                },
+                "BINPATCH": {
+                    "client": "/data/client.lzma"
+                },
+                "SHA": {
+                    "client": "'4b6c41d915c857a006634a12b6cdf9e08451a4fd'"
+                }
+            },
+            "processors": [
+                {
+                    "sides": ["client"],
+                    "jar": "net.minecraftforge:installertools:1.4.1",
+                    "classpath": ["net.sf.jopt-simple:jopt-simple:6.0-alpha-3"],
+                    "args": ["--task", "MCP_DATA", "--output", "{MAPPINGS}"]
+                },
+                {
+                    "sides": ["server"],
+                    "jar": "net.minecraftforge:installertools:1.4.1",
+                    "args": ["--server-only"]
+                },
+                {
+                    "jar": "net.minecraftforge:jarsplitter:1.1.4",
+                    "args": ["--both"]
+                }
+            ],
+            "libraries": []
+        }"#;
+
+        let modern_profile: ForgeInstallProfile =
+            serde_json::from_str(modern_json).expect("failed to deserialize modern profile");
+        match modern_profile {
+            ForgeInstallProfile::Modern(modern) => {
+                assert_eq!(modern.json, "/version.json");
+                assert_eq!(modern.data.len(), 3);
+                assert_eq!(modern.processors.len(), 3);
+                assert!(modern.processors[0].is_client());
+                assert!(!modern.processors[1].is_client());
+                assert!(modern.processors[2].is_client()); // omitted sides defaults to true
+            }
+            ForgeInstallProfile::Legacy(_) => panic!("expected Modern variant"),
+        }
+    }
+
+    #[test]
+    fn test_modern_profile_build_data_map_and_resolve_args() {
+        let temp = TempDirGuard::new("data_map");
+        let installer_path = temp.path().join("forge-installer.jar");
+        let minecraft_jar = temp.path().join("minecraft.jar");
+        let libraries_dir = temp.path().join("libraries");
+        let extract_temp = temp.path().join("temp");
+
+        let mut data = HashMap::new();
+        data.insert(
+            "MAPPINGS".to_string(),
+            SidedDataEntry::Sided {
+                client: "[de.oceanlabs.mcp:mcp_config:1.20.1:mappings@txt]".to_string(),
+                server: None,
+            },
+        );
+        data.insert(
+            "BINPATCH".to_string(),
+            SidedDataEntry::Sided {
+                client: "/data/client.lzma".to_string(),
+                server: None,
+            },
+        );
+        data.insert(
+            "SHA".to_string(),
+            SidedDataEntry::Sided {
+                client: "'4b6c41d915c857a006634a12b6cdf9e08451a4fd'".to_string(),
+                server: None,
+            },
+        );
+
+        let profile = ModernInstallProfile {
+            json: "/version.json".to_string(),
+            path: None,
+            libraries: Vec::new(),
+            data,
+            processors: Vec::new(),
+        };
+
+        let map = profile.build_data_map(
+            &installer_path,
+            &minecraft_jar,
+            &libraries_dir,
+            &extract_temp,
+        );
+
+        assert_eq!(map.get("SIDE").map(String::as_str), Some("client"));
+        assert_eq!(
+            map.get("MINECRAFT_JAR").map(String::as_str),
+            Some(minecraft_jar.to_str().unwrap())
+        );
+        assert_eq!(
+            map.get("INSTALLER").map(String::as_str),
+            Some(installer_path.to_str().unwrap())
+        );
+        assert_eq!(
+            map.get("LIBRARY_DIR").map(String::as_str),
+            Some(libraries_dir.to_str().unwrap())
+        );
+
+        // Check MAPPINGS coord converted to libraries path
+        let expected_mappings =
+            libraries_dir.join("de/oceanlabs/mcp/mcp_config/1.20.1/mcp_config-1.20.1-mappings.txt");
+        assert_eq!(
+            map.get("MAPPINGS").map(String::as_str),
+            Some(expected_mappings.to_str().unwrap())
+        );
+        // Verify parent directory was created
+        assert!(expected_mappings.parent().unwrap().exists());
+
+        // Check BINPATCH /data/... extracted to temp directory path
+        let expected_binpatch = extract_temp.join("data/client.lzma");
+        assert_eq!(
+            map.get("BINPATCH").map(String::as_str),
+            Some(expected_binpatch.to_str().unwrap())
+        );
+        assert!(expected_binpatch.parent().unwrap().exists());
+
+        // Check SHA stripped single quotes
+        assert_eq!(
+            map.get("SHA").map(String::as_str),
+            Some("4b6c41d915c857a006634a12b6cdf9e08451a4fd")
+        );
+
+        // Test resolve_args
+        let processor = ForgeProcessor {
+            jar: "net.minecraftforge:installertools:1.4.1".to_string(),
+            classpath: vec![],
+            args: vec![
+                "--task".to_string(),
+                "MCP_DATA".to_string(),
+                "--input".to_string(),
+                "[de.oceanlabs.mcp:mcp_config:1.20.1@zip]".to_string(),
+                "--output".to_string(),
+                "{MAPPINGS}".to_string(),
+                "--archive".to_string(),
+                "{INSTALLER}".to_string(),
+                "--exec".to_string(),
+                "{ROOT}/run.sh".to_string(),
+            ],
+            sides: None,
+            outputs: None,
+        };
+
+        let resolved = processor.resolve_args(&map, &libraries_dir);
+        let expected_input_zip =
+            libraries_dir.join("de/oceanlabs/mcp/mcp_config/1.20.1/mcp_config-1.20.1.zip");
+        let expected_root_script = format!("{}/run.sh", map.get("ROOT").unwrap());
+
+        assert_eq!(resolved[0], "--task");
+        assert_eq!(resolved[1], "MCP_DATA");
+        assert_eq!(resolved[2], "--input");
+        assert_eq!(resolved[3], expected_input_zip.to_str().unwrap());
+        assert_eq!(resolved[4], "--output");
+        assert_eq!(resolved[5], expected_mappings.to_str().unwrap());
+        assert_eq!(resolved[6], "--archive");
+        assert_eq!(resolved[7], installer_path.to_str().unwrap());
+        assert_eq!(resolved[8], "--exec");
+        assert_eq!(resolved[9], expected_root_script);
+    }
+
+    #[test]
+    fn test_resolve_entry_dest() {
+        let temp = TempDirGuard::new("entry_dest");
+        let libraries_dir = temp.path().join("libraries");
+        let temp_dir = temp.path().join("temp");
+
+        let legacy_profile = ForgeInstallProfile::Legacy(LegacyInstallProfile {
+            install: LegacyInstallInfo {
+                file_path: "forge-1.7.10-universal.jar".to_string(),
+                path: "net.minecraftforge:forge:1.7.10".to_string(),
+            },
+            version_info: VersionPatch {
+                id: "1.7.10".to_string(),
+                inherits_from: None,
+                main_class: None,
+                minecraft_arguments: None,
+                arguments: None,
+                libraries: Vec::new(),
+            },
+        });
+
+        // Rule 1: maven/ prefix
+        let dest_maven = resolve_entry_dest(
+            "maven/net/minecraftforge/forge/1.12.2/forge-1.12.2.jar",
+            &legacy_profile,
+            &libraries_dir,
+            &temp_dir,
+        );
+        assert_eq!(
+            dest_maven,
+            Some(libraries_dir.join("net/minecraftforge/forge/1.12.2/forge-1.12.2.jar"))
+        );
+
+        // Rule 2: data/ prefix
+        let dest_data = resolve_entry_dest(
+            "data/client.lzma",
+            &legacy_profile,
+            &libraries_dir,
+            &temp_dir,
+        );
+        assert_eq!(dest_data, Some(temp_dir.join("data/client.lzma")));
+
+        // Rule 3: Legacy matching universal jar
+        let dest_legacy = resolve_entry_dest(
+            "forge-1.7.10-universal.jar",
+            &legacy_profile,
+            &libraries_dir,
+            &temp_dir,
+        );
+        assert_eq!(
+            dest_legacy,
+            Some(libraries_dir.join("net/minecraftforge/forge/1.7.10/forge-1.7.10.jar"))
+        );
+
+        // Unrelated file
+        let dest_other =
+            resolve_entry_dest("big_logo.png", &legacy_profile, &libraries_dir, &temp_dir);
+        assert_eq!(dest_other, None);
+    }
+
+    #[test]
+    fn test_extract_installer_legacy() {
+        let temp = TempDirGuard::new("extract_legacy");
+        let installer_path = temp.path().join("installer-legacy.jar");
+        let libraries_dir = temp.path().join("libraries");
+        let temp_dir = temp.path().join("temp");
+
+        let install_profile_json = r#"{
+            "install": {
+                "profileName": "Forge",
+                "target": "1.7.10-Forge",
+                "path": "net.minecraftforge:forge:1.7.10-10.13.4.1614-1.7.10",
+                "version": "Forge 10.13.4.1614",
+                "filePath": "forge-1.7.10-universal.jar"
+            },
+            "versionInfo": {
+                "id": "1.7.10-Forge-10.13.4.1614",
+                "mainClass": "net.minecraft.launchwrapper.Launch",
+                "libraries": []
+            }
+        }"#;
+
+        let mock_universal_bytes = b"mock universal jar content";
+
+        create_test_zip(
+            &installer_path,
+            &[
+                ("install_profile.json", install_profile_json.as_bytes()),
+                ("forge-1.7.10-universal.jar", mock_universal_bytes),
+                ("big_logo.png", b"ignored logo"),
+            ],
+        );
+
+        let extracted = extract_installer(&installer_path, &libraries_dir, &temp_dir)
+            .expect("extract_installer legacy should succeed");
+
+        assert_eq!(extracted.patch.id, "1.7.10-Forge-10.13.4.1614");
+        assert_eq!(
+            extracted.patch.main_class.as_deref(),
+            Some("net.minecraft.launchwrapper.Launch")
+        );
+        assert!(extracted.modern.is_none());
+
+        // Verify universal jar extracted to expected Maven location
+        let expected_jar_path = libraries_dir.join(
+            "net/minecraftforge/forge/1.7.10-10.13.4.1614-1.7.10/forge-1.7.10-10.13.4.1614-1.7.10.jar",
+        );
+        assert!(expected_jar_path.exists());
+        assert_eq!(fs::read(&expected_jar_path).unwrap(), mock_universal_bytes);
+    }
+
+    #[test]
+    fn test_extract_installer_modern() {
+        let temp = TempDirGuard::new("extract_modern");
+        let installer_path = temp.path().join("installer-modern.jar");
+        let libraries_dir = temp.path().join("libraries");
+        let temp_dir = temp.path().join("temp");
+
+        let install_profile_json = r#"{
+            "spec": 1,
+            "profile": "forge",
+            "version": "1.20.1-forge-47.3.0",
+            "json": "/version.json",
+            "data": {},
+            "processors": [
+                {
+                    "jar": "net.minecraftforge:installertools:1.4.1",
+                    "classpath": [],
+                    "args": []
+                }
+            ],
+            "libraries": []
+        }"#;
+
+        let version_json = r#"{
+            "id": "1.20.1-forge-47.3.0",
+            "inheritsFrom": "1.20.1",
+            "mainClass": "cpw.mods.bootstraplauncher.BootstrapLauncher",
+            "libraries": []
+        }"#;
+
+        let mock_maven_lib = b"mock maven jar content";
+        let mock_data_lzma = b"mock lzma data content";
+
+        create_test_zip(
+            &installer_path,
+            &[
+                ("install_profile.json", install_profile_json.as_bytes()),
+                ("version.json", version_json.as_bytes()),
+                (
+                    "maven/net/minecraftforge/forge/1.20.1-47.3.0/forge-1.20.1-47.3.0.jar",
+                    mock_maven_lib,
+                ),
+                ("data/client.lzma", mock_data_lzma),
+            ],
+        );
+
+        let extracted = extract_installer(&installer_path, &libraries_dir, &temp_dir)
+            .expect("extract_installer modern should succeed");
+
+        assert_eq!(extracted.patch.id, "1.20.1-forge-47.3.0");
+        assert_eq!(
+            extracted.patch.main_class.as_deref(),
+            Some("cpw.mods.bootstraplauncher.BootstrapLauncher")
+        );
+        let modern = extracted.modern.expect("must be modern");
+        assert_eq!(modern.processors.len(), 1);
+
+        // Verify maven/ library extracted to libraries/ without maven/ prefix
+        let expected_maven_path =
+            libraries_dir.join("net/minecraftforge/forge/1.20.1-47.3.0/forge-1.20.1-47.3.0.jar");
+        assert!(expected_maven_path.exists());
+        assert_eq!(fs::read(&expected_maven_path).unwrap(), mock_maven_lib);
+
+        // Verify data/ extracted to temp_dir
+        let expected_data_path = temp_dir.join("data/client.lzma");
+        assert!(expected_data_path.exists());
+        assert_eq!(fs::read(&expected_data_path).unwrap(), mock_data_lzma);
+    }
+
+    #[test]
+    fn test_extract_installer_missing_version_json_error() {
+        let temp = TempDirGuard::new("extract_missing_vjson");
+        let installer_path = temp.path().join("broken-installer.jar");
+        let libraries_dir = temp.path().join("libraries");
+        let temp_dir = temp.path().join("temp");
+
+        let install_profile_json = r#"{
+            "spec": 1,
+            "profile": "forge",
+            "version": "1.20.1",
+            "json": "/version.json",
+            "processors": [],
+            "data": {},
+            "libraries": []
+        }"#;
+
+        // No version.json in archive
+        create_test_zip(
+            &installer_path,
+            &[("install_profile.json", install_profile_json.as_bytes())],
+        );
+
+        match extract_installer(&installer_path, &libraries_dir, &temp_dir) {
+            Err(MinecraftError::ForgeMissingVersionJson) => {}
+            Ok(_) => panic!("should fail when version.json is missing in modern profile"),
+            Err(err) => panic!("expected ForgeMissingVersionJson, got: {err}"),
+        }
+    }
+
+    #[test]
+    fn test_read_main_class_success_and_missing() {
+        let temp = TempDirGuard::new("main_class");
+        let valid_jar = temp.path().join("valid.jar");
+        let missing_jar = temp.path().join("missing.jar");
+
+        let manifest_content =
+            "Manifest-Version: 1.0\r\nMain-Class: net.minecraftforge.installer.SimpleTool\r\n\r\n";
+        create_test_zip(
+            &valid_jar,
+            &[("META-INF/MANIFEST.MF", manifest_content.as_bytes())],
+        );
+
+        let parsed = read_main_class(&valid_jar).expect("should find Main-Class");
+        assert_eq!(parsed, "net.minecraftforge.installer.SimpleTool");
+
+        let no_main_manifest = "Manifest-Version: 1.0\r\nCreated-By: 1.8.0\r\n\r\n";
+        create_test_zip(
+            &missing_jar,
+            &[("META-INF/MANIFEST.MF", no_main_manifest.as_bytes())],
+        );
+
+        let err = read_main_class(&missing_jar).expect_err("should fail without Main-Class");
+        assert!(matches!(err, MinecraftError::MissingMainClass { .. }));
+    }
+}

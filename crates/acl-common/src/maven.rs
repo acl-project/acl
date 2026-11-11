@@ -174,6 +174,16 @@ mod tests {
             Some("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar".to_string())
         );
 
+        assert_eq!(
+            coordinate_to_path("de.oceanlabs.mcp:mcp_config:1.20.1@zip"),
+            Some("de/oceanlabs/mcp/mcp_config/1.20.1/mcp_config-1.20.1.zip".to_string())
+        );
+
+        assert_eq!(
+            coordinate_to_path("de.oceanlabs.mcp:mcp_config:1.20.1:mappings@txt"),
+            Some("de/oceanlabs/mcp/mcp_config/1.20.1/mcp_config-1.20.1-mappings.txt".to_string())
+        );
+
         assert_eq!(coordinate_to_path("invalid-name"), None);
     }
 }
