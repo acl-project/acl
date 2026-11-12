@@ -6,7 +6,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use acl_common::maven;
-use acl_minecraft::FabricLoaderEntry;
+use acl_minecraft::MetaLoaderEntry;
+use acl_minecraft::fabric::MetaLoader;
 use acl_minecraft::forge::{ForgeManifest, ForgePromos, NeoForgeManifest};
 use gtk::{glib::BoxedAnyObject, prelude::*};
 
@@ -151,29 +152,40 @@ impl LoaderSelectPage {
         let join_handle = relm4::spawn(async move {
             let result: Result<Vec<LoaderVersionItem>, String> = async {
                 match loader {
-                    ModLoader::Fabric => FabricLoaderEntry::fetch_list_with_cache(
-                        &client,
-                        &game_version,
-                        &cache_dir,
-                        download_source,
-                        force_refresh,
-                    )
-                    .await
-                    .map(|entries| {
-                        entries
-                            .into_iter()
-                            .map(|entry| LoaderVersionItem {
-                                loader: ModLoader::Fabric,
-                                version: entry.loader.version,
-                                stability: if entry.loader.stable {
-                                    LoaderStability::Stable
-                                } else {
-                                    LoaderStability::Beta
-                                },
-                            })
-                            .collect()
-                    })
-                    .map_err(|err| err.to_i18n()),
+                    ModLoader::Fabric | ModLoader::Quilt => {
+                        let meta_loader = match loader {
+                            ModLoader::Quilt => MetaLoader::Quilt,
+                            _ => MetaLoader::Fabric,
+                        };
+
+                        MetaLoaderEntry::fetch_list_with_cache(
+                            meta_loader,
+                            &client,
+                            &game_version,
+                            &cache_dir,
+                            download_source,
+                            force_refresh,
+                        )
+                        .await
+                        .map(|entries| {
+                            entries
+                                .into_iter()
+                                .map(|entry| {
+                                    let is_stable = entry.loader.is_stable();
+                                    LoaderVersionItem {
+                                        loader,
+                                        version: entry.loader.version,
+                                        stability: if is_stable {
+                                            LoaderStability::Stable
+                                        } else {
+                                            LoaderStability::Beta
+                                        },
+                                    }
+                                })
+                                .collect()
+                        })
+                        .map_err(|err| err.to_i18n())
+                    }
                     ModLoader::Forge => {
                         let list = ForgeManifest::fetch_with_cache(
                             &client,

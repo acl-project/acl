@@ -17,7 +17,8 @@ pub use asset::{AssetIndex, AssetObject, RESOURCES_BASE_URL};
 pub use cache::{Cached, DEFAULT_MANIFEST_TTL, cache_key_for_url};
 pub use error::{MinecraftError, Result};
 pub use fabric::{
-    FABRIC_META_BASE_URL, FabricIntermediaryInfo, FabricLoaderEntry, FabricLoaderInfo,
+    FABRIC_META_BASE_URL, MetaIntermediaryInfo, MetaLoader, MetaLoaderEntry, MetaLoaderInfo,
+    QUILT_META_BASE_URL,
 };
 pub use manifest::{
     LatestVersions, VERSION_MANIFEST_URL, VersionEntry, VersionManifest, VersionType,

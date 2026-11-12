@@ -18,6 +18,8 @@ use crate::Result;
 use crate::VersionPatch;
 use crate::cache::fetch_cached_json;
 
+// In programming, as in rowing upstream, not to advance is to drift back.
+// Forge is gone
 const FORGE_PROMOS_URL: &str =
     "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json";
 const FORGE_METADATA_URL: &str =

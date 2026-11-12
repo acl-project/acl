@@ -8,35 +8,71 @@ use crate::{
     cache::{fetch_cached_json, fetch_verified_json},
 };
 use serde::{Deserialize, Serialize};
+
 pub const FABRIC_META_BASE_URL: &str = "https://meta.fabricmc.net";
 
-/// Information about a single Fabric Loader version.
+// Live by the QSL, die by the QSL.
+pub const QUILT_META_BASE_URL: &str = "https://meta.quiltmc.org";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetaLoader {
+    Fabric,
+    Quilt,
+}
+
+impl MetaLoader {
+    pub const fn base_url(self) -> &'static str {
+        match self {
+            Self::Fabric => FABRIC_META_BASE_URL,
+            Self::Quilt => QUILT_META_BASE_URL,
+        }
+    }
+
+    pub const fn artifact_prefix(self) -> &'static str {
+        match self {
+            Self::Fabric => "fabric-loader",
+            Self::Quilt => "quilt-loader",
+        }
+    }
+}
+
+/// Information about a single Fabric or Quilt Loader version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FabricLoaderInfo {
+pub struct MetaLoaderInfo {
     pub separator: String,
     pub build: u32,
     pub maven: String,
     pub version: String,
-    pub stable: bool,
+    #[serde(default)]
+    pub stable: Option<bool>,
+}
+
+impl MetaLoaderInfo {
+    /// Fabric explicitly returns the stable field;
+    /// Quilt does not return this field and can be judged by whether the version number contains -(such as -beta.1).
+    pub fn is_stable(&self) -> bool {
+        self.stable.unwrap_or_else(|| !self.version.contains('-'))
+    }
 }
 
 /// Information about the intermediary mappings for a Minecraft version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FabricIntermediaryInfo {
+pub struct MetaIntermediaryInfo {
     pub maven: String,
     pub version: String,
+    #[serde(default)]
     pub stable: bool,
 }
 
 /// A single entry returned by `/v2/versions/loader/{game_version}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FabricLoaderEntry {
-    pub loader: FabricLoaderInfo,
-    pub intermediary: FabricIntermediaryInfo,
+pub struct MetaLoaderEntry {
+    pub loader: MetaLoaderInfo,
+    pub intermediary: MetaIntermediaryInfo,
 }
 
-impl FabricLoaderEntry {
-    /// Construct the upstream URL for listing Fabric loaders of a specific Minecraft version.
+impl MetaLoaderEntry {
+    /// Construct the upstream URL for listing Fabric or Quilt loaders of a specific Minecraft version.
     pub fn list_url(base_url: &str, game_version: &str) -> String {
         format!(
             "{}/v2/versions/loader/{game_version}",
@@ -52,15 +88,16 @@ impl FabricLoaderEntry {
         )
     }
 
-    /// Fetch available Fabric loader entries for `game_version` with caching using default TTL.
+    /// Fetch available Fabric or Quilt loader entries for `game_version` with caching using default TTL.
     pub async fn fetch_list_with_cache(
+        meta_loader: MetaLoader,
         client: &reqwest::Client,
         game_version: &str,
         cache_dir: &Path,
         download_source: DownloadSource,
         force_refresh: bool,
     ) -> Result<Vec<Self>> {
-        let upstream_url = Self::list_url(FABRIC_META_BASE_URL, game_version);
+        let upstream_url = Self::list_url(meta_loader.base_url(), game_version);
         fetch_cached_json(
             client,
             &upstream_url,
@@ -72,21 +109,25 @@ impl FabricLoaderEntry {
         .await
     }
 
-    /// Fetch the Fabric profile (`VersionPatch`) for the given Minecraft and loader version.
+    /// Fetch the Fabric or Quilt profile (`VersionPatch`) for the given Minecraft and loader version.
     /// If `loader_json_path` is already present locally, loads it directly; otherwise fetches from network and saves it.
     pub async fn fetch_profile(
+        meta_loader: MetaLoader,
         client: &reqwest::Client,
         game_version: &str,
         loader_version: &str,
         loader_json_path: &Path,
         download_source: DownloadSource,
     ) -> Result<VersionPatch> {
-        let upstream_url = Self::profile_url(FABRIC_META_BASE_URL, game_version, loader_version);
+        let upstream_url = Self::profile_url(meta_loader.base_url(), game_version, loader_version);
         fetch_verified_json(
             client,
             &download_source.rewrite_url(&upstream_url),
-            "", // Fabric profile has no sha1; pass an empty string to skip validation directly.
-            &format!("fabric-loader-{loader_version}-{game_version}"),
+            "", // Fabric or Quilt profile has no sha1; pass an empty string to skip validation directly.
+            &format!(
+                "{}-{loader_version}-{game_version}",
+                meta_loader.artifact_prefix()
+            ),
             loader_json_path,
         )
         .await
@@ -133,20 +174,20 @@ mod tests {
     #[test]
     fn test_fabric_urls() {
         assert_eq!(
-            FabricLoaderEntry::list_url(FABRIC_META_BASE_URL, "1.20.1"),
+            MetaLoaderEntry::list_url(FABRIC_META_BASE_URL, "1.20.1"),
             "https://meta.fabricmc.net/v2/versions/loader/1.20.1"
         );
         assert_eq!(
-            FabricLoaderEntry::list_url("https://meta.fabricmc.net/", "1.20.1"),
+            MetaLoaderEntry::list_url("https://meta.fabricmc.net/", "1.20.1"),
             "https://meta.fabricmc.net/v2/versions/loader/1.20.1"
         );
 
         assert_eq!(
-            FabricLoaderEntry::profile_url(FABRIC_META_BASE_URL, "1.20.1", "0.16.10"),
+            MetaLoaderEntry::profile_url(FABRIC_META_BASE_URL, "1.20.1", "0.16.10"),
             "https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.16.10/profile/json"
         );
         assert_eq!(
-            FabricLoaderEntry::profile_url("https://meta.fabricmc.net/", "1.20.1", "0.16.10"),
+            MetaLoaderEntry::profile_url("https://meta.fabricmc.net/", "1.20.1", "0.16.10"),
             "https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.16.10/profile/json"
         );
     }
@@ -170,7 +211,7 @@ mod tests {
             }
         ]"#;
 
-        let entries: Vec<FabricLoaderEntry> =
+        let entries: Vec<MetaLoaderEntry> =
             serde_json::from_str(sample_json).expect("failed to deserialize FabricLoaderEntry");
         assert_eq!(entries.len(), 1);
 
@@ -179,7 +220,7 @@ mod tests {
         assert_eq!(entry.loader.build, 1610);
         assert_eq!(entry.loader.separator, ".");
         assert_eq!(entry.loader.maven, "net.fabricmc:fabric-loader:0.16.10");
-        assert!(entry.loader.stable);
+        assert_eq!(entry.loader.stable, Some(true));
 
         assert_eq!(entry.intermediary.version, "1.20.1");
         assert_eq!(entry.intermediary.maven, "net.fabricmc:intermediary:1.20.1");
@@ -210,7 +251,8 @@ mod tests {
         fs::write(&loader_json_path, patch_json).expect("failed to write mock profile");
 
         let client = reqwest::Client::new();
-        let patch = FabricLoaderEntry::fetch_profile(
+        let patch = MetaLoaderEntry::fetch_profile(
+            MetaLoader::Fabric,
             &client,
             "1.20.1",
             "0.16.10",
@@ -236,19 +278,19 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_list_with_cache_from_local_cache() {
         let temp = TempDirGuard::new("fabric_list_cached");
-        let upstream_url = FabricLoaderEntry::list_url(FABRIC_META_BASE_URL, "1.20.1");
+        let upstream_url = MetaLoaderEntry::list_url(FABRIC_META_BASE_URL, "1.20.1");
         let cache_key = crate::cache::cache_key_for_url(&upstream_url);
         let cache_file = temp.path().join(cache_key);
 
-        let sample_entry = FabricLoaderEntry {
-            loader: FabricLoaderInfo {
+        let sample_entry = MetaLoaderEntry {
+            loader: MetaLoaderInfo {
                 separator: ".".to_string(),
                 build: 1610,
                 maven: "net.fabricmc:fabric-loader:0.16.10".to_string(),
                 version: "0.16.10".to_string(),
-                stable: true,
+                stable: Some(true),
             },
-            intermediary: FabricIntermediaryInfo {
+            intermediary: MetaIntermediaryInfo {
                 maven: "net.fabricmc:intermediary:1.20.1".to_string(),
                 version: "1.20.1".to_string(),
                 stable: true,
@@ -265,7 +307,8 @@ mod tests {
             .expect("failed to save cache");
 
         let client = reqwest::Client::new();
-        let loaded = FabricLoaderEntry::fetch_list_with_cache(
+        let loaded = MetaLoaderEntry::fetch_list_with_cache(
+            MetaLoader::Fabric,
             &client,
             "1.20.1",
             temp.path(),

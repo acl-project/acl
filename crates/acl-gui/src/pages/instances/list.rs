@@ -8,8 +8,9 @@ use acl_core::{
 };
 
 use acl_minecraft::{
-    AssetIndex, DownloadSource, FabricLoaderEntry, VersionEntry, VersionMetadata,
+    AssetIndex, DownloadSource, MetaLoaderEntry, VersionEntry, VersionMetadata,
     download::DownloadProgress,
+    fabric::MetaLoader,
     forge::{self, ForgeManifest, ModernInstallProfile, NeoForgeManifest},
 };
 use libadwaita::prelude::*;
@@ -348,6 +349,7 @@ impl ListPage {
         }
     }
 
+    /// Install Fabric or Quilt
     async fn install_fabric(
         client: &reqwest::Client,
         instance: &Instance,
@@ -356,8 +358,15 @@ impl ListPage {
         entry: &VersionEntry,
         id: &str,
     ) -> Result<(), String> {
+        let mod_loader = instance.config.mod_loader;
+        let meta_loader = match mod_loader {
+            ModLoader::Quilt => MetaLoader::Quilt,
+            _ => MetaLoader::Fabric,
+        };
+
         if let Some(loader_ver) = &instance.config.mod_loader_version {
-            let patch = FabricLoaderEntry::fetch_profile(
+            let patch = MetaLoaderEntry::fetch_profile(
+                meta_loader,
                 client,
                 &entry.id,
                 loader_ver,
@@ -370,8 +379,9 @@ impl ListPage {
             metadata.apply_patch(patch);
         } else {
             warn!(
-                "Mod loader Fabric is configured without loader version for instance {}",
-                id
+                "Mod loader {} is configured without loader version for instance {}",
+                mod_loader.label(),
+                id,
             );
         }
 
@@ -486,7 +496,7 @@ impl ListPage {
                         // Handle mod loader
                         match instance.config.mod_loader {
                             ModLoader::Vanilla => {}
-                            ModLoader::Fabric => {
+                            ModLoader::Fabric | ModLoader::Quilt => {
                                 Self::install_fabric(
                                     &client,
                                     &instance,
@@ -508,13 +518,6 @@ impl ListPage {
                                     &mut installer_context,
                                 )
                                 .await?
-                            }
-
-                            _ => {
-                                warn!(
-                                    "Mod loader {} is not supported yet",
-                                    instance.config.mod_loader.label()
-                                );
                             }
                         }
 
