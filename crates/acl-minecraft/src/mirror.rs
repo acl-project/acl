@@ -63,6 +63,8 @@ const BMCLAPI_RULES: &[(&str, &str)] = &[
         "https://maven.fabricmc.net",
         "https://bmclapi2.bangbang93.com/maven",
     ),
+    // Quilt's bmclapi is not available
+    /*
     (
         "https://maven.quiltmc.org/repository/release",
         "https://bmclapi2.bangbang93.com/maven",
@@ -71,6 +73,7 @@ const BMCLAPI_RULES: &[(&str, &str)] = &[
         "https://meta.quiltmc.org",
         "https://bmclapi2.bangbang93.com/quilt-meta",
     ),
+    */
     // Authlib-injector
     (
         "https://authlib-injector.yushi.moe",
@@ -188,14 +191,6 @@ mod tests {
                 "https://bmclapi2.bangbang93.com/maven/net/fabricmc/fabric-loader/0.15.0/loader.jar",
             ),
             (
-                "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/test.jar",
-                "https://bmclapi2.bangbang93.com/maven/org/quiltmc/quilt-loader/test.jar",
-            ),
-            (
-                "https://meta.quiltmc.org/v3/versions",
-                "https://bmclapi2.bangbang93.com/quilt-meta/v3/versions",
-            ),
-            (
                 "https://authlib-injector.yushi.moe/artifact/latest.json",
                 "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/latest.json",
             ),
@@ -214,6 +209,18 @@ mod tests {
     fn test_rewrite_url_unmatched() {
         let external = "https://custom.repo.org/maven/test.jar";
         assert_eq!(DownloadSource::Bmclapi.rewrite_url(external), external);
+
+        // Quilt is not currently proxied by BMCLAPI due to upstream API issues,
+        // so Quilt URLs should remain untouched and connect directly to official endpoints.
+        let quilt_meta = "https://meta.quiltmc.org/v3/versions/loader/1.21.1";
+        assert_eq!(DownloadSource::Bmclapi.rewrite_url(quilt_meta), quilt_meta);
+
+        let quilt_maven =
+            "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/test.jar";
+        assert_eq!(
+            DownloadSource::Bmclapi.rewrite_url(quilt_maven),
+            quilt_maven
+        );
     }
 
     #[test]

@@ -191,6 +191,21 @@ impl SimpleComponent for ConfigurePage {
 
                         adw::ActionRow {
                             // No translation needed
+                            set_title: "NeoForge",
+
+                            #[watch]
+                            set_subtitle: &model.loader_subtitle(ModLoader::NeoForge),
+                            #[watch]
+                            set_activatable: model.is_loader_compatible(ModLoader::NeoForge),
+
+                            connect_activated[sender] => move |_| {
+                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::NeoForge));
+                            },
+                            add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
+                        },
+
+                        adw::ActionRow {
+                            // No translation needed
                             set_title: "Forge",
 
                             #[watch]
@@ -206,17 +221,18 @@ impl SimpleComponent for ConfigurePage {
 
                         adw::ActionRow {
                             // No translation needed
-                            set_title: "NeoForge",
+                            set_title: "Quilt",
 
                             #[watch]
-                            set_subtitle: &model.loader_subtitle(ModLoader::NeoForge),
+                            set_subtitle: &model.loader_subtitle(ModLoader::Quilt),
                             #[watch]
-                            set_activatable: model.is_loader_compatible(ModLoader::NeoForge),
+                            set_activatable: model.is_loader_compatible(ModLoader::Quilt),
 
                             connect_activated[sender] => move |_| {
-                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::NeoForge));
+                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Quilt));
                             },
                             add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
+
                         },
 
                     }
@@ -312,6 +328,9 @@ mod tests {
         page.selected_loader = ModLoader::Fabric;
         assert_eq!(page.effective_name(), "1.21.1-Fabric");
 
+        page.selected_loader = ModLoader::Quilt;
+        assert_eq!(page.effective_name(), "1.21.1-Quilt");
+
         // 2. can_create tests
         page.game_version = "".to_string();
         page.instance_name = "valid-name".to_string();
@@ -329,8 +348,10 @@ mod tests {
         // 3. loader compatibility and subtitle tests
         page.selected_loader = ModLoader::Vanilla;
         assert!(page.is_loader_compatible(ModLoader::Fabric));
+        assert!(page.is_loader_compatible(ModLoader::Quilt));
         assert!(page.is_loader_compatible(ModLoader::Vanilla));
         assert_eq!(page.loader_subtitle(ModLoader::Fabric), "None");
+        assert_eq!(page.loader_subtitle(ModLoader::Quilt), "None");
 
         page.selected_loader = ModLoader::Fabric;
         page.selected_loader_version = Some("0.16.10".to_string());
@@ -348,10 +369,22 @@ mod tests {
         );
         assert!(page.loader_subtitle(ModLoader::NeoForge).contains("Fabric"));
 
+        assert!(!page.is_loader_compatible(ModLoader::Quilt));
+        assert!(page.loader_subtitle(ModLoader::Quilt).contains("Quilt"));
+        assert!(page.loader_subtitle(ModLoader::Quilt).contains("Fabric"));
+
         page.selected_loader = ModLoader::NeoForge;
         page.selected_loader_version = Some("21.1.72".to_string());
         assert!(page.is_loader_compatible(ModLoader::NeoForge));
         assert_eq!(page.loader_subtitle(ModLoader::NeoForge), "21.1.72");
         assert!(!page.is_loader_compatible(ModLoader::Forge));
+
+        page.selected_loader = ModLoader::Quilt;
+        page.selected_loader_version = Some("0.26.4".to_string());
+        assert!(page.is_loader_compatible(ModLoader::Quilt));
+        assert_eq!(page.loader_subtitle(ModLoader::Quilt), "0.26.4");
+        assert!(!page.is_loader_compatible(ModLoader::Fabric));
+        assert!(page.loader_subtitle(ModLoader::Fabric).contains("Fabric"));
+        assert!(page.loader_subtitle(ModLoader::Fabric).contains("Quilt"));
     }
 }
