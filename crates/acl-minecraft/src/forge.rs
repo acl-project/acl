@@ -579,6 +579,8 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
     use zip::write::{SimpleFileOptions, ZipWriter};
 
     struct TempDirGuard {
@@ -1124,5 +1126,86 @@ mod tests {
 
         let err = read_main_class(&missing_jar).expect_err("should fail without Main-Class");
         assert!(matches!(err, MinecraftError::MissingMainClass { .. }));
+    }
+
+    async fn spawn_mock_server(
+        status_code: u16,
+        status_text: &str,
+        payload: Vec<u8>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind mock server");
+        let local_addr = listener.local_addr().expect("failed to get local addr");
+
+        let status_text = status_text.to_string();
+        let handle = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let payload = payload.clone();
+                let status_text = status_text.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf).await;
+                    let header = format!(
+                        "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        status_code,
+                        status_text,
+                        payload.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes()).await;
+                    let _ = stream.write_all(&payload).await;
+                    let _ = stream.flush().await;
+                });
+            }
+        });
+
+        (format!("http://{local_addr}"), handle)
+    }
+
+    fn test_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("failed to create test client")
+    }
+
+    #[tokio::test]
+    async fn test_download_forge_installer_success() {
+        let temp = TempDirGuard::new("installer_success");
+        let payload = b"fake forge installer jar content".to_vec();
+        let (server_url, handle) = spawn_mock_server(200, "OK", payload.clone()).await;
+
+        let client = test_client();
+        // Ensure parent directories are created automatically
+        let dest = temp.path().join("nested").join("sub").join("installer.jar");
+        let download_url = format!("{server_url}/forge-installer.jar");
+
+        let result = download_forge_installer(&client, &download_url, &dest).await;
+        assert!(
+            result.is_ok(),
+            "download should succeed: {:?}",
+            result.err()
+        );
+
+        let written = std::fs::read(&dest).expect("target file should exist");
+        assert_eq!(written, payload);
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_download_forge_installer_http_error() {
+        let temp = TempDirGuard::new("installer_error");
+        let (server_url, handle) = spawn_mock_server(404, "Not Found", vec![]).await;
+
+        let client = test_client();
+        let dest = temp.path().join("installer.jar");
+        let download_url = format!("{server_url}/missing-installer.jar");
+
+        let result = download_forge_installer(&client, &download_url, &dest).await;
+        assert!(result.is_err(), "should fail on 404 status code");
+        assert!(!dest.exists(), "file should not be created on HTTP error");
+
+        handle.abort();
     }
 }
