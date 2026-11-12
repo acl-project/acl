@@ -9,10 +9,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-pub const FABRIC_META_BASE_URL: &str = "https://meta.fabricmc.net";
+pub const FABRIC_META_BASE_URL: &str = "https://meta.fabricmc.net/v2";
 
 // Live by the QSL, die by the QSL.
-pub const QUILT_META_BASE_URL: &str = "https://meta.quiltmc.org";
+pub const QUILT_META_BASE_URL: &str = "https://meta.quiltmc.org/v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetaLoader {
@@ -75,7 +75,7 @@ impl MetaLoaderEntry {
     /// Construct the upstream URL for listing Fabric or Quilt loaders of a specific Minecraft version.
     pub fn list_url(base_url: &str, game_version: &str) -> String {
         format!(
-            "{}/v2/versions/loader/{game_version}",
+            "{}/versions/loader/{game_version}",
             base_url.trim_end_matches('/')
         )
     }
@@ -83,7 +83,7 @@ impl MetaLoaderEntry {
     /// Construct the upstream URL for fetching the launch profile (`VersionPatch`) JSON.
     pub fn profile_url(base_url: &str, game_version: &str, loader_version: &str) -> String {
         format!(
-            "{}/v2/versions/loader/{game_version}/{loader_version}/profile/json",
+            "{}/versions/loader/{game_version}/{loader_version}/profile/json",
             base_url.trim_end_matches('/')
         )
     }
@@ -183,7 +183,7 @@ mod tests {
             "https://meta.fabricmc.net/v2/versions/loader/1.20.1"
         );
         assert_eq!(
-            MetaLoaderEntry::list_url("https://meta.fabricmc.net/", "1.20.1"),
+            MetaLoaderEntry::list_url("https://meta.fabricmc.net/v2/", "1.20.1"),
             "https://meta.fabricmc.net/v2/versions/loader/1.20.1"
         );
 
@@ -192,25 +192,25 @@ mod tests {
             "https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.16.10/profile/json"
         );
         assert_eq!(
-            MetaLoaderEntry::profile_url("https://meta.fabricmc.net/", "1.20.1", "0.16.10"),
+            MetaLoaderEntry::profile_url("https://meta.fabricmc.net/v2/", "1.20.1", "0.16.10"),
             "https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.16.10/profile/json"
         );
 
         assert_eq!(
             MetaLoaderEntry::list_url(QUILT_META_BASE_URL, "1.21.1"),
-            "https://meta.quiltmc.org/v2/versions/loader/1.21.1"
+            "https://meta.quiltmc.org/v3/versions/loader/1.21.1"
         );
         assert_eq!(
-            MetaLoaderEntry::list_url("https://meta.quiltmc.org/", "1.21.1"),
-            "https://meta.quiltmc.org/v2/versions/loader/1.21.1"
+            MetaLoaderEntry::list_url("https://meta.quiltmc.org/v3/", "1.21.1"),
+            "https://meta.quiltmc.org/v3/versions/loader/1.21.1"
         );
         assert_eq!(
             MetaLoaderEntry::profile_url(QUILT_META_BASE_URL, "1.21.1", "0.26.4"),
-            "https://meta.quiltmc.org/v2/versions/loader/1.21.1/0.26.4/profile/json"
+            "https://meta.quiltmc.org/v3/versions/loader/1.21.1/0.26.4/profile/json"
         );
         assert_eq!(
-            MetaLoaderEntry::profile_url("https://meta.quiltmc.org/", "1.21.1", "0.26.4"),
-            "https://meta.quiltmc.org/v2/versions/loader/1.21.1/0.26.4/profile/json"
+            MetaLoaderEntry::profile_url("https://meta.quiltmc.org/v3/", "1.21.1", "0.26.4"),
+            "https://meta.quiltmc.org/v3/versions/loader/1.21.1/0.26.4/profile/json"
         );
     }
 
