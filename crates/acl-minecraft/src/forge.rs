@@ -23,6 +23,9 @@ const FORGE_PROMOS_URL: &str =
 const FORGE_METADATA_URL: &str =
     "https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json";
 
+const NEOFORGE_METADATA_URL: &str =
+    "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForgePromos {
     pub homepage: String,
@@ -135,7 +138,7 @@ impl SidedDataEntry {
 
 /// Corresponds to a single build task (Processor) for 1.13+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForgeProcessor {
+pub struct InstallerProcessor {
     /// The executor's own main Jar (Maven coordinates)
     pub jar: String,
 
@@ -156,7 +159,7 @@ pub struct ForgeProcessor {
     pub outputs: Option<HashMap<String, String>>,
 }
 
-impl ForgeProcessor {
+impl InstallerProcessor {
     pub fn is_client(&self) -> bool {
         match &self.sides {
             Some(sides) => sides.iter().any(|s| s == "client"),
@@ -208,7 +211,7 @@ pub struct ModernInstallProfile {
     #[serde(default)]
     pub data: HashMap<String, SidedDataEntry>,
     #[serde(default)]
-    pub processors: Vec<ForgeProcessor>,
+    pub processors: Vec<InstallerProcessor>,
 }
 
 impl ModernInstallProfile {
@@ -360,7 +363,7 @@ fn default_version_json() -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum ForgeInstallProfile {
+pub enum InstallProfile {
     /// 1.7.10 and ancient versions: with install and inline versionInfo
     Legacy(LegacyInstallProfile),
     /// 1.8 ~ 1.12.2 and 1.13+ modern versions: with version.json pointer, optional data and processors
@@ -370,7 +373,7 @@ pub enum ForgeInstallProfile {
 /// Obtain the corresponding decompression path according to different directories and loader versions.
 fn resolve_entry_dest(
     entry_name: &str,
-    profile: &ForgeInstallProfile,
+    profile: &InstallProfile,
     libraries_dir: &Path,
     temp_dir: &Path,
 ) -> Option<PathBuf> {
@@ -382,7 +385,7 @@ fn resolve_entry_dest(
         return Some(temp_dir.join(entry_name));
     }
 
-    if let ForgeInstallProfile::Legacy(legacy) = profile
+    if let InstallProfile::Legacy(legacy) = profile
         && entry_name == legacy.install.file_path
     {
         return coordinate_to_path(&legacy.install.path).map(|p| libraries_dir.join(p));
@@ -392,7 +395,7 @@ fn resolve_entry_dest(
 }
 
 /// The product after unpacking installer
-pub struct ForgeInstaller {
+pub struct ExtractedInstaller {
     /// Unifiedly generated VersionPatch
     pub patch: VersionPatch,
     /// If it is a modern version (1.8+ /1.13+), return the configuration containing processors; if it is 1.7.10, it is None
@@ -403,7 +406,7 @@ pub fn extract_installer(
     installer_path: &Path,
     libraries_dir: &Path,
     temp_dir: &Path,
-) -> Result<ForgeInstaller> {
+) -> Result<ExtractedInstaller> {
     let file = File::open(installer_path).map_err(|source| MinecraftError::Io {
         path: installer_path.to_path_buf(),
         source,
@@ -430,14 +433,14 @@ pub fn extract_installer(
             source,
         })?;
 
-    let profile: ForgeInstallProfile = serde_json::from_slice(&profile_content)?;
+    let profile: InstallProfile = serde_json::from_slice(&profile_content)?;
 
     drop(profile_entry);
 
     // Parse version.json to get the patch or get it directly from version info, for old versions
     let patch: VersionPatch = match &profile {
-        ForgeInstallProfile::Legacy(profile) => profile.version_info.clone(),
-        ForgeInstallProfile::Modern(_) => {
+        InstallProfile::Legacy(profile) => profile.version_info.clone(),
+        InstallProfile::Modern(_) => {
             if let Ok(mut entry) = zip.by_name("version.json") {
                 let mut content = Vec::with_capacity(entry.size() as usize);
                 entry
@@ -500,11 +503,11 @@ pub fn extract_installer(
     }
 
     let modern = match profile {
-        ForgeInstallProfile::Modern(m) => Some(m),
-        ForgeInstallProfile::Legacy(_) => None,
+        InstallProfile::Modern(m) => Some(m),
+        InstallProfile::Legacy(_) => None,
     };
 
-    Ok(ForgeInstaller { patch, modern })
+    Ok(ExtractedInstaller { patch, modern })
 }
 
 fn read_main_class(jar_path: &Path) -> Result<String> {
@@ -545,8 +548,8 @@ fn read_main_class(jar_path: &Path) -> Result<String> {
     })
 }
 
-/// Download the Forge installer JAR.
-pub async fn download_forge_installer(
+/// Download the Forge or NeoForge installer JAR.
+pub async fn download_installer(
     client: &reqwest::Client,
     url: &str,
     installer_path: &Path,
@@ -572,6 +575,65 @@ pub async fn download_forge_installer(
         })?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NeoForgeManifest {
+    pub versions: Vec<String>,
+}
+
+impl NeoForgeManifest {
+    pub fn download_url(loader: &str) -> String {
+        format!(
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar",
+            loader
+        )
+    }
+
+    pub fn neoforge_prefix(mc_version: &str) -> String {
+        // Old Version 1.20.x ~ 1.21.x
+        if let Some(legacy_rest) = mc_version.strip_prefix("1.") {
+            return if legacy_rest.contains('.') {
+                format!("{legacy_rest}.")
+            } else {
+                format!("{legacy_rest}.0.")
+            };
+        }
+
+        let dot_count = mc_version.chars().filter(|&c| c == '.').count();
+        if dot_count == 1 {
+            format!("{mc_version}.0.")
+        } else {
+            format!("{mc_version}.")
+        }
+    }
+
+    pub fn versions_for_mc(&self, mc_version: &str) -> Vec<String> {
+        let prefix = Self::neoforge_prefix(mc_version);
+
+        self.versions
+            .iter()
+            .filter(|v| v.starts_with(&prefix))
+            .cloned()
+            .collect()
+    }
+
+    pub async fn fetch_with_cache(
+        client: &reqwest::Client,
+        cache_dir: &Path,
+        download_source: DownloadSource,
+        force_refresh: bool,
+    ) -> Result<Self> {
+        fetch_cached_json(
+            client,
+            NEOFORGE_METADATA_URL,
+            cache_dir,
+            DEFAULT_MANIFEST_TTL,
+            download_source,
+            force_refresh,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -703,10 +765,10 @@ mod tests {
             }
         }"#;
 
-        let legacy_profile: ForgeInstallProfile =
+        let legacy_profile: InstallProfile =
             serde_json::from_str(legacy_json).expect("failed to deserialize legacy profile");
         match legacy_profile {
-            ForgeInstallProfile::Legacy(legacy) => {
+            InstallProfile::Legacy(legacy) => {
                 assert_eq!(
                     legacy.install.file_path,
                     "forge-1.7.10-10.13.4.1614-1.7.10-universal.jar"
@@ -717,7 +779,7 @@ mod tests {
                 );
                 assert_eq!(legacy.version_info.id, "1.7.10-Forge10.13.4.1614-1.7.10");
             }
-            ForgeInstallProfile::Modern(_) => panic!("expected Legacy variant"),
+            InstallProfile::Modern(_) => panic!("expected Legacy variant"),
         }
 
         let modern_json = r#"{
@@ -756,10 +818,10 @@ mod tests {
             "libraries": []
         }"#;
 
-        let modern_profile: ForgeInstallProfile =
+        let modern_profile: InstallProfile =
             serde_json::from_str(modern_json).expect("failed to deserialize modern profile");
         match modern_profile {
-            ForgeInstallProfile::Modern(modern) => {
+            InstallProfile::Modern(modern) => {
                 assert_eq!(modern.json, "/version.json");
                 assert_eq!(modern.data.len(), 3);
                 assert_eq!(modern.processors.len(), 3);
@@ -767,7 +829,7 @@ mod tests {
                 assert!(!modern.processors[1].is_client());
                 assert!(modern.processors[2].is_client()); // omitted sides defaults to true
             }
-            ForgeInstallProfile::Legacy(_) => panic!("expected Modern variant"),
+            InstallProfile::Legacy(_) => panic!("expected Modern variant"),
         }
     }
 
@@ -856,7 +918,7 @@ mod tests {
         );
 
         // Test resolve_args
-        let processor = ForgeProcessor {
+        let processor = InstallerProcessor {
             jar: "net.minecraftforge:installertools:1.4.1".to_string(),
             classpath: vec![],
             args: vec![
@@ -898,7 +960,7 @@ mod tests {
         let libraries_dir = temp.path().join("libraries");
         let temp_dir = temp.path().join("temp");
 
-        let legacy_profile = ForgeInstallProfile::Legacy(LegacyInstallProfile {
+        let legacy_profile = InstallProfile::Legacy(LegacyInstallProfile {
             install: LegacyInstallInfo {
                 file_path: "forge-1.7.10-universal.jar".to_string(),
                 path: "net.minecraftforge:forge:1.7.10".to_string(),
@@ -1180,7 +1242,7 @@ mod tests {
         let dest = temp.path().join("nested").join("sub").join("installer.jar");
         let download_url = format!("{server_url}/forge-installer.jar");
 
-        let result = download_forge_installer(&client, &download_url, &dest).await;
+        let result = download_installer(&client, &download_url, &dest).await;
         assert!(
             result.is_ok(),
             "download should succeed: {:?}",
@@ -1202,7 +1264,7 @@ mod tests {
         let dest = temp.path().join("installer.jar");
         let download_url = format!("{server_url}/missing-installer.jar");
 
-        let result = download_forge_installer(&client, &download_url, &dest).await;
+        let result = download_installer(&client, &download_url, &dest).await;
         assert!(result.is_err(), "should fail on 404 status code");
         assert!(!dest.exists(), "file should not be created on HTTP error");
 

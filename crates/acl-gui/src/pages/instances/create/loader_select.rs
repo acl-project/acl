@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use acl_common::maven;
 use acl_minecraft::FabricLoaderEntry;
-use acl_minecraft::forge::{ForgeManifest, ForgePromos};
+use acl_minecraft::forge::{ForgeManifest, ForgePromos, NeoForgeManifest};
 use gtk::{glib::BoxedAnyObject, prelude::*};
 
 use acl_core::{LauncherConfig, ModLoader};
@@ -231,6 +231,46 @@ impl LoaderSelectPage {
                                 LoaderVersionItem {
                                     loader: ModLoader::Forge,
                                     version: entry,
+                                    stability: if is_stable {
+                                        LoaderStability::Stable
+                                    } else {
+                                        LoaderStability::Beta
+                                    },
+                                }
+                            })
+                            .collect();
+
+                        Ok(items)
+                    }
+                    ModLoader::NeoForge => {
+                        let mut versions = NeoForgeManifest::fetch_with_cache(
+                            &client,
+                            &cache_dir,
+                            download_source,
+                            force_refresh,
+                        )
+                        .await
+                        .map_err(|e| e.to_i18n())?
+                        .versions_for_mc(&game_version);
+
+                        versions.sort_by(|a, b| {
+                            let a_stable = !a.contains("-beta");
+                            let b_stable = !b.contains("-beta");
+
+                            // Let the stable version be ranked first
+                            b_stable.cmp(&a_stable).then_with(|| {
+                                maven::compare_maven_rules(b, a)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            })
+                        });
+
+                        let items = versions
+                            .into_iter()
+                            .map(|version| {
+                                let is_stable = !version.contains("-beta");
+                                LoaderVersionItem {
+                                    loader: ModLoader::NeoForge,
+                                    version,
                                     stability: if is_stable {
                                         LoaderStability::Stable
                                     } else {
