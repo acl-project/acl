@@ -10,7 +10,7 @@ use acl_core::{
 use acl_minecraft::{
     AssetIndex, DownloadSource, FabricLoaderEntry, VersionEntry, VersionMetadata,
     download::DownloadProgress,
-    forge::{self, ForgeManifest, ModernInstallProfile},
+    forge::{self, ForgeManifest, ModernInstallProfile, NeoForgeManifest},
 };
 use libadwaita::prelude::*;
 use relm4::{
@@ -23,13 +23,13 @@ use tracing::{error, warn};
 use crate::{i18n::LocalizeError, t};
 
 /// The context used during the installation phase
-struct ForgePostContext {
+struct InstallerPostContext {
     installer_path: PathBuf,
     temp_dir: PathBuf,
     modern: Option<ModernInstallProfile>,
 }
 
-impl Drop for ForgePostContext {
+impl Drop for InstallerPostContext {
     fn drop(&mut self) {
         // Clean up the temporary files generated
         let _ = std::fs::remove_dir_all(&self.temp_dir);
@@ -378,6 +378,7 @@ impl ListPage {
         Ok(())
     }
 
+    /// Install Forge or NeoForge
     async fn install_forge(
         client: &reqwest::Client,
         instance: &Instance,
@@ -385,18 +386,30 @@ impl ListPage {
         download_source: DownloadSource,
         metadata: &mut VersionMetadata,
         id: &str,
-        forge_context: &mut Option<ForgePostContext>,
+        installer_context: &mut Option<InstallerPostContext>,
     ) -> Result<(), String> {
+        let loader = instance.config.mod_loader;
         if let Some(loader_ver) = &instance.config.mod_loader_version {
-            let url = download_source.rewrite_url(&ForgeManifest::download_url(loader_ver));
-            let temp_dir = std::env::temp_dir().join(format!("acl-forge-{}", id));
+            let raw_url = match loader {
+                ModLoader::NeoForge => NeoForgeManifest::download_url(loader_ver),
+                _ => ForgeManifest::download_url(loader_ver),
+            };
+
+            let url = download_source.rewrite_url(&raw_url);
+
+            let temp_dir = std::env::temp_dir().join(format!(
+                "acl-{}-{}",
+                loader.label().to_ascii_lowercase(),
+                id
+            ));
+
             fs::create_dir_all(&temp_dir)
                 .await
                 .map_err(|e| format!("Failed to create temp dir: {e}"))?;
 
             let installer_path = temp_dir.join("installer.jar");
 
-            forge::download_forge_installer(client, &url, &installer_path)
+            forge::download_installer(client, &url, &installer_path)
                 .await
                 .map_err(|e| e.to_i18n())?;
 
@@ -418,14 +431,15 @@ impl ListPage {
                 metadata.libraries.extend(modern.libraries.clone());
             }
 
-            *forge_context = Some(ForgePostContext {
+            *installer_context = Some(InstallerPostContext {
                 installer_path,
                 temp_dir,
                 modern: installer.modern,
             });
         } else {
             warn!(
-                "Mod loader Forge is configured without loader version for instance {}",
+                "Mod loader {} is configured without loader version for instance {}",
+                loader.label(),
                 id
             );
         }
@@ -467,7 +481,7 @@ impl ListPage {
                             .await
                             .map_err(|e| e.to_i18n())?;
 
-                        let mut forge_context = None;
+                        let mut installer_context = None;
 
                         // Handle mod loader
                         match instance.config.mod_loader {
@@ -483,7 +497,7 @@ impl ListPage {
                                 )
                                 .await?
                             }
-                            ModLoader::Forge => {
+                            ModLoader::Forge | ModLoader::NeoForge => {
                                 Self::install_forge(
                                     &client,
                                     &instance,
@@ -491,7 +505,7 @@ impl ListPage {
                                     download_source,
                                     &mut metadata,
                                     &id,
-                                    &mut forge_context,
+                                    &mut installer_context,
                                 )
                                 .await?
                             }
@@ -576,7 +590,7 @@ impl ListPage {
                         .map_err(|e| e.to_i18n())?;
 
                         // Run the forge processors (1.13+)
-                        if let Some(ctx) = forge_context
+                        if let Some(ctx) = installer_context
                             && let Some(modern) = &ctx.modern
                         {
                             let java = launch::select_java(&instance, &global_config, &metadata)

@@ -23,6 +23,12 @@ const FORGE_PROMOS_URL: &str =
 const FORGE_METADATA_URL: &str =
     "https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json";
 
+const NEOFORGE_METADATA_URL: &str =
+    "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge";
+// This is so funny
+const NEOFORGE_LEGACY_1201_METADATA_URL: &str =
+    "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/forge";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForgePromos {
     pub homepage: String,
@@ -135,7 +141,7 @@ impl SidedDataEntry {
 
 /// Corresponds to a single build task (Processor) for 1.13+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForgeProcessor {
+pub struct InstallerProcessor {
     /// The executor's own main Jar (Maven coordinates)
     pub jar: String,
 
@@ -156,7 +162,7 @@ pub struct ForgeProcessor {
     pub outputs: Option<HashMap<String, String>>,
 }
 
-impl ForgeProcessor {
+impl InstallerProcessor {
     pub fn is_client(&self) -> bool {
         match &self.sides {
             Some(sides) => sides.iter().any(|s| s == "client"),
@@ -208,7 +214,7 @@ pub struct ModernInstallProfile {
     #[serde(default)]
     pub data: HashMap<String, SidedDataEntry>,
     #[serde(default)]
-    pub processors: Vec<ForgeProcessor>,
+    pub processors: Vec<InstallerProcessor>,
 }
 
 impl ModernInstallProfile {
@@ -360,7 +366,7 @@ fn default_version_json() -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum ForgeInstallProfile {
+pub enum InstallProfile {
     /// 1.7.10 and ancient versions: with install and inline versionInfo
     Legacy(LegacyInstallProfile),
     /// 1.8 ~ 1.12.2 and 1.13+ modern versions: with version.json pointer, optional data and processors
@@ -370,7 +376,7 @@ pub enum ForgeInstallProfile {
 /// Obtain the corresponding decompression path according to different directories and loader versions.
 fn resolve_entry_dest(
     entry_name: &str,
-    profile: &ForgeInstallProfile,
+    profile: &InstallProfile,
     libraries_dir: &Path,
     temp_dir: &Path,
 ) -> Option<PathBuf> {
@@ -382,7 +388,7 @@ fn resolve_entry_dest(
         return Some(temp_dir.join(entry_name));
     }
 
-    if let ForgeInstallProfile::Legacy(legacy) = profile
+    if let InstallProfile::Legacy(legacy) = profile
         && entry_name == legacy.install.file_path
     {
         return coordinate_to_path(&legacy.install.path).map(|p| libraries_dir.join(p));
@@ -392,7 +398,7 @@ fn resolve_entry_dest(
 }
 
 /// The product after unpacking installer
-pub struct ForgeInstaller {
+pub struct ExtractedInstaller {
     /// Unifiedly generated VersionPatch
     pub patch: VersionPatch,
     /// If it is a modern version (1.8+ /1.13+), return the configuration containing processors; if it is 1.7.10, it is None
@@ -403,7 +409,7 @@ pub fn extract_installer(
     installer_path: &Path,
     libraries_dir: &Path,
     temp_dir: &Path,
-) -> Result<ForgeInstaller> {
+) -> Result<ExtractedInstaller> {
     let file = File::open(installer_path).map_err(|source| MinecraftError::Io {
         path: installer_path.to_path_buf(),
         source,
@@ -430,14 +436,14 @@ pub fn extract_installer(
             source,
         })?;
 
-    let profile: ForgeInstallProfile = serde_json::from_slice(&profile_content)?;
+    let profile: InstallProfile = serde_json::from_slice(&profile_content)?;
 
     drop(profile_entry);
 
     // Parse version.json to get the patch or get it directly from version info, for old versions
     let patch: VersionPatch = match &profile {
-        ForgeInstallProfile::Legacy(profile) => profile.version_info.clone(),
-        ForgeInstallProfile::Modern(_) => {
+        InstallProfile::Legacy(profile) => profile.version_info.clone(),
+        InstallProfile::Modern(_) => {
             if let Ok(mut entry) = zip.by_name("version.json") {
                 let mut content = Vec::with_capacity(entry.size() as usize);
                 entry
@@ -500,11 +506,11 @@ pub fn extract_installer(
     }
 
     let modern = match profile {
-        ForgeInstallProfile::Modern(m) => Some(m),
-        ForgeInstallProfile::Legacy(_) => None,
+        InstallProfile::Modern(m) => Some(m),
+        InstallProfile::Legacy(_) => None,
     };
 
-    Ok(ForgeInstaller { patch, modern })
+    Ok(ExtractedInstaller { patch, modern })
 }
 
 fn read_main_class(jar_path: &Path) -> Result<String> {
@@ -545,8 +551,8 @@ fn read_main_class(jar_path: &Path) -> Result<String> {
     })
 }
 
-/// Download the Forge installer JAR.
-pub async fn download_forge_installer(
+/// Download the Forge or NeoForge installer JAR.
+pub async fn download_installer(
     client: &reqwest::Client,
     url: &str,
     installer_path: &Path,
@@ -572,6 +578,83 @@ pub async fn download_forge_installer(
         })?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NeoForgeManifest {
+    pub versions: Vec<String>,
+}
+
+impl NeoForgeManifest {
+    pub fn download_url(loader: &str) -> String {
+        if loader.starts_with("1.20.1-") {
+            format!(
+                "https://maven.neoforged.net/releases/net/neoforged/forge/{0}/forge-{0}-installer.jar",
+                loader
+            )
+        } else {
+            format!(
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar",
+                loader
+            )
+        }
+    }
+
+    pub fn neoforge_prefix(mc_version: &str) -> String {
+        if mc_version == "1.20.1" {
+            return "1.20.1-".to_string();
+        }
+
+        // Old Version 1.20.x ~ 1.21.x
+        if let Some(legacy_rest) = mc_version.strip_prefix("1.") {
+            return if legacy_rest.contains('.') {
+                format!("{legacy_rest}.")
+            } else {
+                format!("{legacy_rest}.0.")
+            };
+        }
+
+        let dot_count = mc_version.chars().filter(|&c| c == '.').count();
+        if dot_count == 1 {
+            format!("{mc_version}.0.")
+        } else {
+            format!("{mc_version}.")
+        }
+    }
+
+    pub fn versions_for_mc(&self, mc_version: &str) -> Vec<String> {
+        let prefix = Self::neoforge_prefix(mc_version);
+
+        self.versions
+            .iter()
+            .filter(|v| v.starts_with(&prefix))
+            .cloned()
+            .collect()
+    }
+
+    pub async fn fetch_with_cache(
+        client: &reqwest::Client,
+        game_version: &str,
+        cache_dir: &Path,
+        download_source: DownloadSource,
+        force_refresh: bool,
+    ) -> Result<Self> {
+        let url = if game_version == "1.20.1" {
+            NEOFORGE_LEGACY_1201_METADATA_URL
+        } else {
+            NEOFORGE_METADATA_URL
+        };
+
+        fetch_cached_json(
+            client,
+            url,
+            cache_dir,
+            DEFAULT_MANIFEST_TTL,
+            download_source,
+            force_refresh,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -703,10 +786,10 @@ mod tests {
             }
         }"#;
 
-        let legacy_profile: ForgeInstallProfile =
+        let legacy_profile: InstallProfile =
             serde_json::from_str(legacy_json).expect("failed to deserialize legacy profile");
         match legacy_profile {
-            ForgeInstallProfile::Legacy(legacy) => {
+            InstallProfile::Legacy(legacy) => {
                 assert_eq!(
                     legacy.install.file_path,
                     "forge-1.7.10-10.13.4.1614-1.7.10-universal.jar"
@@ -717,7 +800,7 @@ mod tests {
                 );
                 assert_eq!(legacy.version_info.id, "1.7.10-Forge10.13.4.1614-1.7.10");
             }
-            ForgeInstallProfile::Modern(_) => panic!("expected Legacy variant"),
+            InstallProfile::Modern(_) => panic!("expected Legacy variant"),
         }
 
         let modern_json = r#"{
@@ -756,10 +839,10 @@ mod tests {
             "libraries": []
         }"#;
 
-        let modern_profile: ForgeInstallProfile =
+        let modern_profile: InstallProfile =
             serde_json::from_str(modern_json).expect("failed to deserialize modern profile");
         match modern_profile {
-            ForgeInstallProfile::Modern(modern) => {
+            InstallProfile::Modern(modern) => {
                 assert_eq!(modern.json, "/version.json");
                 assert_eq!(modern.data.len(), 3);
                 assert_eq!(modern.processors.len(), 3);
@@ -767,7 +850,7 @@ mod tests {
                 assert!(!modern.processors[1].is_client());
                 assert!(modern.processors[2].is_client()); // omitted sides defaults to true
             }
-            ForgeInstallProfile::Legacy(_) => panic!("expected Modern variant"),
+            InstallProfile::Legacy(_) => panic!("expected Modern variant"),
         }
     }
 
@@ -856,7 +939,7 @@ mod tests {
         );
 
         // Test resolve_args
-        let processor = ForgeProcessor {
+        let processor = InstallerProcessor {
             jar: "net.minecraftforge:installertools:1.4.1".to_string(),
             classpath: vec![],
             args: vec![
@@ -898,7 +981,7 @@ mod tests {
         let libraries_dir = temp.path().join("libraries");
         let temp_dir = temp.path().join("temp");
 
-        let legacy_profile = ForgeInstallProfile::Legacy(LegacyInstallProfile {
+        let legacy_profile = InstallProfile::Legacy(LegacyInstallProfile {
             install: LegacyInstallInfo {
                 file_path: "forge-1.7.10-universal.jar".to_string(),
                 path: "net.minecraftforge:forge:1.7.10".to_string(),
@@ -1180,7 +1263,7 @@ mod tests {
         let dest = temp.path().join("nested").join("sub").join("installer.jar");
         let download_url = format!("{server_url}/forge-installer.jar");
 
-        let result = download_forge_installer(&client, &download_url, &dest).await;
+        let result = download_installer(&client, &download_url, &dest).await;
         assert!(
             result.is_ok(),
             "download should succeed: {:?}",
@@ -1202,10 +1285,124 @@ mod tests {
         let dest = temp.path().join("installer.jar");
         let download_url = format!("{server_url}/missing-installer.jar");
 
-        let result = download_forge_installer(&client, &download_url, &dest).await;
+        let result = download_installer(&client, &download_url, &dest).await;
         assert!(result.is_err(), "should fail on 404 status code");
         assert!(!dest.exists(), "file should not be created on HTTP error");
 
         handle.abort();
+    }
+
+    #[test]
+    fn test_neoforge_manifest_deserialization() {
+        let json = r#"{
+            "isSnapshot": false,
+            "versions": [
+                "20.2.3-beta",
+                "20.4.195",
+                "21.0.167",
+                "21.1.72",
+                "26.1.0.1-beta"
+            ]
+        }"#;
+
+        let manifest: NeoForgeManifest =
+            serde_json::from_str(json).expect("failed to deserialize NeoForgeManifest");
+        assert_eq!(
+            manifest.versions,
+            vec![
+                "20.2.3-beta",
+                "20.4.195",
+                "21.0.167",
+                "21.1.72",
+                "26.1.0.1-beta"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_neoforge_download_url() {
+        assert_eq!(
+            NeoForgeManifest::download_url("21.1.72"),
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.72/neoforge-21.1.72-installer.jar"
+        );
+        assert_eq!(
+            NeoForgeManifest::download_url("20.4.195"),
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/20.4.195/neoforge-20.4.195-installer.jar"
+        );
+        // Legacy 1.20.1 pattern
+        assert_eq!(
+            NeoForgeManifest::download_url("1.20.1-47.1.106"),
+            "https://maven.neoforged.net/releases/net/neoforged/forge/1.20.1-47.1.106/forge-1.20.1-47.1.106-installer.jar"
+        );
+    }
+
+    #[test]
+    fn test_neoforge_prefix_rules() {
+        // Legacy 1.20.1 pattern
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.20.1"), "1.20.1-");
+
+        // Legacy 1.20.x ~ 1.21.x patterns
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.20.4"), "20.4.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.20.2"), "20.2.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.21"), "21.0.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.21.1"), "21.1.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.21.4"), "21.4.");
+
+        // Year-based versioning patterns (26.1, 26.1.1)
+        assert_eq!(NeoForgeManifest::neoforge_prefix("26.1"), "26.1.0.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("26.1.1"), "26.1.1.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("26.2.0"), "26.2.0.");
+    }
+
+    #[test]
+    fn test_neoforge_versions_for_mc() {
+        let manifest = NeoForgeManifest {
+            versions: vec![
+                "1.20.1-47.1.84".to_string(),
+                "1.20.1-47.1.106".to_string(),
+                "20.4.195".to_string(),
+                "20.4.237".to_string(),
+                "21.0.167".to_string(),
+                "21.1.72".to_string(),
+                "21.1.120".to_string(),
+                "26.1.0.1-beta".to_string(),
+                "26.1.0.15".to_string(),
+                "26.1.1.5".to_string(),
+            ],
+        };
+
+        // 1.20.1 matches 1.20.1-x
+        assert_eq!(
+            manifest.versions_for_mc("1.20.1"),
+            vec!["1.20.1-47.1.84", "1.20.1-47.1.106"]
+        );
+
+        // 1.20.4 matches 20.4.x
+        assert_eq!(
+            manifest.versions_for_mc("1.20.4"),
+            vec!["20.4.195", "20.4.237"]
+        );
+
+        // 1.21 matches only 21.0.x, not 21.1.x
+        assert_eq!(manifest.versions_for_mc("1.21"), vec!["21.0.167"]);
+
+        // 1.21.1 matches 21.1.x
+        assert_eq!(
+            manifest.versions_for_mc("1.21.1"),
+            vec!["21.1.72", "21.1.120"]
+        );
+
+        // 26.1 matches 26.1.0.x
+        assert_eq!(
+            manifest.versions_for_mc("26.1"),
+            vec!["26.1.0.1-beta", "26.1.0.15"]
+        );
+
+        // 26.1.1 matches 26.1.1.x
+        assert_eq!(manifest.versions_for_mc("26.1.1"), vec!["26.1.1.5"]);
+
+        // Non-existent version returns empty
+        assert!(manifest.versions_for_mc("1.19").is_empty());
+        assert!(manifest.versions_for_mc("25.1").is_empty());
     }
 }

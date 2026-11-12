@@ -202,7 +202,22 @@ impl SimpleComponent for ConfigurePage {
                                 let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Forge));
                             },
                             add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
-                        }
+                        },
+
+                        adw::ActionRow {
+                            // No translation needed
+                            set_title: "NeoForge",
+
+                            #[watch]
+                            set_subtitle: &model.loader_subtitle(ModLoader::NeoForge),
+                            #[watch]
+                            set_activatable: model.is_loader_compatible(ModLoader::NeoForge),
+
+                            connect_activated[sender] => move |_| {
+                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::NeoForge));
+                            },
+                            add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
+                        },
 
                     }
                 },
@@ -325,5 +340,18 @@ mod tests {
         assert!(!page.is_loader_compatible(ModLoader::Forge));
         assert!(page.loader_subtitle(ModLoader::Forge).contains("Forge"));
         assert!(page.loader_subtitle(ModLoader::Forge).contains("Fabric"));
+
+        assert!(!page.is_loader_compatible(ModLoader::NeoForge));
+        assert!(
+            page.loader_subtitle(ModLoader::NeoForge)
+                .contains("NeoForge")
+        );
+        assert!(page.loader_subtitle(ModLoader::NeoForge).contains("Fabric"));
+
+        page.selected_loader = ModLoader::NeoForge;
+        page.selected_loader_version = Some("21.1.72".to_string());
+        assert!(page.is_loader_compatible(ModLoader::NeoForge));
+        assert_eq!(page.loader_subtitle(ModLoader::NeoForge), "21.1.72");
+        assert!(!page.is_loader_compatible(ModLoader::Forge));
     }
 }
