@@ -1329,10 +1329,18 @@ mod tests {
             NeoForgeManifest::download_url("20.4.195"),
             "https://maven.neoforged.net/releases/net/neoforged/neoforge/20.4.195/neoforge-20.4.195-installer.jar"
         );
+        // Legacy 1.20.1 pattern
+        assert_eq!(
+            NeoForgeManifest::download_url("1.20.1-47.1.106"),
+            "https://maven.neoforged.net/releases/net/neoforged/forge/1.20.1-47.1.106/forge-1.20.1-47.1.106-installer.jar"
+        );
     }
 
     #[test]
     fn test_neoforge_prefix_rules() {
+        // Legacy 1.20.1 pattern
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.20.1"), "1.20.1-");
+
         // Legacy 1.20.x ~ 1.21.x patterns
         assert_eq!(NeoForgeManifest::neoforge_prefix("1.20.4"), "20.4.");
         assert_eq!(NeoForgeManifest::neoforge_prefix("1.20.2"), "20.2.");
@@ -1350,6 +1358,8 @@ mod tests {
     fn test_neoforge_versions_for_mc() {
         let manifest = NeoForgeManifest {
             versions: vec![
+                "1.20.1-47.1.84".to_string(),
+                "1.20.1-47.1.106".to_string(),
                 "20.4.195".to_string(),
                 "20.4.237".to_string(),
                 "21.0.167".to_string(),
@@ -1360,6 +1370,12 @@ mod tests {
                 "26.1.1.5".to_string(),
             ],
         };
+
+        // 1.20.1 matches 1.20.1-x
+        assert_eq!(
+            manifest.versions_for_mc("1.20.1"),
+            vec!["1.20.1-47.1.84", "1.20.1-47.1.106"]
+        );
 
         // 1.20.4 matches 20.4.x
         assert_eq!(

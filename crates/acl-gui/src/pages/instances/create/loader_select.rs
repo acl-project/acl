@@ -556,6 +556,15 @@ mod tests {
         // Non-matching
         assert!(!matches_version_entry(&entry, "0.15"));
         assert!(!matches_version_entry(&entry, "fabric"));
+
+        let neoforge_entry = LoaderVersionItem {
+            loader: ModLoader::NeoForge,
+            version: "21.1.72".to_string(),
+            stability: LoaderStability::Stable,
+        };
+        assert!(matches_version_entry(&neoforge_entry, "21.1"));
+        assert!(matches_version_entry(&neoforge_entry, "72"));
+        assert!(!matches_version_entry(&neoforge_entry, "20.4"));
     }
 
     #[test]
