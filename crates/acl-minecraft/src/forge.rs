@@ -1270,4 +1270,102 @@ mod tests {
 
         handle.abort();
     }
+
+    #[test]
+    fn test_neoforge_manifest_deserialization() {
+        let json = r#"{
+            "isSnapshot": false,
+            "versions": [
+                "20.2.3-beta",
+                "20.4.195",
+                "21.0.167",
+                "21.1.72",
+                "26.1.0.1-beta"
+            ]
+        }"#;
+
+        let manifest: NeoForgeManifest =
+            serde_json::from_str(json).expect("failed to deserialize NeoForgeManifest");
+        assert_eq!(
+            manifest.versions,
+            vec![
+                "20.2.3-beta",
+                "20.4.195",
+                "21.0.167",
+                "21.1.72",
+                "26.1.0.1-beta"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_neoforge_download_url() {
+        assert_eq!(
+            NeoForgeManifest::download_url("21.1.72"),
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.72/neoforge-21.1.72-installer.jar"
+        );
+        assert_eq!(
+            NeoForgeManifest::download_url("20.4.195"),
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/20.4.195/neoforge-20.4.195-installer.jar"
+        );
+    }
+
+    #[test]
+    fn test_neoforge_prefix_rules() {
+        // Legacy 1.20.x ~ 1.21.x patterns
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.20.4"), "20.4.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.20.2"), "20.2.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.21"), "21.0.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.21.1"), "21.1.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("1.21.4"), "21.4.");
+
+        // Year-based versioning patterns (26.1, 26.1.1)
+        assert_eq!(NeoForgeManifest::neoforge_prefix("26.1"), "26.1.0.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("26.1.1"), "26.1.1.");
+        assert_eq!(NeoForgeManifest::neoforge_prefix("26.2.0"), "26.2.0.");
+    }
+
+    #[test]
+    fn test_neoforge_versions_for_mc() {
+        let manifest = NeoForgeManifest {
+            versions: vec![
+                "20.4.195".to_string(),
+                "20.4.237".to_string(),
+                "21.0.167".to_string(),
+                "21.1.72".to_string(),
+                "21.1.120".to_string(),
+                "26.1.0.1-beta".to_string(),
+                "26.1.0.15".to_string(),
+                "26.1.1.5".to_string(),
+            ],
+        };
+
+        // 1.20.4 matches 20.4.x
+        assert_eq!(
+            manifest.versions_for_mc("1.20.4"),
+            vec!["20.4.195", "20.4.237"]
+        );
+
+        // 1.21 matches only 21.0.x, not 21.1.x
+        assert_eq!(manifest.versions_for_mc("1.21"), vec!["21.0.167"]);
+
+        // 1.21.1 matches 21.1.x
+        assert_eq!(
+            manifest.versions_for_mc("1.21.1"),
+            vec!["21.1.72", "21.1.120"]
+        );
+
+        // 26.1 matches 26.1.0.x
+        assert_eq!(
+            manifest.versions_for_mc("26.1"),
+            vec!["26.1.0.1-beta", "26.1.0.15"]
+        );
+
+        // 26.1.1 matches 26.1.1.x
+        assert_eq!(manifest.versions_for_mc("26.1.1"), vec!["26.1.1.5"]);
+
+        // Non-existent version returns empty
+        assert!(manifest.versions_for_mc("1.19").is_empty());
+        assert!(manifest.versions_for_mc("25.1").is_empty());
+    }
 }
