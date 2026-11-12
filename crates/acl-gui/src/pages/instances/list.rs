@@ -1,16 +1,33 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use acl_core::{Instance, LauncherConfig, LauncherDirs, ModLoader, manager::InstanceManager};
+use acl_core::{
+    Instance, LauncherConfig, LauncherDirs, ModLoader, launch, manager::InstanceManager,
+};
 
-use acl_minecraft::{AssetIndex, FabricLoaderEntry, VersionEntry, download::DownloadProgress};
+use acl_minecraft::{
+    AssetIndex, DownloadSource, FabricLoaderEntry, VersionEntry, VersionMetadata,
+    download::DownloadProgress,
+    forge::{self, ForgeManifest, ModernInstallProfile},
+};
 use libadwaita::prelude::*;
-use relm4::{SharedState, gtk, prelude::*, tokio};
+use relm4::{
+    SharedState, gtk,
+    prelude::*,
+    tokio::{self, fs},
+};
 use tracing::{error, warn};
 
 use crate::{i18n::LocalizeError, t};
+
+/// The context used during the installation phase
+struct ForgePostContext {
+    installer_path: PathBuf,
+    temp_dir: PathBuf,
+    modern: Option<ModernInstallProfile>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstallStage {
@@ -324,6 +341,91 @@ impl ListPage {
         }
     }
 
+    async fn install_fabric(
+        client: &reqwest::Client,
+        instance: &Instance,
+        download_source: DownloadSource,
+        metadata: &mut VersionMetadata,
+        entry: &VersionEntry,
+        id: &str,
+    ) -> Result<(), String> {
+        if let Some(loader_ver) = &instance.config.mod_loader_version {
+            let patch = FabricLoaderEntry::fetch_profile(
+                client,
+                &entry.id,
+                loader_ver,
+                &instance.loader_json(),
+                download_source,
+            )
+            .await
+            .map_err(|e| e.to_i18n())?;
+
+            metadata.apply_patch(patch);
+        } else {
+            warn!(
+                "Mod loader Fabric is configured without loader version for instance {}",
+                id
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn install_forge(
+        client: &reqwest::Client,
+        instance: &Instance,
+        dirs: &LauncherDirs,
+        download_source: DownloadSource,
+        metadata: &mut VersionMetadata,
+        id: &str,
+        forge_context: &mut Option<ForgePostContext>,
+    ) -> Result<(), String> {
+        if let Some(loader_ver) = &instance.config.mod_loader_version {
+            let url = download_source.rewrite_url(&ForgeManifest::download_url(loader_ver));
+            let temp_dir = std::env::temp_dir().join(format!("acl-forge-{}", id));
+            fs::create_dir_all(&temp_dir)
+                .await
+                .map_err(|e| format!("Failed to create temp dir {e}"))?;
+
+            let installer_path = temp_dir.join("installer.jar");
+
+            forge::download_forge_install(client, &url, &installer_path)
+                .await
+                .map_err(|e| e.to_i18n())?;
+
+            let installer =
+                forge::extract_installer(&installer_path, &dirs.libraries_dir(), &temp_dir)
+                    .map_err(|e| e.to_i18n())?;
+
+            // Save as loader.json
+            let patch_json =
+                serde_json::to_string_pretty(&installer.patch).map_err(|e| e.to_string())?;
+            tokio::fs::write(instance.loader_json(), patch_json)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            metadata.apply_patch(installer.patch);
+
+            // Add processor dependency library
+            if let Some(modern) = &installer.modern {
+                metadata.libraries.extend(modern.libraries.clone());
+            }
+
+            *forge_context = Some(ForgePostContext {
+                installer_path,
+                temp_dir,
+                modern: installer.modern,
+            });
+        } else {
+            warn!(
+                "Mod loader Forge is configured without loader version for instance {}",
+                id
+            );
+        }
+
+        Ok(())
+    }
+
     fn spawn_install(&mut self, id: String, entry: VersionEntry, sender: &ComponentSender<Self>) {
         let instance = self
             .mgr
@@ -340,6 +442,7 @@ impl ListPage {
 
         let client = self.client.clone();
         let dirs = self.dirs.clone();
+        let global_config = self.config.read().clone();
         let max_concurrent = self.config.read().max_concurrent_downloads;
         let download_source = self.config.read().download_source;
 
@@ -357,26 +460,35 @@ impl ListPage {
                             .await
                             .map_err(|e| e.to_i18n())?;
 
+                        let mut forge_context = None;
+
                         // Handle mod loader
                         match instance.config.mod_loader {
                             ModLoader::Vanilla => {}
                             ModLoader::Fabric => {
-                                if let Some(loader_ver) = &instance.config.mod_loader_version {
-                                    let patch = FabricLoaderEntry::fetch_profile(
-                                        &client,
-                                        &entry.id,
-                                        loader_ver,
-                                        &instance.loader_json(),
-                                        download_source,
-                                    )
-                                    .await
-                                    .map_err(|e| e.to_i18n())?;
-
-                                    metadata.apply_patch(patch);
-                                } else {
-                                    warn!("Mod loader Fabric is configured without loader version for instance {}", id);
-                                }
+                                Self::install_fabric(
+                                    &client,
+                                    &instance,
+                                    download_source,
+                                    &mut metadata,
+                                    &entry,
+                                    &id,
+                                )
+                                .await?
                             }
+                            ModLoader::Forge => {
+                                Self::install_forge(
+                                    &client,
+                                    &instance,
+                                    &dirs,
+                                    download_source,
+                                    &mut metadata,
+                                    &id,
+                                    &mut forge_context,
+                                )
+                                .await?
+                            }
+
                             _ => {
                                 warn!(
                                     "Mod loader {} is not supported yet",
@@ -436,7 +548,8 @@ impl ListPage {
                         )
                         .await
                         .map_err(|e| e.to_i18n())?;
-                        let _ = forward_handle.await; // Ownership of tx has already been moved; tx will be dropped once the download completes.
+                        // Ownership of tx has already been moved; tx will be dropped once the download completes.
+                        let _ = forward_handle.await;
 
                         let _ = out.send(ListCmdOutput::StageChanged {
                             id: id.clone(),
@@ -445,13 +558,38 @@ impl ListPage {
                         let inst_c = instance.clone();
                         let dirs_c = dirs.clone();
 
+                        let metadata_c = metadata.clone();
+
                         // Prepare runtime
                         tokio::task::spawn_blocking(move || {
-                            inst_c.prepare_runtime(&metadata, &asset_index, &dirs_c)
+                            inst_c.prepare_runtime(&metadata_c, &asset_index, &dirs_c)
                         })
                         .await
                         .map_err(|e| e.to_string())?
                         .map_err(|e| e.to_i18n())?;
+
+                        // Run the forge processors (1.13+)
+                        if let Some(ctx) = forge_context {
+                            if let Some(modern) = ctx.modern {
+                                let java =
+                                    launch::select_java(&instance, &global_config, &metadata)
+                                        .map_err(|e| e.to_i18n())?;
+
+                                modern
+                                    .run_processors(
+                                        &java.path,
+                                        &ctx.installer_path,
+                                        &instance.client_jar(),
+                                        &dirs.libraries_dir(),
+                                        &ctx.temp_dir,
+                                    )
+                                    .await
+                                    .map_err(|e| e.to_i18n())?;
+                            }
+
+                            // Clean up the temporary files generated
+                            let _ = tokio::fs::remove_dir_all(&ctx.temp_dir).await;
+                        }
 
                         Ok(())
                     }

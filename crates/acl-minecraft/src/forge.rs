@@ -545,6 +545,34 @@ fn read_main_class(jar_path: &Path) -> Result<String> {
     })
 }
 
+pub async fn download_forge_install(
+    client: &reqwest::Client,
+    url: &str,
+    installer_path: &Path,
+) -> Result<()> {
+    let response = client.get(url).send().await?.error_for_status()?;
+
+    let bytes = response.bytes().await?;
+
+    if let Some(parent) = installer_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| MinecraftError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+
+    tokio::fs::write(installer_path, bytes)
+        .await
+        .map_err(|source| MinecraftError::Io {
+            path: installer_path.to_path_buf(),
+            source,
+        })?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

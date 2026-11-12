@@ -5,7 +5,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use acl_common::maven;
 use acl_minecraft::FabricLoaderEntry;
+use acl_minecraft::forge::{ForgeManifest, ForgePromos};
 use gtk::{glib::BoxedAnyObject, prelude::*};
 
 use acl_core::{LauncherConfig, ModLoader};
@@ -147,35 +149,103 @@ impl LoaderSelectPage {
         let out = sender.command_sender().clone();
 
         let join_handle = relm4::spawn(async move {
-            let result: Result<Vec<LoaderVersionItem>, String> = match loader {
-                ModLoader::Fabric => FabricLoaderEntry::fetch_list_with_cache(
-                    &client,
-                    &game_version,
-                    &cache_dir,
-                    download_source,
-                    force_refresh,
-                )
-                .await
-                .map(|entries| {
-                    entries
-                        .into_iter()
-                        .map(|entry| LoaderVersionItem {
-                            loader: ModLoader::Fabric,
-                            version: entry.loader.version,
-                            stability: if entry.loader.stable {
-                                LoaderStability::Stable
-                            } else {
-                                LoaderStability::Beta
-                            },
-                        })
-                        .collect()
-                })
-                .map_err(|err| err.to_i18n()),
-                _ => Err(t!(
-                    "instances-create-error-unsupported-loader",
-                    "Not implemented or unsupported loader"
-                )),
-            };
+            let result: Result<Vec<LoaderVersionItem>, String> = async {
+                match loader {
+                    ModLoader::Fabric => FabricLoaderEntry::fetch_list_with_cache(
+                        &client,
+                        &game_version,
+                        &cache_dir,
+                        download_source,
+                        force_refresh,
+                    )
+                    .await
+                    .map(|entries| {
+                        entries
+                            .into_iter()
+                            .map(|entry| LoaderVersionItem {
+                                loader: ModLoader::Fabric,
+                                version: entry.loader.version,
+                                stability: if entry.loader.stable {
+                                    LoaderStability::Stable
+                                } else {
+                                    LoaderStability::Beta
+                                },
+                            })
+                            .collect()
+                    })
+                    .map_err(|err| err.to_i18n()),
+                    ModLoader::Forge => {
+                        let list = ForgeManifest::fetch_with_cache(
+                            &client,
+                            &cache_dir,
+                            download_source,
+                            force_refresh,
+                        )
+                        .await
+                        .map_err(|err| err.to_i18n())?;
+
+                        let promos = ForgePromos::fetch_with_cache(
+                            &client,
+                            &cache_dir,
+                            download_source,
+                            force_refresh,
+                        )
+                        .await
+                        .map_err(|err| err.to_i18n())?;
+
+                        let loader_versions = list.mc_to_forge.get(&game_version).ok_or(t!(
+                            "instances-create-error-forge-version",
+                            "Failed get {game} forge manifest",
+                            game = game_version,
+                        ))?;
+
+                        let stable_loader = promos.stable(&game_version);
+
+                        let mut loader_versions = loader_versions.clone();
+
+                        loader_versions.sort_by(|a, b| {
+                            let a_stable = stable_loader
+                                .as_deref()
+                                .is_some_and(|v| a.ends_with(v) || a == v);
+                            let b_stable = stable_loader
+                                .as_deref()
+                                .is_some_and(|v| b.ends_with(v) || b == v);
+
+                            // Let the stable version be ranked first
+                            // Use Maven version comparison rules to sort from newest to oldest (descending order)
+                            b_stable.cmp(&a_stable).then_with(|| {
+                                maven::compare_maven_rules(b, a)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            })
+                        });
+
+                        let items = loader_versions
+                            .into_iter()
+                            .map(|entry| {
+                                let is_stable = stable_loader
+                                    .as_deref()
+                                    .is_some_and(|v| entry.ends_with(&v) || entry == v);
+                                LoaderVersionItem {
+                                    loader: ModLoader::Forge,
+                                    version: entry.clone(),
+                                    stability: if is_stable {
+                                        LoaderStability::Stable
+                                    } else {
+                                        LoaderStability::Beta
+                                    },
+                                }
+                            })
+                            .collect();
+
+                        Ok(items)
+                    }
+                    _ => Err(t!(
+                        "instances-create-error-unsupported-loader",
+                        "Not implemented or unsupported loader"
+                    )),
+                }
+            }
+            .await;
 
             let _ = out.send(LoaderSelectCmdOutput::Finish(result));
         });
