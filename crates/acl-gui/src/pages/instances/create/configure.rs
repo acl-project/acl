@@ -199,7 +199,7 @@ impl SimpleComponent for ConfigurePage {
                             set_activatable: model.is_loader_compatible(ModLoader::Forge),
 
                             connect_activated[sender] => move |_| {
-                                            let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Forge));
+                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Forge));
                             },
                             add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
                         }

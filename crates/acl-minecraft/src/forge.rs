@@ -545,7 +545,8 @@ fn read_main_class(jar_path: &Path) -> Result<String> {
     })
 }
 
-pub async fn download_forge_install(
+/// Download the Forge installer JAR.
+pub async fn download_forge_installer(
     client: &reqwest::Client,
     url: &str,
     installer_path: &Path,

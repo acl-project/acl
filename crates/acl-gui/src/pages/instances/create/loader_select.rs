@@ -193,11 +193,14 @@ impl LoaderSelectPage {
                         .await
                         .map_err(|err| err.to_i18n())?;
 
-                        let loader_versions = list.mc_to_forge.get(&game_version).ok_or(t!(
-                            "instances-create-error-forge-version",
-                            "Failed get {game} forge manifest",
-                            game = game_version,
-                        ))?;
+                        let loader_versions =
+                            list.mc_to_forge.get(&game_version).ok_or_else(|| {
+                                t!(
+                                    "instances-create-error-forge-version",
+                                    "Failed to get {game} forge manifest",
+                                    game = game_version,
+                                )
+                            })?;
 
                         let stable_loader = promos.stable(&game_version);
 
@@ -224,10 +227,10 @@ impl LoaderSelectPage {
                             .map(|entry| {
                                 let is_stable = stable_loader
                                     .as_deref()
-                                    .is_some_and(|v| entry.ends_with(&v) || entry == v);
+                                    .is_some_and(|v| entry.ends_with(v) || entry == v);
                                 LoaderVersionItem {
                                     loader: ModLoader::Forge,
-                                    version: entry.clone(),
+                                    version: entry,
                                     stability: if is_stable {
                                         LoaderStability::Stable
                                     } else {

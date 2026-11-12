@@ -32,5 +32,4 @@ rust-embed = { workspace = true }
 unic-langid = { workspace = true }
 fluent = { workspace = true }
 
-serde = { workspace = true }
 serde_json = { workspace = true }

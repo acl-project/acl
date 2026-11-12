@@ -29,6 +29,13 @@ struct ForgePostContext {
     modern: Option<ModernInstallProfile>,
 }
 
+impl Drop for ForgePostContext {
+    fn drop(&mut self) {
+        // Clean up the temporary files generated
+        let _ = std::fs::remove_dir_all(&self.temp_dir);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstallStage {
     /// Normal and usable
@@ -385,11 +392,11 @@ impl ListPage {
             let temp_dir = std::env::temp_dir().join(format!("acl-forge-{}", id));
             fs::create_dir_all(&temp_dir)
                 .await
-                .map_err(|e| format!("Failed to create temp dir {e}"))?;
+                .map_err(|e| format!("Failed to create temp dir: {e}"))?;
 
             let installer_path = temp_dir.join("installer.jar");
 
-            forge::download_forge_install(client, &url, &installer_path)
+            forge::download_forge_installer(client, &url, &installer_path)
                 .await
                 .map_err(|e| e.to_i18n())?;
 
@@ -443,8 +450,8 @@ impl ListPage {
         let client = self.client.clone();
         let dirs = self.dirs.clone();
         let global_config = self.config.read().clone();
-        let max_concurrent = self.config.read().max_concurrent_downloads;
-        let download_source = self.config.read().download_source;
+        let max_concurrent = global_config.max_concurrent_downloads;
+        let download_source = global_config.download_source;
 
         sender.command(move |out, shutdown| {
             shutdown
@@ -569,26 +576,22 @@ impl ListPage {
                         .map_err(|e| e.to_i18n())?;
 
                         // Run the forge processors (1.13+)
-                        if let Some(ctx) = forge_context {
-                            if let Some(modern) = ctx.modern {
-                                let java =
-                                    launch::select_java(&instance, &global_config, &metadata)
-                                        .map_err(|e| e.to_i18n())?;
+                        if let Some(ctx) = forge_context
+                            && let Some(modern) = &ctx.modern
+                        {
+                            let java = launch::select_java(&instance, &global_config, &metadata)
+                                .map_err(|e| e.to_i18n())?;
 
-                                modern
-                                    .run_processors(
-                                        &java.path,
-                                        &ctx.installer_path,
-                                        &instance.client_jar(),
-                                        &dirs.libraries_dir(),
-                                        &ctx.temp_dir,
-                                    )
-                                    .await
-                                    .map_err(|e| e.to_i18n())?;
-                            }
-
-                            // Clean up the temporary files generated
-                            let _ = tokio::fs::remove_dir_all(&ctx.temp_dir).await;
+                            modern
+                                .run_processors(
+                                    &java.path,
+                                    &ctx.installer_path,
+                                    &instance.client_jar(),
+                                    &dirs.libraries_dir(),
+                                    &ctx.temp_dir,
+                                )
+                                .await
+                                .map_err(|e| e.to_i18n())?;
                         }
 
                         Ok(())
