@@ -205,20 +205,19 @@ impl SimpleComponent for ConfigurePage {
                         },
 
                         adw::ActionRow {
-                        // No translation needed
-                        set_title: "NeoForge",
+                            // No translation needed
+                            set_title: "NeoForge",
 
                             #[watch]
-                        set_subtitle: &model.loader_subtitle(ModLoader::NeoForge),
-                        #[watch]
-                        set_activatable: model.is_loader_compatible(ModLoader::NeoForge),
+                            set_subtitle: &model.loader_subtitle(ModLoader::NeoForge),
+                            #[watch]
+                            set_activatable: model.is_loader_compatible(ModLoader::NeoForge),
 
                             connect_activated[sender] => move |_| {
                                 let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::NeoForge));
                             },
                             add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
-                        }
-
+                        },
 
                     }
                 },

@@ -378,7 +378,7 @@ impl ListPage {
         Ok(())
     }
 
-    /// Install forge or neoforge
+    /// Install Forge or NeoForge
     async fn install_forge(
         client: &reqwest::Client,
         instance: &Instance,
@@ -388,8 +388,9 @@ impl ListPage {
         id: &str,
         installer_context: &mut Option<InstallerPostContext>,
     ) -> Result<(), String> {
+        let loader = instance.config.mod_loader;
         if let Some(loader_ver) = &instance.config.mod_loader_version {
-            let raw_url = match instance.config.mod_loader {
+            let raw_url = match loader {
                 ModLoader::NeoForge => NeoForgeManifest::download_url(loader_ver),
                 _ => ForgeManifest::download_url(loader_ver),
             };
@@ -398,7 +399,7 @@ impl ListPage {
 
             let temp_dir = std::env::temp_dir().join(format!(
                 "acl-{}-{}",
-                instance.config.mod_loader.label().to_ascii_lowercase(),
+                loader.label().to_ascii_lowercase(),
                 id
             ));
 
@@ -437,7 +438,8 @@ impl ListPage {
             });
         } else {
             warn!(
-                "Mod loader Forge is configured without loader version for instance {}",
+                "Mod loader {} is configured without loader version for instance {}",
+                loader.label(),
                 id
             );
         }
@@ -479,7 +481,7 @@ impl ListPage {
                             .await
                             .map_err(|e| e.to_i18n())?;
 
-                        let mut forge_context = None;
+                        let mut installer_context = None;
 
                         // Handle mod loader
                         match instance.config.mod_loader {
@@ -503,7 +505,7 @@ impl ListPage {
                                     download_source,
                                     &mut metadata,
                                     &id,
-                                    &mut forge_context,
+                                    &mut installer_context,
                                 )
                                 .await?
                             }
@@ -588,7 +590,7 @@ impl ListPage {
                         .map_err(|e| e.to_i18n())?;
 
                         // Run the forge processors (1.13+)
-                        if let Some(ctx) = forge_context
+                        if let Some(ctx) = installer_context
                             && let Some(modern) = &ctx.modern
                         {
                             let java = launch::select_java(&instance, &global_config, &metadata)
