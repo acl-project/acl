@@ -205,6 +205,8 @@ instances-create-button-next = 下一步
 instances-create-error-create-instance = 创建实例失败：{ $err }
 # Source: Please select a Minecraft version
 instances-create-error-empty-version = 请选择 Minecraft 版本
+# Source: Failed to get { $game } forge manifest
+instances-create-error-forge-version = 获取 { $game } 的 Forge 清单失败
 # Source: Failed to load version manifest: { $err }
 instances-create-error-load-version-manifest = 加载版本清单失败：{ $err }
 # Source: Failed to refresh instances: { $err }

@@ -187,7 +187,23 @@ impl SimpleComponent for ConfigurePage {
                             },
                             add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
 
+                        },
+
+                        adw::ActionRow {
+                            // No translation needed
+                            set_title: "Forge",
+
+                            #[watch]
+                            set_subtitle: &model.loader_subtitle(ModLoader::Forge),
+                            #[watch]
+                            set_activatable: model.is_loader_compatible(ModLoader::Forge),
+
+                            connect_activated[sender] => move |_| {
+                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Forge));
+                            },
+                            add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
                         }
+
                     }
                 },
             }

@@ -67,6 +67,7 @@ dependencies = [
  "relm4-components",
  "reqwest",
  "rust-embed",
+ "serde_json",
  "sysinfo",
  "thiserror 2.0.21",
  "tracing",
