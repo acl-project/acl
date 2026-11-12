@@ -245,6 +245,7 @@ impl LoaderSelectPage {
                     ModLoader::NeoForge => {
                         let mut versions = NeoForgeManifest::fetch_with_cache(
                             &client,
+                            &game_version,
                             &cache_dir,
                             download_source,
                             force_refresh,

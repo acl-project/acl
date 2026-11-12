@@ -25,6 +25,9 @@ const FORGE_METADATA_URL: &str =
 
 const NEOFORGE_METADATA_URL: &str =
     "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge";
+// This is so funny
+const NEOFORGE_LEGACY_1201_METADATA_URL: &str =
+    "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/forge";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForgePromos {
@@ -584,13 +587,24 @@ pub struct NeoForgeManifest {
 
 impl NeoForgeManifest {
     pub fn download_url(loader: &str) -> String {
-        format!(
-            "https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar",
-            loader
-        )
+        if loader.starts_with("1.20.1-") {
+            format!(
+                "https://maven.neoforged.net/releases/net/neoforged/forge/{0}/forge-{0}-installer.jar",
+                loader
+            )
+        } else {
+            format!(
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar",
+                loader
+            )
+        }
     }
 
     pub fn neoforge_prefix(mc_version: &str) -> String {
+        if mc_version == "1.20.1" {
+            return "1.20.1-".to_string();
+        }
+
         // Old Version 1.20.x ~ 1.21.x
         if let Some(legacy_rest) = mc_version.strip_prefix("1.") {
             return if legacy_rest.contains('.') {
@@ -620,13 +634,20 @@ impl NeoForgeManifest {
 
     pub async fn fetch_with_cache(
         client: &reqwest::Client,
+        game_version: &str,
         cache_dir: &Path,
         download_source: DownloadSource,
         force_refresh: bool,
     ) -> Result<Self> {
+        let url = if game_version == "1.20.1" {
+            NEOFORGE_LEGACY_1201_METADATA_URL
+        } else {
+            NEOFORGE_METADATA_URL
+        };
+
         fetch_cached_json(
             client,
-            NEOFORGE_METADATA_URL,
+            url,
             cache_dir,
             DEFAULT_MANIFEST_TTL,
             download_source,
