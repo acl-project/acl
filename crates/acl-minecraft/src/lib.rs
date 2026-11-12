@@ -6,6 +6,7 @@ pub mod cache;
 pub mod download;
 pub mod error;
 pub mod fabric;
+pub mod forge;
 pub mod manifest;
 pub mod mirror;
 pub mod native;

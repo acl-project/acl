@@ -74,6 +74,31 @@ pub fn compare_maven_rules(candidate: &str, current: &str) -> Option<Ordering> {
     }
 }
 
+/// Convert Maven coordinate `group:artifact:version[:classifier]` into relative jar path.
+pub fn coordinate_to_path(coordinate: &str) -> Option<String> {
+    let part = coordinate.split_once('@');
+    let (name, ext) = if let Some((p, s)) = part {
+        (p, s)
+    } else {
+        (coordinate, "jar")
+    };
+    let mut parts = name.split(':');
+
+    let group = parts.next()?;
+    let artifact = parts.next()?;
+    let version = parts.next()?;
+    let classifier = parts.next();
+    let group_path = group.replace('.', "/");
+
+    let file_name = if let Some(classifier) = classifier {
+        format!("{artifact}-{version}-{classifier}.{ext}")
+    } else {
+        format!("{artifact}-{version}.{ext}")
+    };
+
+    Some(format!("{group_path}/{artifact}/{version}/{file_name}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,5 +159,30 @@ mod tests {
             Some(Ordering::Greater)
         );
         assert_eq!(compare_maven_rules("1.21", "1.21"), Some(Ordering::Equal));
+    }
+
+    #[test]
+    fn test_maven_artifact_path() {
+        assert_eq!(
+            coordinate_to_path("com.mojang:authlib:1.5.25"),
+            Some("com/mojang/authlib/1.5.25/authlib-1.5.25.jar".to_string())
+        );
+
+        assert_eq!(
+            coordinate_to_path("org.lwjgl:lwjgl:3.3.3:natives-linux"),
+            Some("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar".to_string())
+        );
+
+        assert_eq!(
+            coordinate_to_path("de.oceanlabs.mcp:mcp_config:1.20.1@zip"),
+            Some("de/oceanlabs/mcp/mcp_config/1.20.1/mcp_config-1.20.1.zip".to_string())
+        );
+
+        assert_eq!(
+            coordinate_to_path("de.oceanlabs.mcp:mcp_config:1.20.1:mappings@txt"),
+            Some("de/oceanlabs/mcp/mcp_config/1.20.1/mcp_config-1.20.1-mappings.txt".to_string())
+        );
+
+        assert_eq!(coordinate_to_path("invalid-name"), None);
     }
 }

@@ -226,6 +226,31 @@ impl LocalizeError for acl_minecraft::MinecraftError {
                 path = path,
                 source = source
             ),
+            Self::InvalidMavenCoordinate { coordinate } => crate::t!(
+                "minecraft-error-invalid-maven-coordinate",
+                "Invalid Maven coordinate: '{coordinate}'",
+                coordinate = coordinate
+            ),
+            Self::MissingMainClass { jar_path } => crate::t!(
+                "minecraft-error-missing-main-class",
+                "Main-Class attribute not found in manifest of jar '{jar_path}'",
+                jar_path = jar_path
+            ),
+            Self::ForgeMissingVersionJson => crate::t!(
+                "minecraft-error-forge-missing-version-json",
+                "Modern Forge install profile is missing version.json"
+            ),
+            Self::ProcessorFailed { jar, exit_code } => crate::t!(
+                "minecraft-error-processor-failed",
+                "Forge processor '{jar}' failed with exit code {exit_code}",
+                jar = jar,
+                exit_code = exit_code
+            ),
+            Self::Classpath(arg0) => crate::t!(
+                "minecraft-error-classpath",
+                "Failed to construct classpath: {arg0}",
+                arg0 = arg0
+            ),
         }
     }
 }

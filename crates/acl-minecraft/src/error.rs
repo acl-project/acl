@@ -39,6 +39,21 @@ pub enum MinecraftError {
         #[source]
         source: zip::result::ZipError,
     },
+
+    #[error("Invalid Maven coordinate: '{coordinate}'")]
+    InvalidMavenCoordinate { coordinate: String },
+
+    #[error("Main-Class attribute not found in manifest of jar '{jar_path}'")]
+    MissingMainClass { jar_path: PathBuf },
+
+    #[error("Modern Forge install profile is missing version.json")]
+    ForgeMissingVersionJson,
+
+    #[error("Forge processor '{jar}' failed with exit code {exit_code}")]
+    ProcessorFailed { jar: String, exit_code: i32 },
+
+    #[error("Failed to construct classpath: {0}")]
+    Classpath(#[from] std::env::JoinPathsError),
 }
 
 pub type Result<T> = std::result::Result<T, MinecraftError>;
@@ -83,6 +98,37 @@ mod tests {
         assert_eq!(
             zip_err.to_string(),
             "Zip archive error at path '/test/archive.jar': specified file not found in archive"
+        );
+
+        let coord_err = MinecraftError::InvalidMavenCoordinate {
+            coordinate: "invalid:coord".to_string(),
+        };
+        assert_eq!(
+            coord_err.to_string(),
+            "Invalid Maven coordinate: 'invalid:coord'"
+        );
+
+        let main_class_err = MinecraftError::MissingMainClass {
+            jar_path: PathBuf::from("/test/proc.jar"),
+        };
+        assert_eq!(
+            main_class_err.to_string(),
+            "Main-Class attribute not found in manifest of jar '/test/proc.jar'"
+        );
+
+        let missing_vjson_err = MinecraftError::ForgeMissingVersionJson;
+        assert_eq!(
+            missing_vjson_err.to_string(),
+            "Modern Forge install profile is missing version.json"
+        );
+
+        let proc_err = MinecraftError::ProcessorFailed {
+            jar: "net.minecraftforge:installertools:1.4.1".to_string(),
+            exit_code: 1,
+        };
+        assert_eq!(
+            proc_err.to_string(),
+            "Forge processor 'net.minecraftforge:installertools:1.4.1' failed with exit code 1"
         );
     }
 }

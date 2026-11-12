@@ -291,14 +291,24 @@ list-tooltip-settings = 实例设置
 loader-stability-beta = 测试版
 # Source: Stable
 loader-stability-stable = 稳定版
+# Source: Failed to construct classpath: { $arg0 }
+minecraft-error-classpath = 构建 classpath 失败：{ $arg0 }
+# Source: Modern Forge install profile is missing version.json
+minecraft-error-forge-missing-version-json = 现代 Forge 安装配置文件缺少 version.json
 # Source: SHA-1 mismatch for '{ $target }': expected { $expected }, actual { $actual }
 minecraft-error-hash-mismatch = '{ $target }' 的 SHA-1 不匹配：期望 { $expected }，实际 { $actual }
 # Source: HTTP request failed: { $arg0 }
 minecraft-error-http = HTTP 请求失败：{ $arg0 }
+# Source: Invalid Maven coordinate: '{ $coordinate }'
+minecraft-error-invalid-maven-coordinate = 无效的 Maven 坐标：'{ $coordinate }'
 # Source: I/O error at path '{ $path }': { $source }
 minecraft-error-io = 路径 '{ $path }' 处发生 I/O 错误：{ $source }
 # Source: Failed to parse JSON: { $arg0 }
 minecraft-error-json = 解析 JSON 失败：{ $arg0 }
+# Source: Main-Class attribute not found in manifest of jar '{ $jar_path }'
+minecraft-error-missing-main-class = 在 jar '{ $jar_path }' 的清单中未找到 Main-Class 属性
+# Source: Forge processor '{ $jar }' failed with exit code { $exit_code }
+minecraft-error-processor-failed = Forge 处理器 '{ $jar }' 执行失败，退出码：{ $exit_code }
 # Source: System clock error: { $arg0 }
 minecraft-error-system-time = 系统时钟错误：{ $arg0 }
 # Source: Minecraft version '{ $version_id }' not found in manifest

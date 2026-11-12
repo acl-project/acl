@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use acl_common::version::is_newer_version;
+use acl_common::{maven::coordinate_to_path, version::is_newer_version};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -86,28 +86,12 @@ impl Library {
         }
     }
 
-    /// Convert Maven coordinate `group:artifact:version[:classifier]` into relative jar path. for old version and fabric
-    pub fn maven_artifact_path(&self) -> Option<String> {
-        let parts: Vec<&str> = self.name.split(':').collect();
-        if parts.len() < 3 {
-            return None;
-        }
-
-        let group_path = parts[0].replace('.', "/");
-        let artifact = parts[1];
-        let version = parts[2];
-
-        let file_name = if let Some(classifier) = parts.get(3) {
-            format!("{artifact}-{version}-{classifier}.jar")
-        } else {
-            format!("{artifact}-{version}.jar")
-        };
-
-        Some(format!("{group_path}/{artifact}/{version}/{file_name}"))
-    }
     /// Resolve relative artifact path from explicit `artifact.path` or Maven coordinate fallback.
     pub fn artifact_relative_path(&self, artifact: &LibraryArtifact) -> Option<String> {
-        artifact.path.clone().or_else(|| self.maven_artifact_path())
+        artifact
+            .path
+            .clone()
+            .or_else(|| coordinate_to_path(&self.name))
     }
 
     /// Check whether the Maven coordinate represents a modern Linux native artifact (1.19+).
@@ -125,7 +109,7 @@ impl Library {
             return downloads.artifact.clone();
         }
 
-        let path = self.maven_artifact_path()?;
+        let path = coordinate_to_path(&self.name)?;
         let base_url = self
             .url
             .as_deref()
@@ -316,6 +300,11 @@ impl VersionMetadata {
                 let rel_path = lib.artifact_relative_path(artifact);
 
                 if let Some(rel_path) = rel_path {
+                    // Forge's local library will not provide a URL, so skip it directly.
+                    if artifact.url.is_empty() {
+                        continue;
+                    }
+
                     let destination = libraries_dir.join(&rel_path);
 
                     if seen_path.insert(destination.clone()) {
@@ -417,6 +406,11 @@ impl VersionMetadata {
 
     /// Split group:artifact:version[:classifier] into (key, version).
     fn split_maven_key_version(name: &str) -> Option<(String, &str)> {
+        let name = if let Some((p, _)) = name.split_once('@') {
+            p
+        } else {
+            name
+        };
         let mut parts = name.split(':');
         let group = parts.next()?;
         let artifact = parts.next()?;
@@ -520,51 +514,6 @@ impl VersionMetadata {
 mod tests {
     use super::*;
     use crate::rule::{OsRule, RuleAction};
-
-    #[test]
-    fn test_maven_artifact_path() {
-        let standard_lib = Library {
-            name: "com.mojang:authlib:1.5.25".to_string(),
-            downloads: None,
-            url: None,
-            sha1: None,
-            size: None,
-            natives: None,
-            rules: None,
-            extract: None,
-        };
-        assert_eq!(
-            standard_lib.maven_artifact_path(),
-            Some("com/mojang/authlib/1.5.25/authlib-1.5.25.jar".to_string())
-        );
-
-        let classifier_lib = Library {
-            name: "org.lwjgl:lwjgl:3.3.3:natives-linux".to_string(),
-            downloads: None,
-            url: None,
-            sha1: None,
-            size: None,
-            natives: None,
-            rules: None,
-            extract: None,
-        };
-        assert_eq!(
-            classifier_lib.maven_artifact_path(),
-            Some("org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar".to_string())
-        );
-
-        let invalid_lib = Library {
-            name: "invalid-name".to_string(),
-            downloads: None,
-            url: None,
-            sha1: None,
-            size: None,
-            natives: None,
-            rules: None,
-            extract: None,
-        };
-        assert_eq!(invalid_lib.maven_artifact_path(), None);
-    }
 
     #[test]
     fn test_string_or_vec_to_vec() {
