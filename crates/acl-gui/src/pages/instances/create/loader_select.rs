@@ -158,7 +158,7 @@ impl LoaderSelectPage {
                             _ => MetaLoader::Fabric,
                         };
 
-                        MetaLoaderEntry::fetch_list_with_cache(
+                        let mut loaders = MetaLoaderEntry::fetch_list_with_cache(
                             meta_loader,
                             &client,
                             &game_version,
@@ -167,24 +167,30 @@ impl LoaderSelectPage {
                             force_refresh,
                         )
                         .await
-                        .map(|entries| {
-                            entries
-                                .into_iter()
-                                .map(|entry| {
-                                    let is_stable = entry.loader.is_stable();
-                                    LoaderVersionItem {
-                                        loader,
-                                        version: entry.loader.version,
-                                        stability: if is_stable {
-                                            LoaderStability::Stable
-                                        } else {
-                                            LoaderStability::Beta
-                                        },
-                                    }
-                                })
-                                .collect()
-                        })
-                        .map_err(|err| err.to_i18n())
+                        .map_err(|err| err.to_i18n())?;
+
+                        loaders.sort_by(|a, b| {
+                            maven::compare_maven_rules(&b.loader.version, &a.loader.version)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
+
+                        let items = loaders
+                            .into_iter()
+                            .map(|entry| {
+                                let is_stable = entry.loader.is_stable();
+                                LoaderVersionItem {
+                                    loader,
+                                    version: entry.loader.version,
+                                    stability: if is_stable {
+                                        LoaderStability::Stable
+                                    } else {
+                                        LoaderStability::Beta
+                                    },
+                                }
+                            })
+                            .collect();
+
+                        Ok(items)
                     }
                     ModLoader::Forge => {
                         let list = ForgeManifest::fetch_with_cache(

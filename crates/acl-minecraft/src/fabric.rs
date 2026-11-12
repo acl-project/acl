@@ -68,7 +68,8 @@ pub struct MetaIntermediaryInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MetaLoaderEntry {
     pub loader: MetaLoaderInfo,
-    pub intermediary: MetaIntermediaryInfo,
+    #[serde(default)]
+    pub intermediary: Option<MetaIntermediaryInfo>,
 }
 
 impl MetaLoaderEntry {
@@ -284,9 +285,13 @@ mod tests {
         assert_eq!(entry.loader.stable, Some(true));
         assert!(entry.loader.is_stable());
 
-        assert_eq!(entry.intermediary.version, "1.20.1");
-        assert_eq!(entry.intermediary.maven, "net.fabricmc:intermediary:1.20.1");
-        assert!(entry.intermediary.stable);
+        let intermediary = entry
+            .intermediary
+            .as_ref()
+            .expect("intermediary should be present");
+        assert_eq!(intermediary.version, "1.20.1");
+        assert_eq!(intermediary.maven, "net.fabricmc:intermediary:1.20.1");
+        assert!(intermediary.stable);
     }
 
     #[test]
@@ -315,22 +320,38 @@ mod tests {
                     "maven": "net.fabricmc:intermediary:1.21.1",
                     "version": "1.21.1"
                 }
+            },
+            {
+                "loader": {
+                    "separator": ".",
+                    "build": 9,
+                    "maven": "org.quiltmc:quilt-loader:0.20.0-beta.9",
+                    "version": "0.20.0-beta.9"
+                }
             }
         ]"#;
 
         let entries: Vec<MetaLoaderEntry> =
             serde_json::from_str(sample_json).expect("failed to deserialize Quilt MetaLoaderEntry");
-        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.len(), 3);
 
         assert_eq!(entries[0].loader.version, "0.26.4");
         assert_eq!(entries[0].loader.stable, None);
         assert!(entries[0].loader.is_stable());
-        assert_eq!(entries[0].intermediary.version, "1.21.1");
-        assert!(!entries[0].intermediary.stable);
+        let inter0 = entries[0]
+            .intermediary
+            .as_ref()
+            .expect("entry 0 has intermediary");
+        assert_eq!(inter0.version, "1.21.1");
+        assert!(!inter0.stable);
 
         assert_eq!(entries[1].loader.version, "0.26.4-beta.1");
         assert_eq!(entries[1].loader.stable, None);
         assert!(!entries[1].loader.is_stable());
+
+        // Snapshot or newer version without intermediary (such as 26.3)
+        assert_eq!(entries[2].loader.version, "0.20.0-beta.9");
+        assert_eq!(entries[2].intermediary, None);
     }
 
     #[tokio::test]
@@ -433,11 +454,11 @@ mod tests {
                 version: "0.26.4".to_string(),
                 stable: None,
             },
-            intermediary: MetaIntermediaryInfo {
+            intermediary: Some(MetaIntermediaryInfo {
                 maven: "net.fabricmc:intermediary:1.21.1".to_string(),
                 version: "1.21.1".to_string(),
                 stable: false,
-            },
+            }),
         };
 
         let cached = crate::cache::Cached::new(
@@ -478,11 +499,11 @@ mod tests {
                 version: "0.16.10".to_string(),
                 stable: Some(true),
             },
-            intermediary: MetaIntermediaryInfo {
+            intermediary: Some(MetaIntermediaryInfo {
                 maven: "net.fabricmc:intermediary:1.20.1".to_string(),
                 version: "1.20.1".to_string(),
                 stable: true,
-            },
+            }),
         };
 
         let cached = crate::cache::Cached::new(
