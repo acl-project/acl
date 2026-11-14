@@ -135,6 +135,7 @@ pub enum AppMsg {
     PromptReauth(String),
     /// Open the instance details page; the String is the instance id.
     OpenInstanceDetail(String),
+    OpenTasks,
     CloseInstanceDetail,
     OpenDownload,
     Refresh,
@@ -376,6 +377,7 @@ impl SimpleComponent for AppModel {
             .forward(sender.input_sender(), |msg| match msg {
                 InstancesPageOutput::ShowToast(message) => AppMsg::ShowToast(message),
                 InstancesPageOutput::OpenDetail(id) => AppMsg::OpenInstanceDetail(id),
+                InstancesPageOutput::OpenTasks => AppMsg::OpenTasks,
             });
 
         let accounts_page = AccountsPage::builder()
@@ -487,6 +489,7 @@ impl SimpleComponent for AppModel {
             }
             AppMsg::CloseInstanceDetail => self.current_view = AppView::Main,
             AppMsg::OpenDownload => self.current_view = AppView::Download,
+            AppMsg::OpenTasks => self.current_page = NavPage::Tasks,
         }
     }
 }

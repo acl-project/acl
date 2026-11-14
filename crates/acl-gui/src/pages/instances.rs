@@ -48,6 +48,7 @@ pub struct InstancesPage {
 pub enum InstancesPageOutput {
     ShowToast(String),
     OpenDetail(String),
+    OpenTasks,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +152,7 @@ impl SimpleComponent for InstancesPage {
                     self.dirs.clone(),
                     self.config.read().clone(),
                 );
+                let _ = sender.output(InstancesPageOutput::OpenTasks);
             }
             InstancesPageInput::OpenDetail(id) => {
                 let _ = sender.output(InstancesPageOutput::OpenDetail(id));
