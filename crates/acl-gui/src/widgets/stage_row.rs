@@ -16,7 +16,7 @@ impl StageRow {
     fn status_icon(&self) -> &'static str {
         match self.stage.status {
             StageStatus::Pending | StageStatus::Running => "content-loading-symbolic",
-            StageStatus::Done => "emblem-ok-symbolic",
+            StageStatus::Done => "object-select-symbolic",
             StageStatus::Cancelled => "process-stop-symbolic",
             StageStatus::Failed => "dialog-error-symbolic",
         }

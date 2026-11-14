@@ -139,13 +139,13 @@ home-page-error-save-accounts = 保存账户失败：{ $err }
 home-page-no-instance = 未选择实例
 # Source: Instance settings
 home-page-tooltip-instance-settings = 实例设置
-# Source: Downloading ({ $completed }/{ $total })
-install-stage-downloading = 正在下载 ({ $completed }/{ $total })
-# Source: Fetching asset index...
+# Source: Downloading files
+install-stage-downloading-files = 正在下载文件...
+# Source: Fetching asset index
 install-stage-fetching-asset-index = 正在获取资源索引...
-# Source: Fetching metadata...
+# Source: Fetching metadata
 install-stage-fetching-metadata = 正在获取版本元数据...
-# Source: Preparing runtime...
+# Source: Preparing runtime
 install-stage-preparing-runtime = 正在准备运行环境...
 # Source: Back
 instance-detail-button-back = 返回
@@ -175,8 +175,6 @@ instance-folder-shaderpacks = 光影包文件夹
 instance-list-error-remove-instance = 移除实例失败：{ $err }
 # Source: Failed to select instance: { $err }
 instance-list-error-select-instance = 选择实例失败：{ $err }
-# Source: Instance "{ $id }" is ready to play
-instance-list-ready-to-play = 实例“{ $id }”已准备就绪
 # Source: Settings
 instance-navigation-page-settings = 设置
 # Source: Base
@@ -209,10 +207,6 @@ instances-create-error-empty-version = 请选择 Minecraft 版本
 instances-create-error-forge-version = 获取 { $game } 的 Forge 清单失败
 # Source: Failed to load version manifest: { $err }
 instances-create-error-load-version-manifest = 加载版本清单失败：{ $err }
-# Source: Failed to refresh instances: { $err }
-instances-create-error-refresh-instances = 刷新实例列表失败：{ $err }
-# Source: Failed to save instance config: { $err }
-instances-create-error-save-config = 保存实例配置失败：{ $err }
 # Source: Not implemented or unsupported loader
 instances-create-error-unsupported-loader = 未实现或不支持的模组加载器
 # Source: { $candidate } is incompatible with { $selected }
@@ -343,12 +337,16 @@ ms-login-toast-add-account = 微软账户添加成功
 ms-login-toast-copy-link = 登录链接已复制到剪贴板
 # Source: Accounts
 navigation-page-accounts = 账户
+# Source: Download Center
+navigation-page-download = 下载中心
 # Source: Home
 navigation-page-home = 首页
 # Source: Instances
 navigation-page-instances = 实例
 # Source: Settings
 navigation-page-settings = 设置
+# Source: Tasks
+navigation-page-tasks = 任务
 # Source: You must launch the game at least once with an official Microsoft account before adding an offline account.
 offline-disabled-dialog-body = 在添加离线账户之前，必须至少使用正版微软账户启动一次游戏。
 # Source: Cancel
@@ -397,6 +395,36 @@ settings-launcher-language-title = 语言
 settings-launcher-title = 启动器
 # Source: Successfully refreshed the Java list.
 settings-toast-refresh-java = 成功刷新 Java 列表。
+# Source: Cancel
+tasks-action-cancel = 取消
+# Source: Copy error
+tasks-action-copy-error = 复制错误
+# Source: Remove
+tasks-action-remove = 移除
+# Source: Retry
+tasks-action-retry = 重试
+# Source: Clear Finished
+tasks-button-clear = 清除已完成
+# Source: Downloads and instance installations will appear here
+tasks-empty-description = 下载和实例安装任务将显示在这里
+# Source: No Tasks
+tasks-empty-title = 暂无任务
+# Source: Finished
+tasks-group-finished = 已完成
+# Source: In Progress
+tasks-group-running = 进行中
+# Source: Cancelled
+tasks-subtitle-cancelled = 已取消
+# Source: Completed
+tasks-subtitle-completed = 已完成
+# Source: Completed · { $time }
+tasks-subtitle-completed-time = 已完成 · { $time }
+# Source: Failed
+tasks-subtitle-failed = 失败
+# Source: Stage { $current }/{ $total } · { $label }
+tasks-subtitle-stage = 阶段 { $current }/{ $total } · { $label }
+# Source: Starting...
+tasks-subtitle-starting = 正在开始...
 # Source: Username (e.g. Steve)
 username-entry-placeholder-text = 用户名（例如 Steve）
 # Source: Old
