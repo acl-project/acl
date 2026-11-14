@@ -25,7 +25,7 @@ pub struct InstallContext {
     pub mgr: Arc<SharedState<InstanceManager>>,
     pub client: reqwest::Client,
     pub dirs: LauncherDirs,
-    pub config: LauncherConfig,
+    pub config: Arc<SharedState<LauncherConfig>>,
     pub active_install: Arc<Mutex<Option<String>>>,
 }
 
@@ -219,9 +219,6 @@ pub fn spawn_install(
     entry: VersionEntry,
     ctx: InstallContext,
 ) {
-    let max_concurrent = ctx.config.max_concurrent_downloads;
-    let download_source = ctx.config.download_source;
-
     let stage_labels = vec![
         t!("install-stage-fetching-metadata", "Fetching metadata"),
         t!("install-stage-fetching-asset-index", "Fetching asset index"),
@@ -232,8 +229,13 @@ pub fn spawn_install(
     const STAGE_ASSET_INDEX: usize = 1;
     const STAGE_DOWNLOAD: usize = 2;
     const STAGE_RUNTIME: usize = 3;
+
     tasks.submit(
-        format!("Install {}", instance.id()),
+        t!(
+            "tasks-install-instance",
+            "Install {version}",
+            version = instance.id()
+        ),
         stage_labels,
         move |task_id, task_mgr| {
             let instance = instance.clone();
@@ -241,9 +243,13 @@ pub fn spawn_install(
 
             let client = ctx.client.clone();
             let dirs = ctx.dirs.clone();
-            let global_config = ctx.config.clone();
+            // Each retry task uses the latest configuration file
+            // If the player switches the download source, it can also ensure that the latest download source is used.
+            let global_config = ctx.config.read().clone();
             let instance_mgr = Arc::clone(&ctx.mgr);
             let active_install = Arc::clone(&ctx.active_install);
+            let max_concurrent = global_config.max_concurrent_downloads;
+            let download_source = global_config.download_source;
 
             async move {
                 let mut guard = InstallGuard::acquire(&active_install, &instance)?;

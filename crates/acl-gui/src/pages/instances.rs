@@ -155,7 +155,7 @@ impl SimpleComponent for InstancesPage {
                         mgr: Arc::clone(&self.mgr),
                         client: self.client.clone(),
                         dirs: self.dirs.clone(),
-                        config: self.config.read().clone(),
+                        config: Arc::clone(&self.config),
                         active_install: Arc::clone(&self.active_install),
                     },
                 );
