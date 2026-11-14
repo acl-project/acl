@@ -337,12 +337,16 @@ pub fn spawn_install(
                 let metadata_c = metadata.clone();
 
                 // Prepare runtime
-                tokio::task::spawn_blocking(move || {
-                    inst_c.prepare_runtime(&metadata_c, &asset_index, &dirs_c)
-                })
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| e.to_i18n())?;
+
+                // Don't put it in spawn_blocking, otherwise InstallGuard::drop and prepare_runtime will race.
+                inst_c
+                    .prepare_runtime(&metadata_c, &asset_index, &dirs_c)
+                    .map_err(|e| e.to_i18n())?;
+
+                // handle.abort() will only take effect in the next .await
+                // If click Cancel in Prepare runtime, without this line,
+                // the configuration file will be written directly.
+                tokio::task::yield_now().await;
 
                 // Run the forge processors (1.13+)
                 if let Some(ctx) = installer_context
