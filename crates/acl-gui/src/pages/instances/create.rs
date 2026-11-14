@@ -5,9 +5,12 @@ pub mod configure;
 pub mod loader_select;
 pub mod version_select;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
-use acl_core::{Instance, LauncherConfig, ModLoader, manager::InstanceManager};
+use acl_core::{CoreError, Instance, LauncherConfig, ModLoader, manager::InstanceManager};
 use acl_minecraft::VersionEntry;
 
 use relm4::{
@@ -16,6 +19,7 @@ use relm4::{
 use tracing::{error, info};
 
 use crate::{
+    i18n::LocalizeError,
     pages::instances::create::{
         configure::{ConfigureInit, ConfigureInput, ConfigureOutput, ConfigurePage},
         loader_select::{
@@ -49,6 +53,7 @@ pub struct CreatePageInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
     pub cache_dir: PathBuf,
+    pub active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug)]
@@ -70,7 +75,7 @@ pub enum CreateInput {
 #[derive(Debug, Clone)]
 pub enum CreateOutput {
     Cancel,
-    Created(String, VersionEntry),
+    Created(Box<Instance>, VersionEntry),
     ShowToast(String),
 }
 
@@ -81,6 +86,7 @@ pub struct CreatePage {
     version_select: Controller<VersionSelectPage>,
     configure: Controller<ConfigurePage>,
     loader_select: Controller<LoaderSelectPage>,
+    active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[relm4::component(pub)]
@@ -165,6 +171,7 @@ impl Component for CreatePage {
             version_select,
             configure,
             loader_select,
+            active_install: init.active_install,
         };
 
         let widgets = view_output!();
@@ -184,6 +191,19 @@ impl Component for CreatePage {
                 loader,
                 loader_version,
             } => {
+                // You have poisoning and I am poisoned
+                if self
+                    .active_install
+                    .lock()
+                    .map_or(true, |active| active.is_some())
+                {
+                    let _ = sender.output(CreateOutput::ShowToast(t!(
+                        "instances-create-error-active-install",
+                        "Another installation is already in progress"
+                    )));
+                    return;
+                }
+
                 let Some(version_entry) = self.selected_version.clone() else {
                     let _ = sender.output(CreateOutput::ShowToast(t!(
                         "instances-create-error-empty-version",
@@ -193,48 +213,43 @@ impl Component for CreatePage {
                 };
 
                 let versions_dir = self.mgr.read().versions_dir.clone();
-                match Instance::create(&name, &name, &version_entry.id, &versions_dir) {
-                    Ok(mut instance) => {
-                        if loader != ModLoader::Vanilla {
-                            instance.config.mod_loader = loader;
-                            instance.config.mod_loader_version = loader_version;
-                            if let Err(err) = instance.save_config() {
-                                error!("Failed to save instance config: {err}");
-                                let _ = sender.output(CreateOutput::ShowToast(t!(
-                                    "instances-create-error-save-config",
-                                    "Failed to save instance config: {err}",
-                                    err = err
-                                )));
-                            }
-                        }
-                        info!(
-                            "Created instance '{}' with version '{}'",
-                            name, version_entry.id
-                        );
-                        if let Err(err) = self.mgr.write().refresh() {
-                            error!("Failed to refresh instances: {err}");
+                // Only create in memory, do not save, wait until successful installation.
+                let mut instance =
+                    match Instance::new(&name, &name, &version_entry.id, &versions_dir) {
+                        Ok(instance) => instance,
+                        Err(err) => {
+                            error!("Failed to create instance: {err}");
                             let msg = t!(
-                                "instances-create-error-refresh-instances",
-                                "Failed to refresh instances: {err}",
+                                "instances-create-error-create-instance",
+                                "Failed to create instance: {err}",
                                 err = err
                             );
                             let _ = sender.output(CreateOutput::ShowToast(msg));
-                        } else {
-                            self.selected_version = None;
-                            self.step = CreateStep::SelectVersion;
-                            let _ = sender.output(CreateOutput::Created(name, version_entry));
+                            return;
                         }
-                    }
-                    Err(err) => {
-                        error!("Failed to create instance: {err}");
-                        let msg = t!(
-                            "instances-create-error-create-instance",
-                            "Failed to create instance: {err}",
-                            err = err
-                        );
-                        let _ = sender.output(CreateOutput::ShowToast(msg));
-                    }
+                    };
+
+                let already_exists = instance.dir.exists()
+                    || self.mgr.read().instances.iter().any(|i| i.id() == name);
+                if already_exists {
+                    let msg = CoreError::InstanceAlreadyExists { id: name }.to_i18n();
+                    let _ = sender.output(CreateOutput::ShowToast(msg));
+                    return;
                 }
+
+                if loader != ModLoader::Vanilla {
+                    instance.config.mod_loader = loader;
+                    instance.config.mod_loader_version = loader_version;
+                }
+
+                info!(
+                    "Queued installation for instance '{}' with version '{}'",
+                    name, version_entry.id
+                );
+
+                self.selected_version = None;
+                self.step = CreateStep::SelectVersion;
+                let _ = sender.output(CreateOutput::Created(Box::new(instance), version_entry));
             }
             CreateInput::ShowToast(message) => {
                 let _ = sender.output(CreateOutput::ShowToast(message));

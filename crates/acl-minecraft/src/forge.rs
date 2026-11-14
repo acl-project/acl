@@ -343,6 +343,7 @@ impl ModernInstallProfile {
                 .arg(cp_str)
                 .arg(main_class)
                 .args(&args)
+                .kill_on_drop(true)
                 .status()
                 .await
                 .map_err(|source| MinecraftError::Io {

@@ -34,8 +34,8 @@ pub struct InstanceManager {
 
 impl InstanceManager {
     /// Update the instance list and save it.
-    pub fn refresh(&mut self) -> Result<()> {
-        self.instances = Instance::discover_all(&self.versions_dir)?;
+    pub fn refresh(&mut self, cleanup: bool) -> Result<()> {
+        self.instances = Instance::discover_all(&self.versions_dir, cleanup)?;
 
         info!(
             "Find {} versions in {}",
@@ -73,7 +73,8 @@ impl InstanceManager {
             }
         }
 
-        mgr.refresh()?;
+        // Load the instance during initialization and delete the instance that failed to install.
+        mgr.refresh(true)?;
 
         Ok(mgr)
     }
@@ -182,6 +183,16 @@ mod tests {
         }
     }
 
+    fn save_test_instance(
+        id: &str,
+        name: &str,
+        game_version: &str,
+        versions_dir: &std::path::Path,
+    ) {
+        let instance = Instance::new(id, name, game_version, versions_dir).unwrap();
+        instance.save_config().unwrap();
+    }
+
     #[test]
     fn test_manager_config_file_path() {
         let guard = TempDirGuard::new("config_path");
@@ -231,8 +242,8 @@ mod tests {
         fs::create_dir_all(&versions_dir).unwrap();
         fs::create_dir_all(&config_dir).unwrap();
 
-        let _ = Instance::create("inst1", "Instance One", "1.20.4", &versions_dir).unwrap();
-        let _ = Instance::create("inst2", "Instance Two", "1.21", &versions_dir).unwrap();
+        save_test_instance("inst1", "Instance One", "1.20.4", &versions_dir);
+        save_test_instance("inst2", "Instance Two", "1.21", &versions_dir);
 
         let mgr = InstanceManager::load(versions_dir, config_dir).unwrap();
         assert_eq!(mgr.instances.len(), 2);
@@ -249,8 +260,8 @@ mod tests {
         fs::create_dir_all(&versions_dir).unwrap();
         fs::create_dir_all(&config_dir).unwrap();
 
-        let _ = Instance::create("inst1", "Instance One", "1.20.4", &versions_dir).unwrap();
-        let _ = Instance::create("inst2", "Instance Two", "1.21", &versions_dir).unwrap();
+        save_test_instance("inst1", "Instance One", "1.20.4", &versions_dir);
+        save_test_instance("inst2", "Instance Two", "1.21", &versions_dir);
 
         let mut mgr = InstanceManager::load(versions_dir, config_dir).unwrap();
         let selected = mgr.set_active_instance("inst2").unwrap();
@@ -272,8 +283,8 @@ mod tests {
         fs::create_dir_all(&versions_dir).unwrap();
         fs::create_dir_all(&config_dir).unwrap();
 
-        let _ = Instance::create("inst1", "Instance One", "1.20.4", &versions_dir).unwrap();
-        let _ = Instance::create("inst2", "Instance Two", "1.21", &versions_dir).unwrap();
+        save_test_instance("inst1", "Instance One", "1.20.4", &versions_dir);
+        save_test_instance("inst2", "Instance Two", "1.21", &versions_dir);
 
         let mut mgr = InstanceManager::load(versions_dir.clone(), config_dir).unwrap();
         mgr.set_active_instance("inst1").unwrap();
@@ -295,7 +306,7 @@ mod tests {
         fs::create_dir_all(&versions_dir).unwrap();
         fs::create_dir_all(&config_dir).unwrap();
 
-        let _ = Instance::create("inst1", "Instance One", "1.20.4", &versions_dir).unwrap();
+        save_test_instance("inst1", "Instance One", "1.20.4", &versions_dir);
 
         let mut mgr = InstanceManager::load(versions_dir.clone(), config_dir).unwrap();
         assert_eq!(mgr.config.active_id, Some("inst1".to_string()));
@@ -314,8 +325,8 @@ mod tests {
         fs::create_dir_all(&versions_dir).unwrap();
         fs::create_dir_all(&config_dir).unwrap();
 
-        let _ = Instance::create("inst1", "Instance One", "1.20.4", &versions_dir).unwrap();
-        let _ = Instance::create("inst2", "Instance Two", "1.21", &versions_dir).unwrap();
+        save_test_instance("inst1", "Instance One", "1.20.4", &versions_dir);
+        save_test_instance("inst2", "Instance Two", "1.21", &versions_dir);
 
         let mut mgr = InstanceManager::load(versions_dir.clone(), config_dir).unwrap();
         mgr.set_active_instance("inst1").unwrap();
@@ -367,8 +378,8 @@ mod tests {
         fs::create_dir_all(&versions_dir).unwrap();
         fs::create_dir_all(&config_dir).unwrap();
 
-        Instance::create("inst_a", "Instance A", "1.20.1", &versions_dir).unwrap();
-        Instance::create("inst_b", "Instance B", "1.21.1", &versions_dir).unwrap();
+        save_test_instance("inst_a", "Instance A", "1.20.1", &versions_dir);
+        save_test_instance("inst_b", "Instance B", "1.21.1", &versions_dir);
 
         let mut mgr = InstanceManager::load(versions_dir, config_dir).unwrap();
 
@@ -414,8 +425,8 @@ mod tests {
         fs::create_dir_all(&versions_dir).unwrap();
         fs::create_dir_all(&config_dir).unwrap();
 
-        Instance::create("inst_1", "Instance One", "1.20.1", &versions_dir).unwrap();
-        Instance::create("inst_2", "Instance Two", "1.21.1", &versions_dir).unwrap();
+        save_test_instance("inst_1", "Instance One", "1.20.1", &versions_dir);
+        save_test_instance("inst_2", "Instance Two", "1.21.1", &versions_dir);
 
         let mut mgr = InstanceManager::load(versions_dir, config_dir).unwrap();
 
@@ -436,5 +447,38 @@ mod tests {
         // 3. Nonexistent instance lookup returns None
         assert!(mgr.instance("nonexistent").is_none());
         assert!(mgr.instance_mut("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_manager_load_cleans_up_installing_and_refresh_preserves() {
+        let temp = TempDirGuard::new("cleanup_installing");
+        let versions_dir = temp.path().join("versions");
+        let config_dir = temp.path().join("config");
+        fs::create_dir_all(&versions_dir).unwrap();
+        fs::create_dir_all(&config_dir).unwrap();
+
+        save_test_instance("ready_inst", "Ready Instance", "1.21.1", &versions_dir);
+
+        let stale = Instance::new("stale_inst", "Stale Instance", "1.21.1", &versions_dir).unwrap();
+        fs::create_dir_all(&stale.dir).unwrap();
+        stale.mark_installing().unwrap();
+
+        // Initial load enables cleanup = true and removes incomplete installing directories
+        let mut mgr = InstanceManager::load(versions_dir.clone(), config_dir).unwrap();
+        assert_eq!(mgr.instances.len(), 1);
+        assert_eq!(mgr.instances[0].id(), "ready_inst");
+        assert!(!stale.dir.exists());
+        assert!(versions_dir.join("ready_inst").exists());
+
+        // Subsequent refresh(false) leaves currently installing directories intact
+        let in_progress =
+            Instance::new("active_inst", "Active Instance", "1.21.1", &versions_dir).unwrap();
+        fs::create_dir_all(&in_progress.dir).unwrap();
+        in_progress.mark_installing().unwrap();
+
+        mgr.refresh(false).unwrap();
+        assert_eq!(mgr.instances.len(), 1);
+        assert_eq!(mgr.instances[0].id(), "ready_inst");
+        assert!(in_progress.dir.exists());
     }
 }

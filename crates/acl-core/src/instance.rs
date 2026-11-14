@@ -3,6 +3,7 @@
 
 use std::{
     fs::{self, File},
+    io::ErrorKind,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -13,10 +14,11 @@ use acl_minecraft::{
     version::VersionPatch,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 const CONFIG_NAME: &str = "aclcfg.toml";
 const ABNORMAL_MARK: &str = ".abnormal";
+pub const INSTALL_MARK: &str = ".installing";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -269,24 +271,34 @@ impl Instance {
         self.dir.join("loader.json")
     }
 
-    pub fn create(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        game_version: impl Into<String>,
-        version_dir: &Path,
-    ) -> Result<Self> {
-        let id = id.into();
-        let instance = Instance::new(id.clone(), name, game_version, version_dir)?;
-        if instance.dir.exists() {
-            return Err(CoreError::InstanceAlreadyExists { id });
-        }
-
-        instance.save_config()?;
-
-        Ok(instance)
+    pub fn install_mark_path(&self) -> PathBuf {
+        self.dir.join(INSTALL_MARK)
     }
 
-    pub fn discover_all(versions_dir: &Path) -> Result<Vec<Self>> {
+    pub fn mark_installing(&self) -> Result<()> {
+        let mark = self.install_mark_path();
+        fs::File::create(&mark).map_err(|source| CoreError::Io { path: mark, source })?;
+        Ok(())
+    }
+
+    pub fn clear_installing(&self) -> Result<()> {
+        let install_mark = self.install_mark_path();
+
+        match fs::remove_file(&install_mark) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(CoreError::Io {
+                path: install_mark,
+                source: e,
+            }),
+        }
+    }
+
+    pub fn has_install_mark(&self) -> bool {
+        fs::exists(self.install_mark_path()).unwrap_or(false)
+    }
+
+    pub fn discover_all(versions_dir: &Path, cleanup: bool) -> Result<Vec<Self>> {
         let mut instances = Vec::new();
 
         if !versions_dir.exists() {
@@ -307,6 +319,14 @@ impl Instance {
             let path = entry.path();
 
             if !path.is_dir() {
+                continue;
+            }
+
+            // Clean up the directory where the download failed
+            if cleanup && path.join(INSTALL_MARK).exists() {
+                if let Err(err) = fs::remove_dir_all(&path) {
+                    error!("Failed to cleanup dir {}: {err}", path.display());
+                }
                 continue;
             }
 
@@ -738,28 +758,109 @@ mod tests {
         assert_eq!(loaded.saves_dir(), renamed_dir.join("saves"));
     }
 
+    fn save_test_instance(
+        id: &str,
+        name: &str,
+        game_version: &str,
+        version_dir: &Path,
+    ) -> Instance {
+        let instance =
+            Instance::new(id, name, game_version, version_dir).expect("should create instance");
+        instance.save_config().expect("should save instance config");
+        instance
+    }
+
     #[test]
-    fn test_instance_create_and_already_exists() {
-        let temp = TempDirGuard::new("instance_create");
+    fn test_instance_new_is_in_memory_until_saved() {
+        let temp = TempDirGuard::new("instance_in_memory");
         let version_dir = temp.path();
 
-        let instance = Instance::create("inst_create", "Created Instance", "1.21.1", version_dir)
-            .expect("should create new instance");
-        assert_eq!(instance.id(), "inst_create");
+        let instance = Instance::new("inst_mem", "In-Memory Instance", "1.21.1", version_dir)
+            .expect("should construct instance in memory");
+        assert_eq!(instance.id(), "inst_mem");
+        assert!(!instance.dir.exists());
+        assert!(!instance.config_file().exists());
+        assert!(
+            Instance::discover_all(version_dir, false)
+                .expect("discover_all should succeed")
+                .is_empty()
+        );
+
+        instance
+            .save_config()
+            .expect("should save instance config to disk");
         assert!(instance.dir.exists());
         assert!(instance.config_file().exists());
 
         let loaded =
-            Instance::load_from_dir(&instance.dir).expect("should load created instance from disk");
-        assert_eq!(loaded.id(), "inst_create");
-        assert_eq!(loaded.config.name, "Created Instance");
+            Instance::load_from_dir(&instance.dir).expect("should load saved instance from disk");
+        assert_eq!(loaded.id(), "inst_mem");
+        assert_eq!(loaded.config.name, "In-Memory Instance");
         assert_eq!(loaded.config.game_version, "1.21.1");
+    }
 
-        let duplicate = Instance::create("inst_create", "Duplicate", "1.21.1", version_dir);
-        assert!(matches!(
-            duplicate,
-            Err(CoreError::InstanceAlreadyExists { id }) if id == "inst_create"
-        ));
+    #[test]
+    fn test_instance_install_mark_lifecycle() {
+        let temp = TempDirGuard::new("instance_install_mark");
+        let version_dir = temp.path();
+
+        let instance = Instance::new("install_inst", "Install Test", "1.21.1", version_dir)
+            .expect("should construct instance");
+        assert!(!instance.has_install_mark());
+
+        // Clearing when neither directory nor marker exists should be a no-op
+        instance
+            .clear_installing()
+            .expect("clearing absent install mark should succeed");
+
+        fs::create_dir_all(&instance.dir).expect("failed to create instance dir");
+        instance
+            .mark_installing()
+            .expect("should create install mark");
+        assert!(instance.has_install_mark());
+        assert!(instance.install_mark_path().exists());
+
+        instance
+            .clear_installing()
+            .expect("should remove install mark");
+        assert!(!instance.has_install_mark());
+        assert!(!instance.install_mark_path().exists());
+
+        // Clearing again when absent should remain a no-op
+        instance
+            .clear_installing()
+            .expect("clearing missing install mark again should succeed");
+    }
+
+    #[test]
+    fn test_instance_discover_all_install_cleanup() {
+        let temp = TempDirGuard::new("instance_discover_cleanup");
+        let version_dir = temp.path();
+
+        let ready = save_test_instance("ready_inst", "Ready Instance", "1.21.1", version_dir);
+
+        let partial = Instance::new("partial_inst", "Partial Instance", "1.21.1", version_dir)
+            .expect("should construct partial instance");
+        fs::create_dir_all(&partial.dir).expect("failed to create partial dir");
+        partial
+            .mark_installing()
+            .expect("should mark partial instance as installing");
+        fs::write(partial.version_json(), b"{}").expect("failed to write partial artifact");
+
+        // cleanup = false leaves in-progress directories untouched while excluding them from results
+        let without_cleanup =
+            Instance::discover_all(version_dir, false).expect("discover_all should succeed");
+        assert_eq!(without_cleanup.len(), 1);
+        assert_eq!(without_cleanup[0].id(), ready.id());
+        assert!(partial.dir.exists());
+
+        // cleanup = true removes directories marked as installing while keeping complete instances
+        let with_cleanup =
+            Instance::discover_all(version_dir, true).expect("discover_all should succeed");
+        assert_eq!(with_cleanup.len(), 1);
+        assert_eq!(with_cleanup[0].id(), ready.id());
+        assert!(!partial.dir.exists());
+        assert!(ready.dir.exists());
     }
 
     #[test]
@@ -767,8 +868,8 @@ mod tests {
         let temp = TempDirGuard::new("instance_discover");
         let non_existent = temp.path().join("non_existent_versions");
 
-        let empty =
-            Instance::discover_all(&non_existent).expect("non-existent dir should return empty");
+        let empty = Instance::discover_all(&non_existent, false)
+            .expect("non-existent dir should return empty");
         assert!(empty.is_empty());
 
         let version_dir = temp.path().join("versions");
@@ -788,21 +889,22 @@ mod tests {
             .expect("failed to write broken config");
 
         // Valid instances with different last_play_at timestamps
-        let mut inst_older = Instance::create("older_inst", "Older", "1.20.1", &version_dir)
+        let mut inst_older = Instance::new("older_inst", "Older", "1.20.1", &version_dir)
             .expect("failed to create older_inst");
         inst_older.config.last_play_at = 100;
         inst_older
             .save_config()
             .expect("failed to save older_inst config");
 
-        let mut inst_newer = Instance::create("newer_inst", "Newer", "1.21.1", &version_dir)
+        let mut inst_newer = Instance::new("newer_inst", "Newer", "1.21.1", &version_dir)
             .expect("failed to create newer_inst");
         inst_newer.config.last_play_at = 500;
         inst_newer
             .save_config()
             .expect("failed to save newer_inst config");
 
-        let discovered = Instance::discover_all(&version_dir).expect("discover_all should succeed");
+        let discovered =
+            Instance::discover_all(&version_dir, false).expect("discover_all should succeed");
         assert_eq!(discovered.len(), 2);
         assert_eq!(discovered[0].id(), "newer_inst");
         assert_eq!(discovered[1].id(), "older_inst");
@@ -813,8 +915,7 @@ mod tests {
         let temp = TempDirGuard::new("instance_delete");
         let version_dir = temp.path();
 
-        let instance = Instance::create("to_delete", "Delete Me", "1.21", version_dir)
-            .expect("should create instance");
+        let instance = save_test_instance("to_delete", "Delete Me", "1.21", version_dir);
         assert!(instance.dir.exists());
 
         instance.delete().expect("should delete existing instance");
@@ -831,8 +932,7 @@ mod tests {
         let temp = TempDirGuard::new("instance_update_last_play");
         let version_dir = temp.path();
 
-        let mut instance = Instance::create("play_inst", "Play Instance", "1.21", version_dir)
-            .expect("should create instance");
+        let mut instance = save_test_instance("play_inst", "Play Instance", "1.21", version_dir);
         assert_eq!(instance.config.last_play_at, 0);
 
         instance
@@ -908,8 +1008,7 @@ mod tests {
             temp.path().join("cache"),
         );
 
-        let instance = Instance::create("cached_inst", "Cached", "1.21.1", &dirs.versions_dir())
-            .expect("should create instance");
+        let instance = save_test_instance("cached_inst", "Cached", "1.21.1", &dirs.versions_dir());
 
         let json_payload = r#"{
             "id": "1.21.1",
@@ -1081,8 +1180,8 @@ mod tests {
             temp.path().join("cache"),
         );
 
-        let instance = Instance::create("runtime_inst", "Runtime", "1.21.1", &dirs.versions_dir())
-            .expect("should create instance");
+        let instance =
+            save_test_instance("runtime_inst", "Runtime", "1.21.1", &dirs.versions_dir());
 
         // Prepare a mock asset object for legacy resource mapping
         let object_hash = "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598";
@@ -1170,8 +1269,7 @@ mod tests {
             temp.path().join("cache"),
         );
 
-        let instance = Instance::create("test_meta", "Meta Test", "1.21.1", &dirs.versions_dir())
-            .expect("should create instance");
+        let instance = save_test_instance("test_meta", "Meta Test", "1.21.1", &dirs.versions_dir());
 
         // 1. Missing metadata file returns CoreError::Io
         let err_missing = instance.load_metadata().unwrap_err();
@@ -1205,13 +1303,12 @@ mod tests {
             temp.path().join("cache"),
         );
 
-        let instance = Instance::create(
+        let instance = save_test_instance(
             "test_abnormal",
             "Abnormal Test",
             "1.21.1",
             &dirs.versions_dir(),
-        )
-        .expect("should create instance");
+        );
         let mark_path = instance.game_dir().join(ABNORMAL_MARK);
 
         assert!(!mark_path.exists());
@@ -1238,13 +1335,12 @@ mod tests {
             temp.path().join("cache"),
         );
 
-        let instance = Instance::create(
+        let instance = save_test_instance(
             "test_integrity",
             "Integrity Test",
             "1.21.1",
             &dirs.versions_dir(),
-        )
-        .expect("should create instance");
+        );
 
         let files_dir = temp.path().join("files");
         fs::create_dir_all(&files_dir).expect("failed to create files dir");
@@ -1344,13 +1440,12 @@ mod tests {
             temp.path().join("cache"),
         );
 
-        let instance = Instance::create(
+        let instance = save_test_instance(
             "test_load_meta",
             "Load Meta Test",
             "1.21.1",
             &dirs.versions_dir(),
-        )
-        .expect("should create instance");
+        );
 
         let base_meta = sample_version_metadata();
         fs::write(
@@ -1413,13 +1508,12 @@ mod tests {
             temp.path().join("cache"),
         );
 
-        let mut instance = Instance::create(
+        let mut instance = save_test_instance(
             "modded_missing_loader",
             "Modded Missing Loader",
             "1.21.1",
             &dirs.versions_dir(),
-        )
-        .expect("should create instance");
+        );
 
         instance.config.mod_loader = ModLoader::Fabric;
         instance.config.mod_loader_version = Some("0.16.10".to_string());

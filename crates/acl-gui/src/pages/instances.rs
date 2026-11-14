@@ -4,16 +4,18 @@
 mod create;
 mod list;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use acl_core::manager::InstanceManager;
-use acl_core::{LauncherConfig, LauncherDirs};
+use acl_core::task::TaskManager;
+use acl_core::{Instance, LauncherConfig, LauncherDirs};
 use acl_minecraft::VersionEntry;
 use relm4::{ComponentParts, SimpleComponent};
 use relm4::{SharedState, prelude::*};
 
+use crate::install::{InstallContext, spawn_install};
 use crate::pages::instances::create::{CreateOutput, CreatePage, CreatePageInit};
-use crate::pages::instances::list::{ListInput, ListOutput, ListPage, ListPageInit};
+use crate::pages::instances::list::{ListOutput, ListPage, ListPageInit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstancesView {
@@ -32,22 +34,29 @@ impl InstancesView {
 }
 
 pub struct InstancesPage {
+    mgr: Arc<SharedState<InstanceManager>>,
+    config: Arc<SharedState<LauncherConfig>>,
+    client: reqwest::Client,
+    dirs: LauncherDirs,
+    tasks: Arc<TaskManager>,
     current_view: InstancesView,
     list_page: Controller<ListPage>,
     create_page: Controller<CreatePage>,
+    active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
 pub enum InstancesPageOutput {
     ShowToast(String),
     OpenDetail(String),
+    OpenTasks,
 }
 
 #[derive(Debug, Clone)]
 pub enum InstancesPageInput {
     ChangeView(InstancesView),
     ShowToast(String),
-    InstanceCreated(String, VersionEntry),
+    InstanceCreated(Box<Instance>, VersionEntry),
     OpenDetail(String),
 }
 
@@ -56,6 +65,8 @@ pub struct InstancesInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
     pub dirs: LauncherDirs,
+    pub tasks: Arc<TaskManager>,
+    pub active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[relm4::component(pub)]
@@ -87,8 +98,6 @@ impl SimpleComponent for InstancesPage {
             .launch(ListPageInit {
                 mgr: Arc::clone(&init.mgr),
                 config: Arc::clone(&init.config),
-                client: init.client.clone(),
-                dirs: init.dirs.clone(),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 ListOutput::ShowToast(message) => InstancesPageInput::ShowToast(message),
@@ -98,21 +107,30 @@ impl SimpleComponent for InstancesPage {
 
         let create_page = CreatePage::builder()
             .launch(CreatePageInit {
-                mgr: init.mgr,
-                config: init.config,
-                client: init.client,
+                mgr: Arc::clone(&init.mgr),
+                config: Arc::clone(&init.config),
+                client: init.client.clone(),
                 cache_dir: init.dirs.cache_dir().to_path_buf(),
+                active_install: Arc::clone(&init.active_install),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 CreateOutput::Cancel => InstancesPageInput::ChangeView(InstancesView::List),
-                CreateOutput::Created(id, entry) => InstancesPageInput::InstanceCreated(id, entry),
+                CreateOutput::Created(instance, entry) => {
+                    InstancesPageInput::InstanceCreated(instance, entry)
+                }
                 CreateOutput::ShowToast(text) => InstancesPageInput::ShowToast(text),
             });
 
         let model = InstancesPage {
+            mgr: init.mgr,
+            config: init.config,
+            client: init.client,
+            dirs: init.dirs,
+            tasks: init.tasks,
             current_view: InstancesView::List,
             list_page,
             create_page,
+            active_install: init.active_install,
         };
 
         let widgets = view_output!();
@@ -128,10 +146,21 @@ impl SimpleComponent for InstancesPage {
             InstancesPageInput::ShowToast(message) => {
                 let _ = sender.output(InstancesPageOutput::ShowToast(message));
             }
-            InstancesPageInput::InstanceCreated(id, entry) => {
-                self.list_page.emit(ListInput::Refresh);
-                self.list_page.emit(ListInput::StartDownload(id, entry));
-                sender.input(InstancesPageInput::ChangeView(InstancesView::List));
+            InstancesPageInput::InstanceCreated(instance, entry) => {
+                spawn_install(
+                    &self.tasks,
+                    *instance,
+                    entry,
+                    InstallContext {
+                        mgr: Arc::clone(&self.mgr),
+                        client: self.client.clone(),
+                        dirs: self.dirs.clone(),
+                        config: Arc::clone(&self.config),
+                        active_install: Arc::clone(&self.active_install),
+                    },
+                );
+                self.current_view = InstancesView::List;
+                let _ = sender.output(InstancesPageOutput::OpenTasks);
             }
             InstancesPageInput::OpenDetail(id) => {
                 let _ = sender.output(InstancesPageOutput::OpenDetail(id));
