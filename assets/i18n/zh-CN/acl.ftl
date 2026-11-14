@@ -139,6 +139,8 @@ home-page-error-save-accounts = 保存账户失败：{ $err }
 home-page-no-instance = 未选择实例
 # Source: Instance settings
 home-page-tooltip-instance-settings = 实例设置
+# Source: Another installation is already in progress
+install-error-already-in-progress = 已有另一个安装任务正在进行中
 # Source: Downloading files
 install-stage-downloading-files = 下载文件...
 # Source: Fetching asset index
@@ -199,6 +201,8 @@ instances-create-button-clear = 清除
 instances-create-button-create = 创建
 # Source: Next
 instances-create-button-next = 下一步
+# Source: Another installation is already in progress
+instances-create-error-active-install = 已有另一个安装任务正在进行中
 # Source: Failed to create instance: { $err }
 instances-create-error-create-instance = 创建实例失败：{ $err }
 # Source: Please select a Minecraft version
@@ -413,6 +417,8 @@ tasks-empty-title = 暂无任务
 tasks-group-finished = 已完成
 # Source: In Progress
 tasks-group-running = 进行中
+# Source: Install { $version }
+tasks-install-instance = 安装 { $version }
 # Source: Cancelled
 tasks-subtitle-cancelled = 已取消
 # Source: Completed

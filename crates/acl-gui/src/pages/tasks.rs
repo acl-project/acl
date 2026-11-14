@@ -243,6 +243,9 @@ impl FactoryComponent for TaskRow {
     }
 
     fn init_model(snap: Self::Init, _index: &Self::Index, _sender: FactorySender<Self>) -> Self {
+        // StageRow does not update the language
+        // This is to ensure the simplicity of the code
+        // And no one should switch languages in the middle of downloading.
         let stages: Vec<Controller<StageRow>> = snap
             .stages
             .iter()
