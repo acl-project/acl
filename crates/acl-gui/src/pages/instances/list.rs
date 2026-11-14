@@ -58,7 +58,7 @@ impl FactoryComponent for InstanceRow {
 
             set_selectable: false,
             set_focus_on_click: false,
-
+            set_activatable: true,
 
             connect_activated[sender, id = self.instance.id().to_owned()] => move |_| {
                 let _ = sender.output(InstanceRowOutput::Select(id.clone()));
