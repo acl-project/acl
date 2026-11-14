@@ -104,6 +104,7 @@ pub struct TaskManager {
 }
 
 impl TaskManager {
+    /// The caller needs to have entered the Tokio runtime
     pub fn new() -> Arc<Self> {
         let (events, _) = broadcast::channel(256);
         let flush_notify = Arc::new(Notify::new());

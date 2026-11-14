@@ -3,6 +3,7 @@
 
 use std::{
     fs::{self, File},
+    io::ErrorKind,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -17,6 +18,7 @@ use tracing::{info, warn};
 
 const CONFIG_NAME: &str = "aclcfg.toml";
 const ABNORMAL_MARK: &str = ".abnormal";
+pub const INSTALL_MARK: &str = ".installing";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -269,6 +271,34 @@ impl Instance {
         self.dir.join("loader.json")
     }
 
+    pub fn install_mark_dir(&self) -> PathBuf {
+        self.dir.join(INSTALL_MARK)
+    }
+
+    pub fn mark_installing(&self) -> Result<()> {
+        let mark = self.install_mark_dir();
+        fs::File::create(&mark).map_err(|source| CoreError::Io { path: mark, source })?;
+        Ok(())
+    }
+
+    pub fn clear_installing(&self) -> Result<()> {
+        let install_mark = self.install_mark_dir();
+
+        match fs::remove_file(&install_mark) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(CoreError::Io {
+                path: install_mark,
+                source: e,
+            }),
+        }
+    }
+
+    pub fn has_install_mark(&self) -> bool {
+        fs::exists(self.install_mark_dir()).unwrap_or(false)
+    }
+
+    /// Create a new instance in memory
     pub fn create(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -281,7 +311,10 @@ impl Instance {
             return Err(CoreError::InstanceAlreadyExists { id });
         }
 
-        instance.save_config()?;
+        fs::create_dir_all(&instance.dir).map_err(|source| CoreError::Io {
+            path: instance.dir.clone(),
+            source,
+        })?;
 
         Ok(instance)
     }

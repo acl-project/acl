@@ -53,6 +53,7 @@ pub enum TaskRowOutput {
 }
 
 impl TaskRow {
+    /// Calculate the percentage of the total progress based on the current progress
     fn percent_text(&self) -> String {
         let count = self.snap.stages.len();
         if count == 0 {
@@ -441,6 +442,7 @@ impl Component for TasksPage {
                 if target.get(&id).is_some() {
                     target.send(&id, TaskRowInput::Update(snap));
                 } else {
+                    // Construct a TaskRow
                     target.insert(id, snap);
                 }
             }
