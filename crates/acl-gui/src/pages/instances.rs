@@ -152,6 +152,7 @@ impl SimpleComponent for InstancesPage {
                     self.dirs.clone(),
                     self.config.read().clone(),
                 );
+                self.current_view = InstancesView::List;
                 let _ = sender.output(InstancesPageOutput::OpenTasks);
             }
             InstancesPageInput::OpenDetail(id) => {

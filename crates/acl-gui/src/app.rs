@@ -401,9 +401,6 @@ impl SimpleComponent for AppModel {
         let tasks_page = TasksPage::builder()
             .launch(TasksInit {
                 config: Arc::clone(&config_state),
-                mgr: Arc::clone(&instances_state),
-                client: client.clone(),
-                dirs: dirs.clone(),
                 tasks: Arc::clone(&tasks),
             })
             .forward(sender.input_sender(), |msg| match msg {});
@@ -481,6 +478,9 @@ impl SimpleComponent for AppModel {
                 self.stack
                     .page(self.settings_page.widget())
                     .set_title(Some(&NavPage::Settings.title()));
+                self.stack
+                    .page(self.tasks_page.widget())
+                    .set_title(Some(&NavPage::Tasks.title()))
             }
             AppMsg::OpenInstanceDetail(id) => {
                 self.instance_detail

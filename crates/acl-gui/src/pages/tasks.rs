@@ -4,8 +4,7 @@
 use std::sync::Arc;
 
 use acl_core::{
-    LauncherConfig, LauncherDirs,
-    manager::InstanceManager,
+    LauncherConfig,
     task::{StageStatus, TaskEvent, TaskId, TaskManager, TaskSnapshot, TaskState},
 };
 use libadwaita::prelude::*;
@@ -279,9 +278,6 @@ impl FactoryComponent for TaskRow {
 #[derive(Clone)]
 pub struct TasksInit {
     pub config: Arc<SharedState<LauncherConfig>>,
-    pub mgr: Arc<SharedState<InstanceManager>>,
-    pub client: reqwest::Client,
-    pub dirs: LauncherDirs,
     pub tasks: Arc<TaskManager>,
 }
 
