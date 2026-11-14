@@ -38,11 +38,12 @@ pub struct TaskRow {
     stages: Vec<Controller<StageRow>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TaskRowInput {
     Update(TaskSnapshot),
     Primary,
     CopyError,
+    Refresh,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -167,6 +168,7 @@ impl FactoryComponent for TaskRow {
         #[root]
         #[name = "row"]
         adw::ExpanderRow {
+            set_use_markup: false,
             set_title: &self.snap.title,
             #[watch]
             set_subtitle: &self.subtitle(),
@@ -195,13 +197,14 @@ impl FactoryComponent for TaskRow {
            // The row that displays the error message should be the last one added
            // so that it can be displayed at the bottom.
             add_row = &adw::ActionRow {
+                set_use_markup: false,
                 add_css_class: "error",
                 #[watch]
                 set_visible: matches!(self.snap.state, TaskState::Failed(_)),
                 #[watch]
                 set_title: self.error_text(),
 
-              // Provide buttons for easy copying
+                // Provide buttons for easy copying
                 add_suffix = &gtk::Button {
                     set_valign: gtk::Align::Center,
                     add_css_class: "flat",
@@ -272,6 +275,7 @@ impl FactoryComponent for TaskRow {
                     display.clipboard().set_text(err);
                 }
             }
+            TaskRowInput::Refresh => {}
         }
     }
 }
@@ -413,7 +417,10 @@ impl Component for TasksPage {
                 TaskRowOutput::Retry => self.tasks.retry(id),
             },
             TasksInput::ClearFinished => self.tasks.clear_finished(),
-            TasksInput::Refresh => {}
+            TasksInput::Refresh => {
+                self.finished.broadcast(TaskRowInput::Refresh);
+                self.running.broadcast(TaskRowInput::Refresh);
+            }
         }
     }
 
