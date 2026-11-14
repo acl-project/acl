@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::cell::Cell;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -145,6 +147,8 @@ pub struct HomePage {
 
     instance_model: gtk::StringList,
     account_model: gtk::StringList,
+    /// Prevent instance and account from generating redundant messages
+    syncing: Rc<Cell<bool>>,
 }
 
 pub struct HomeInit {
@@ -456,12 +460,17 @@ impl HomePage {
     }
 
     fn refresh_models(&mut self) {
+        self.syncing.set(true);
+
         let mgr = self.mgr.read();
         let inst_names: Vec<&str> = mgr
             .instances
             .iter()
             .map(|i| i.config.name.as_str())
             .collect();
+        // StringList::splice clears the list and re-inserts it.
+        // GTK DropDown will reset selected to 0 on the spot and trigger connect_selected_notify immediately.
+        // If not blocked, a new useless message will be generated
         self.instance_model
             .splice(0, self.instance_model.n_items(), &inst_names);
         drop(mgr);
@@ -482,6 +491,8 @@ impl HomePage {
         let acc_refs: Vec<&str> = acc_labels.iter().map(|s| s.as_str()).collect();
         self.account_model
             .splice(0, self.account_model.n_items(), &acc_refs);
+
+        self.syncing.set(false);
     }
 
     fn active_instance_index(&self) -> u32 {
@@ -581,7 +592,10 @@ impl Component for HomePage {
                                 #[watch]
                                 set_sensitive: !model.mgr.read().instances.is_empty(),
 
-                                connect_selected_notify[sender] => move |dropdown| {
+                                connect_selected_notify[sender,syncing] => move |dropdown| {
+                                    if syncing.get() {
+                                        return;
+                                    }
                                     let idx = dropdown.selected();
                                     if idx != gtk::INVALID_LIST_POSITION {
                                         sender.input(HomeInput::SelectInstance(idx as usize));
@@ -609,7 +623,10 @@ impl Component for HomePage {
                                 #[watch]
                                 set_sensitive: !model.accounts.read().accounts().is_empty(),
 
-                                connect_selected_notify[sender] => move |dropdown| {
+                                connect_selected_notify[sender, syncing] => move |dropdown| {
+                                    if syncing.get() {
+                                        return;
+                                    }
                                     let idx = dropdown.selected();
                                     if idx != gtk::INVALID_LIST_POSITION {
                                         sender.input(HomeInput::SelectAccount(idx as usize));
@@ -724,6 +741,8 @@ impl Component for HomePage {
         let instance_model = gtk::StringList::new(&[]);
         let account_model = gtk::StringList::new(&[]);
 
+        let syncing = Rc::new(Cell::new(false));
+
         let mut model = HomePage {
             mgr: init.mgr,
             accounts: init.accounts,
@@ -733,6 +752,7 @@ impl Component for HomePage {
             stage: LaunchStage::Idle,
             instance_model: instance_model.clone(),
             account_model: account_model.clone(),
+            syncing: Rc::clone(&syncing),
         };
 
         model.refresh_models();
@@ -760,28 +780,49 @@ impl Component for HomePage {
                 }
             }
             HomeInput::SelectInstance(idx) => {
-                let mut mgr = self.mgr.write();
-                if let Some(id) = mgr.instances.get(idx).map(|i| i.id().to_owned())
-                    && mgr.config.active_id.as_deref() != Some(id.as_str())
-                {
-                    if let Err(err) = mgr.set_active_instance(&id) {
-                        error!("Failed to set active instance: {err}");
+                // Determine whether the id has really changed before writing
+                // Avoid redundant Refresh
+                // Otherwise, it will form an infinite loop with refresh model
+                let target_id = {
+                    let mgr = self.mgr.read();
+                    let Some(id) = mgr.instances.get(idx).map(|i| i.id()) else {
+                        return;
+                    };
+                    if mgr.config.active_id.as_deref() == Some(id) {
                         return;
                     }
-                    if let Err(err) = mgr.save() {
-                        error!("Failed to save instances config: {err}");
-                    }
+                    id.to_owned()
+                };
+
+                let mut mgr = self.mgr.write();
+
+                if let Err(err) = mgr.set_active_instance(&target_id) {
+                    error!("Failed to set active instance: {err}");
+                    return;
+                }
+                if let Err(err) = mgr.save() {
+                    error!("Failed to save instances config: {err}");
                 }
             }
             HomeInput::SelectAccount(idx) => {
-                let mut accounts = self.accounts.write();
-                if let Some(uuid) = accounts.accounts().get(idx).map(|a| a.uuid)
-                    && accounts.active_uuid() != Some(uuid)
-                {
-                    let _ = accounts.set_active_account(uuid);
-                    if let Err(err) = accounts.save(&self.dirs.accounts_file()) {
-                        error!("Failed to save accounts: {err}");
+                // Determine whether the uuid has really changed before writing
+                // Avoid redundant Refresh
+                // Otherwise, it will form an infinite loop with refresh model
+                let target_uuid = {
+                    let accounts = self.accounts.read();
+                    let Some(uuid) = accounts.accounts().get(idx).map(|a| a.uuid) else {
+                        return;
+                    };
+                    if accounts.active_uuid() == Some(uuid) {
+                        return;
                     }
+                    uuid
+                };
+
+                let mut accounts = self.accounts.write();
+                let _ = accounts.set_active_account(target_uuid);
+                if let Err(err) = accounts.save(&self.dirs.accounts_file()) {
+                    error!("Failed to save accounts: {err}");
                 }
             }
         }
@@ -1220,6 +1261,7 @@ mod tests {
             stage: LaunchStage::Idle,
             instance_model: gtk::StringList::new(&[]),
             account_model: gtk::StringList::new(&[]),
+            syncing: Rc::new(Cell::new(false)),
         };
 
         assert_eq!(page.active_instance_index(), 0);
