@@ -4,7 +4,7 @@
 mod create;
 mod list;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use acl_core::manager::InstanceManager;
 use acl_core::task::TaskManager;
@@ -13,7 +13,7 @@ use acl_minecraft::VersionEntry;
 use relm4::{ComponentParts, SimpleComponent};
 use relm4::{SharedState, prelude::*};
 
-use crate::install::spawn_install;
+use crate::install::{InstallContext, spawn_install};
 use crate::pages::instances::create::{CreateOutput, CreatePage, CreatePageInit};
 use crate::pages::instances::list::{ListOutput, ListPage, ListPageInit};
 
@@ -42,6 +42,7 @@ pub struct InstancesPage {
     current_view: InstancesView,
     list_page: Controller<ListPage>,
     create_page: Controller<CreatePage>,
+    active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +66,7 @@ pub struct InstancesInit {
     pub client: reqwest::Client,
     pub dirs: LauncherDirs,
     pub tasks: Arc<TaskManager>,
+    pub active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[relm4::component(pub)]
@@ -109,6 +111,7 @@ impl SimpleComponent for InstancesPage {
                 config: Arc::clone(&init.config),
                 client: init.client.clone(),
                 cache_dir: init.dirs.cache_dir().to_path_buf(),
+                active_install: Arc::clone(&init.active_install),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 CreateOutput::Cancel => InstancesPageInput::ChangeView(InstancesView::List),
@@ -127,6 +130,7 @@ impl SimpleComponent for InstancesPage {
             current_view: InstancesView::List,
             list_page,
             create_page,
+            active_install: init.active_install,
         };
 
         let widgets = view_output!();
@@ -145,12 +149,15 @@ impl SimpleComponent for InstancesPage {
             InstancesPageInput::InstanceCreated(instance, entry) => {
                 spawn_install(
                     &self.tasks,
-                    Arc::clone(&self.mgr),
                     *instance,
                     entry,
-                    self.client.clone(),
-                    self.dirs.clone(),
-                    self.config.read().clone(),
+                    InstallContext {
+                        mgr: Arc::clone(&self.mgr),
+                        client: self.client.clone(),
+                        dirs: self.dirs.clone(),
+                        config: self.config.read().clone(),
+                        active_install: Arc::clone(&self.active_install),
+                    },
                 );
                 self.current_view = InstancesView::List;
                 let _ = sender.output(InstancesPageOutput::OpenTasks);

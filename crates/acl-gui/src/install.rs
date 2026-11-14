@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use acl_core::{
-    Instance, LauncherConfig, LauncherDirs, ModLoader, launch, manager::InstanceManager,
+    CoreError, Instance, LauncherConfig, LauncherDirs, ModLoader, launch, manager::InstanceManager,
     task::TaskManager,
 };
 use acl_minecraft::{
@@ -17,6 +20,14 @@ use relm4::{SharedState, tokio};
 use tracing::warn;
 
 use crate::{i18n::LocalizeError, t};
+
+pub struct InstallContext {
+    pub mgr: Arc<SharedState<InstanceManager>>,
+    pub client: reqwest::Client,
+    pub dirs: LauncherDirs,
+    pub config: LauncherConfig,
+    pub active_install: Arc<Mutex<Option<String>>>,
+}
 
 /// The context used during the installation phase
 struct InstallerPostContext {
@@ -139,17 +150,77 @@ async fn install_forge(
     Ok(())
 }
 
+struct InstallGuard {
+    active_install: Arc<Mutex<Option<String>>>,
+    instance: Instance,
+    completed: bool,
+}
+
+impl InstallGuard {
+    /// Attempt to perform instance installation tasks
+    /// Ensures that there will only be one instance installation task at the same time
+    fn acquire(
+        active_install: &Arc<Mutex<Option<String>>>,
+        instance: &Instance,
+    ) -> Result<Self, String> {
+        let mut active = active_install.lock().unwrap_or_else(|e| e.into_inner());
+        if active.is_some() {
+            return Err(t!(
+                "install-error-already-in-progress",
+                "Another installation is already in progress"
+            ));
+        }
+
+        if instance.dir.exists() {
+            return Err(CoreError::InstanceAlreadyExists {
+                id: instance.id().to_owned(),
+            }
+            .to_i18n());
+        }
+        std::fs::create_dir_all(&instance.dir).map_err(|e| e.to_string())?;
+        if let Err(err) = instance.mark_installing() {
+            let _ = instance.delete();
+            return Err(err.to_i18n());
+        }
+        *active = Some(instance.id().to_owned());
+        Ok(Self {
+            active_install: Arc::clone(active_install),
+            instance: instance.clone(),
+            completed: false,
+        })
+    }
+}
+
+/// Automatically release active and clean the file if it fails.
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        let mut active = self
+            .active_install
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        // Only release the slot if it still belongs to this install, preventing a
+        // rejected or duplicate task from clearing another running installation's lock.
+        if active.as_deref() == Some(self.instance.id()) {
+            *active = None;
+        }
+
+        drop(active);
+
+        if !self.completed && self.instance.has_install_mark() {
+            let _ = self.instance.delete();
+        }
+    }
+}
+
 pub fn spawn_install(
     tasks: &Arc<TaskManager>,
-    mgr: Arc<SharedState<InstanceManager>>,
     instance: Instance,
     entry: VersionEntry,
-    client: reqwest::Client,
-    dirs: LauncherDirs,
-    config: LauncherConfig,
+    ctx: InstallContext,
 ) {
-    let max_concurrent = config.max_concurrent_downloads;
-    let download_source = config.download_source;
+    let max_concurrent = ctx.config.max_concurrent_downloads;
+    let download_source = ctx.config.download_source;
 
     let stage_labels = vec![
         t!("install-stage-fetching-metadata", "Fetching metadata"),
@@ -168,12 +239,15 @@ pub fn spawn_install(
             let instance = instance.clone();
             let entry = entry.clone();
 
-            let client = client.clone();
-            let dirs = dirs.clone();
-            let global_config = config.clone();
-            let instance_mgr = Arc::clone(&mgr);
+            let client = ctx.client.clone();
+            let dirs = ctx.dirs.clone();
+            let global_config = ctx.config.clone();
+            let instance_mgr = Arc::clone(&ctx.mgr);
+            let active_install = Arc::clone(&ctx.active_install);
 
             async move {
+                let mut guard = InstallGuard::acquire(&active_install, &instance)?;
+
                 // Fetch metadata
                 task_mgr.start_stage(task_id, STAGE_METADATA);
 
@@ -291,7 +365,14 @@ pub fn spawn_install(
 
                 // Successfully installed, write aclcfg.toml and refresh the list
                 instance.save_config().map_err(|e| e.to_i18n())?;
-                instance_mgr.write().refresh().map_err(|e| e.to_i18n())?;
+                instance.clear_installing().map_err(|e| e.to_i18n())?;
+                guard.completed = true;
+                // Release immediately installing = false (completed, directory will not be deleted)
+                drop(guard);
+                instance_mgr
+                    .write()
+                    .refresh(false)
+                    .map_err(|e| e.to_i18n())?;
                 Ok(())
             }
         },

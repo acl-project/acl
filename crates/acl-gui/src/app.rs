@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    str::FromStr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use crate::{
     i18n::apply_language,
@@ -329,6 +333,8 @@ impl SimpleComponent for AppModel {
 
         let tasks = TaskManager::new();
 
+        let active_install: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
         // Initialize ui widgets
 
         let ms_login = MsLoginDialog::builder()
@@ -373,6 +379,7 @@ impl SimpleComponent for AppModel {
                 client: client.clone(),
                 dirs: dirs.clone(),
                 tasks: Arc::clone(&tasks),
+                active_install: Arc::clone(&active_install),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 InstancesPageOutput::ShowToast(message) => AppMsg::ShowToast(message),

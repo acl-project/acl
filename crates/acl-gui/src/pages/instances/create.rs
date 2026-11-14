@@ -5,7 +5,10 @@ pub mod configure;
 pub mod loader_select;
 pub mod version_select;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use acl_core::{CoreError, Instance, LauncherConfig, ModLoader, manager::InstanceManager};
 use acl_minecraft::VersionEntry;
@@ -50,6 +53,7 @@ pub struct CreatePageInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
     pub cache_dir: PathBuf,
+    pub active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug)]
@@ -82,6 +86,7 @@ pub struct CreatePage {
     version_select: Controller<VersionSelectPage>,
     configure: Controller<ConfigurePage>,
     loader_select: Controller<LoaderSelectPage>,
+    active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[relm4::component(pub)]
@@ -166,6 +171,7 @@ impl Component for CreatePage {
             version_select,
             configure,
             loader_select,
+            active_install: init.active_install,
         };
 
         let widgets = view_output!();
@@ -185,6 +191,19 @@ impl Component for CreatePage {
                 loader,
                 loader_version,
             } => {
+                // You have poisoning and I am poisoned
+                if self
+                    .active_install
+                    .lock()
+                    .map_or(true, |active| active.is_some())
+                {
+                    let _ = sender.output(CreateOutput::ShowToast(t!(
+                        "instances-create-error-active-install",
+                        "Another installation is already in progress"
+                    )));
+                    return;
+                }
+
                 let Some(version_entry) = self.selected_version.clone() else {
                     let _ = sender.output(CreateOutput::ShowToast(t!(
                         "instances-create-error-empty-version",
