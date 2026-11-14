@@ -107,3 +107,67 @@ impl SimpleComponent for StageRow {
         self.stage = msg;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row_with(status: StageStatus, done: u64, total: u64) -> StageRow {
+        StageRow {
+            stage: StageSnapshot {
+                label: "Test stage".to_string(),
+                status,
+                done,
+                total,
+                bytes_per_sec: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_stage_row_status_icon_and_css() {
+        assert_eq!(
+            row_with(StageStatus::Pending, 0, 0).status_icon(),
+            "content-loading-symbolic"
+        );
+        assert_eq!(
+            row_with(StageStatus::Running, 0, 0).status_icon(),
+            "content-loading-symbolic"
+        );
+        assert_eq!(
+            row_with(StageStatus::Done, 0, 0).status_icon(),
+            "object-select-symbolic"
+        );
+        assert_eq!(
+            row_with(StageStatus::Cancelled, 0, 0).status_icon(),
+            "process-stop-symbolic"
+        );
+        assert_eq!(
+            row_with(StageStatus::Failed, 0, 0).status_icon(),
+            "dialog-error-symbolic"
+        );
+
+        assert_eq!(
+            row_with(StageStatus::Pending, 0, 0).status_css(),
+            &["dim-label"]
+        );
+        assert_eq!(
+            row_with(StageStatus::Running, 0, 0).status_css(),
+            &["dim-label"]
+        );
+        assert_eq!(
+            row_with(StageStatus::Cancelled, 0, 0).status_css(),
+            &["dim-label"]
+        );
+        assert_eq!(row_with(StageStatus::Done, 0, 0).status_css(), &["success"]);
+        assert_eq!(row_with(StageStatus::Failed, 0, 0).status_css(), &["error"]);
+    }
+
+    #[test]
+    fn test_stage_row_fraction() {
+        assert_eq!(row_with(StageStatus::Pending, 0, 0).fraction(), 0.0);
+        assert_eq!(row_with(StageStatus::Pending, 5, 0).fraction(), 0.0);
+        assert!((row_with(StageStatus::Running, 3, 10).fraction() - 0.3).abs() < f64::EPSILON);
+        assert_eq!(row_with(StageStatus::Running, 15, 10).fraction(), 1.0);
+    }
+}

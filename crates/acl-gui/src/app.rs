@@ -515,6 +515,7 @@ mod tests {
         let cases = [
             (NavPage::Home, "home", "Home"),
             (NavPage::Instances, "instances", "Instances"),
+            (NavPage::Tasks, "tasks", "Tasks"),
             (NavPage::Accounts, "accounts", "Accounts"),
             (NavPage::Settings, "settings", "Settings"),
         ];
@@ -530,6 +531,7 @@ mod tests {
         let pages = [
             NavPage::Home,
             NavPage::Instances,
+            NavPage::Tasks,
             NavPage::Accounts,
             NavPage::Settings,
         ];

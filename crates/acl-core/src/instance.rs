@@ -271,18 +271,18 @@ impl Instance {
         self.dir.join("loader.json")
     }
 
-    pub fn install_mark_dir(&self) -> PathBuf {
+    pub fn install_mark_path(&self) -> PathBuf {
         self.dir.join(INSTALL_MARK)
     }
 
     pub fn mark_installing(&self) -> Result<()> {
-        let mark = self.install_mark_dir();
+        let mark = self.install_mark_path();
         fs::File::create(&mark).map_err(|source| CoreError::Io { path: mark, source })?;
         Ok(())
     }
 
     pub fn clear_installing(&self) -> Result<()> {
-        let install_mark = self.install_mark_dir();
+        let install_mark = self.install_mark_path();
 
         match fs::remove_file(&install_mark) {
             Ok(()) => Ok(()),
@@ -295,7 +295,7 @@ impl Instance {
     }
 
     pub fn has_install_mark(&self) -> bool {
-        fs::exists(self.install_mark_dir()).unwrap_or(false)
+        fs::exists(self.install_mark_path()).unwrap_or(false)
     }
 
     pub fn discover_all(versions_dir: &Path, cleanup: bool) -> Result<Vec<Self>> {
@@ -818,13 +818,13 @@ mod tests {
             .mark_installing()
             .expect("should create install mark");
         assert!(instance.has_install_mark());
-        assert!(instance.install_mark_dir().exists());
+        assert!(instance.install_mark_path().exists());
 
         instance
             .clear_installing()
             .expect("should remove install mark");
         assert!(!instance.has_install_mark());
-        assert!(!instance.install_mark_dir().exists());
+        assert!(!instance.install_mark_path().exists());
 
         // Clearing again when absent should remain a no-op
         instance

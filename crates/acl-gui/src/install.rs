@@ -388,3 +388,103 @@ pub fn spawn_install(
         },
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "acl_test_install_{}_{}_{}",
+                name,
+                std::process::id(),
+                id
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("failed to create temp test dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_install_guard_acquire_concurrency_and_cleanup() {
+        let temp = TempDirGuard::new("guard_lifecycle");
+        let active_install: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+        let inst_a = Instance::new("inst_a", "Inst A", "1.21.1", temp.path())
+            .expect("should construct inst_a");
+        let inst_b = Instance::new("inst_b", "Inst B", "1.21.1", temp.path())
+            .expect("should construct inst_b");
+
+        let guard = InstallGuard::acquire(&active_install, &inst_a)
+            .expect("first install guard should succeed");
+        assert!(inst_a.dir.exists());
+        assert!(inst_a.has_install_mark());
+        assert_eq!(active_install.lock().unwrap().as_deref(), Some("inst_a"));
+
+        // Concurrent install while inst_a is active should fail without clearing inst_a's lock.
+        let concurrent = InstallGuard::acquire(&active_install, &inst_b);
+        assert!(concurrent.is_err());
+        assert!(!inst_b.dir.exists());
+        assert_eq!(active_install.lock().unwrap().as_deref(), Some("inst_a"));
+
+        // Dropping an uncompleted guard removes the marked directory and clears active_install.
+        drop(guard);
+        assert!(!inst_a.dir.exists());
+        assert_eq!(*active_install.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn test_install_guard_preserves_existing_dir_and_completed_install() {
+        let temp = TempDirGuard::new("guard_existing_and_completed");
+        let active_install: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+        let existing = Instance::new("existing", "Existing", "1.21.1", temp.path())
+            .expect("should construct existing");
+        existing
+            .save_config()
+            .expect("should save existing instance config");
+
+        // Acquiring over an existing directory fails and leaves the existing directory untouched.
+        let err = InstallGuard::acquire(&active_install, &existing);
+        assert!(err.is_err());
+        assert!(existing.dir.exists());
+        assert!(existing.config_file().exists());
+        assert_eq!(*active_install.lock().unwrap(), None);
+
+        // Completed install clears the mark and preserves the instance directory on drop.
+        let completed = Instance::new("completed", "Completed", "1.21.1", temp.path())
+            .expect("should construct completed");
+        let mut guard = InstallGuard::acquire(&active_install, &completed)
+            .expect("guard should acquire for new instance");
+        completed.save_config().expect("should save config");
+        completed
+            .clear_installing()
+            .expect("should clear install mark");
+        guard.completed = true;
+        drop(guard);
+
+        assert!(completed.dir.exists());
+        assert!(completed.config_file().exists());
+        assert!(!completed.has_install_mark());
+        assert_eq!(*active_install.lock().unwrap(), None);
+    }
+}

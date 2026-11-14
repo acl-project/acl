@@ -438,3 +438,356 @@ impl TaskSubscription {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+    async fn next_event(sub: &mut TaskSubscription) -> TaskEvent {
+        tokio::time::timeout(Duration::from_secs(2), sub.next())
+            .await
+            .expect("timed out waiting for task event")
+            .expect("task subscription closed unexpectedly")
+    }
+
+    #[test]
+    fn test_task_state_is_finished() {
+        assert!(!TaskState::Running.is_finished());
+        assert!(TaskState::Succeeded.is_finished());
+        assert!(TaskState::Failed("err".to_string()).is_finished());
+        assert!(TaskState::Cancelled.is_finished());
+    }
+
+    #[tokio::test]
+    async fn test_submit_start_stage_and_finish_success() {
+        let tm = TaskManager::new();
+        let mut sub = tm.subscribe();
+
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+        let done_rx = Arc::new(Mutex::new(Some(done_rx)));
+
+        let task_id = tm.submit(
+            "Install 1.21.1",
+            vec![
+                "Metadata".to_string(),
+                "Assets".to_string(),
+                "Download".to_string(),
+            ],
+            move |id, mgr| {
+                let done_rx = Arc::clone(&done_rx);
+                async move {
+                    mgr.start_stage(id, 0);
+                    mgr.start_stage(id, 1);
+                    let rx = done_rx.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    if let Some(rx) = rx {
+                        let _ = rx.await;
+                    }
+                    Ok(())
+                }
+            },
+        );
+
+        let second_id = tm.submit("No-op", vec![], |_, _| async { Ok(()) });
+        assert!(second_id > task_id);
+
+        // Drain events until task_id reaches Running stage 1, then release completion.
+        let mut saw_running_initial = false;
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == task_id
+            {
+                if snap.stages[0].status == StageStatus::Pending {
+                    assert_eq!(snap.title, "Install 1.21.1");
+                    assert_eq!(snap.state, TaskState::Running);
+                    assert_eq!(snap.elapsed_secs, None);
+                    saw_running_initial = true;
+                } else if snap.stages[1].status == StageStatus::Running {
+                    assert_eq!(snap.stages[0].status, StageStatus::Done);
+                    assert_eq!(snap.stages[2].status, StageStatus::Pending);
+                    break;
+                }
+            }
+        }
+        assert!(saw_running_initial);
+
+        let _ = done_tx.send(());
+
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == task_id
+                && snap.state == TaskState::Succeeded
+            {
+                assert!(snap.elapsed_secs.is_some());
+                assert!(snap.stages.iter().all(|s| s.status == StageStatus::Done));
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_finish_failure_and_retry() {
+        let tm = TaskManager::new();
+        let mut sub = tm.subscribe();
+        let attempts = Arc::new(AtomicUsize::new(0));
+
+        let task_id = tm.submit(
+            "Install Fabric",
+            vec!["Step 1".to_string(), "Step 2".to_string()],
+            {
+                let attempts = Arc::clone(&attempts);
+                move |id, mgr| {
+                    let attempts = Arc::clone(&attempts);
+                    async move {
+                        let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                        mgr.start_stage(id, 0);
+                        if attempt == 0 {
+                            mgr.update_stage(id, 0, 5, 10, Some(1024));
+                            Err("network error".to_string())
+                        } else {
+                            mgr.start_stage(id, 1);
+                            Ok(())
+                        }
+                    }
+                }
+            },
+        );
+
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == task_id
+                && snap.state == TaskState::Failed("network error".to_string())
+            {
+                assert_eq!(snap.stages[0].status, StageStatus::Failed);
+                assert_eq!(snap.stages[1].status, StageStatus::Pending);
+                assert!(snap.elapsed_secs.is_some());
+                break;
+            }
+        }
+
+        tm.retry(task_id);
+
+        let mut saw_reset = false;
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == task_id
+            {
+                if snap.state == TaskState::Running && snap.stages[0].status == StageStatus::Pending
+                {
+                    assert_eq!(snap.stages[0].done, 0);
+                    assert_eq!(snap.stages[0].total, 0);
+                    assert_eq!(snap.stages[0].bytes_per_sec, None);
+                    assert_eq!(snap.elapsed_secs, None);
+                    saw_reset = true;
+                } else if snap.state == TaskState::Succeeded {
+                    assert!(saw_reset);
+                    assert_eq!(snap.stages[0].status, StageStatus::Done);
+                    assert_eq!(snap.stages[1].status, StageStatus::Done);
+                    break;
+                }
+            }
+        }
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+
+        // Retrying a succeeded task should be a no-op.
+        tm.retry(task_id);
+        tokio::task::yield_now().await;
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_aborts_task_and_guards_against_finish() {
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let tm = TaskManager::new();
+        let mut sub = tm.subscribe();
+        let started = Arc::new(Notify::new());
+        let dropped = Arc::new(AtomicBool::new(false));
+
+        let task_id = tm.submit(
+            "Long Task",
+            vec!["Stage A".to_string(), "Stage B".to_string()],
+            {
+                let started = Arc::clone(&started);
+                let dropped = Arc::clone(&dropped);
+                move |id, mgr| {
+                    let started = Arc::clone(&started);
+                    let dropped = Arc::clone(&dropped);
+                    async move {
+                        let _guard = DropFlag(dropped);
+                        mgr.start_stage(id, 0);
+                        started.notify_one();
+                        std::future::pending::<()>().await;
+                        Ok(())
+                    }
+                }
+            },
+        );
+
+        tokio::time::timeout(Duration::from_secs(2), started.notified())
+            .await
+            .expect("task should start");
+
+        tm.cancel(task_id);
+
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == task_id
+                && snap.state == TaskState::Cancelled
+            {
+                assert_eq!(snap.stages[0].status, StageStatus::Cancelled);
+                assert_eq!(snap.stages[1].status, StageStatus::Pending);
+                assert!(snap.elapsed_secs.is_some());
+                break;
+            }
+        }
+
+        // Give the Tokio scheduler a moment to drop the aborted future.
+        for _ in 0..10 {
+            if dropped.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(dropped.load(Ordering::SeqCst));
+
+        // Late completion or repeat cancel must not alter Cancelled state.
+        tm.finish(task_id, Ok(()));
+        tm.finish(task_id, Err("late error".to_string()));
+        tm.cancel(task_id);
+        let tasks = tm.lock_tasks();
+        assert_eq!(
+            tasks.get(&task_id).map(|r| &r.snapshot.state),
+            Some(&TaskState::Cancelled)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_stage_flushes_and_remove_clear_finished() {
+        let tm = TaskManager::new();
+        let mut sub = tm.subscribe();
+
+        let running_started = Arc::new(Notify::new());
+        let running_release = Arc::new(Notify::new());
+
+        let running_id = tm.submit("Running Task", vec!["Download".to_string()], {
+            let running_started = Arc::clone(&running_started);
+            let running_release = Arc::clone(&running_release);
+            move |id, mgr| {
+                let running_started = Arc::clone(&running_started);
+                let running_release = Arc::clone(&running_release);
+                async move {
+                    mgr.update_stage(id, 0, 3, 10, Some(2048));
+                    running_started.notify_one();
+                    running_release.notified().await;
+                    Ok(())
+                }
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), running_started.notified())
+            .await
+            .expect("running task should update stage");
+
+        // update_stage sets dirty and flushes within ~100ms.
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == running_id
+                && snap.stages[0].done == 3
+            {
+                assert_eq!(snap.stages[0].status, StageStatus::Running);
+                assert_eq!(snap.stages[0].total, 10);
+                assert_eq!(snap.stages[0].bytes_per_sec, Some(2048));
+                break;
+            }
+        }
+
+        // Removing a running task must be ignored.
+        tm.remove(running_id);
+        assert!(tm.lock_tasks().contains_key(&running_id));
+
+        let done_id_1 = tm.submit("Done 1", vec![], |_, _| async { Ok(()) });
+        let done_id_2 = tm.submit("Done 2", vec![], |_, _| async { Err("fail".to_string()) });
+
+        let mut seen_done_1 = false;
+        let mut seen_done_2 = false;
+        while !(seen_done_1 && seen_done_2) {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await {
+                if snap.id == done_id_1 && snap.state == TaskState::Succeeded {
+                    seen_done_1 = true;
+                } else if snap.id == done_id_2
+                    && snap.state == TaskState::Failed("fail".to_string())
+                {
+                    seen_done_2 = true;
+                }
+            }
+        }
+
+        tm.remove(done_id_1);
+        loop {
+            if let TaskEvent::Removed(id) = next_event(&mut sub).await
+                && id == done_id_1
+            {
+                break;
+            }
+        }
+        assert!(!tm.lock_tasks().contains_key(&done_id_1));
+
+        tm.clear_finished();
+        loop {
+            if let TaskEvent::Removed(id) = next_event(&mut sub).await
+                && id == done_id_2
+            {
+                break;
+            }
+        }
+        assert!(!tm.lock_tasks().contains_key(&done_id_2));
+        assert!(tm.lock_tasks().contains_key(&running_id));
+
+        running_release.notify_one();
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == running_id
+                && snap.state == TaskState::Succeeded
+            {
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_replays_existing_tasks() {
+        let tm = TaskManager::new();
+        let existing_id = tm.submit("Existing", vec!["Only".to_string()], |_, _| async {
+            Ok(())
+        });
+
+        // Wait until the pre-existing task completes before subscribing.
+        for _ in 0..50 {
+            let done = tm
+                .lock_tasks()
+                .get(&existing_id)
+                .is_some_and(|r| r.snapshot.state == TaskState::Succeeded);
+            if done {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let mut sub = tm.subscribe();
+        match next_event(&mut sub).await {
+            TaskEvent::Upsert(snap) => {
+                assert_eq!(snap.id, existing_id);
+                assert_eq!(snap.title, "Existing");
+                assert_eq!(snap.state, TaskState::Succeeded);
+            }
+            other => panic!("expected Upsert replay, got {other:?}"),
+        }
+    }
+}

@@ -459,3 +459,149 @@ impl Component for TasksPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acl_core::task::StageSnapshot;
+
+    fn make_stage(label: &str, status: StageStatus, done: u64, total: u64) -> StageSnapshot {
+        StageSnapshot {
+            label: label.to_string(),
+            status,
+            done,
+            total,
+            bytes_per_sec: None,
+        }
+    }
+
+    fn make_row(
+        stages: Vec<StageSnapshot>,
+        state: TaskState,
+        elapsed_secs: Option<u64>,
+    ) -> TaskRow {
+        TaskRow {
+            snap: TaskSnapshot {
+                id: 1,
+                title: "Install 1.21.1".to_string(),
+                stages,
+                state,
+                elapsed_secs,
+            },
+            stages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_format_speed_and_duration() {
+        assert_eq!(format_speed(0), "0 KB/s");
+        assert_eq!(format_speed(512 * 1024), "512 KB/s");
+        assert_eq!(format_speed(1024 * 1024), "1.0 MB/s");
+        assert_eq!(format_speed(1536 * 1024), "1.5 MB/s");
+
+        assert_eq!(format_duration(0), "0s");
+        assert_eq!(format_duration(59), "59s");
+        assert_eq!(format_duration(60), "1:00");
+        assert_eq!(format_duration(125), "2:05");
+    }
+
+    #[test]
+    fn test_task_row_percent_text() {
+        let empty = make_row(vec![], TaskState::Running, None);
+        assert_eq!(empty.percent_text(), "0%");
+
+        let partial = make_row(
+            vec![
+                make_stage("A", StageStatus::Done, 0, 0),
+                make_stage("B", StageStatus::Running, 5, 10),
+                make_stage("C", StageStatus::Pending, 0, 0),
+                make_stage("D", StageStatus::Pending, 0, 0),
+            ],
+            TaskState::Running,
+            None,
+        );
+        // (1.0 + 0.5) / 4 = 37.5% -> 38%
+        assert_eq!(partial.percent_text(), "38%");
+
+        let overflow = make_row(
+            vec![
+                make_stage("A", StageStatus::Done, 0, 0),
+                make_stage("B", StageStatus::Running, 200, 100),
+            ],
+            TaskState::Running,
+            None,
+        );
+        assert_eq!(overflow.percent_text(), "100%");
+    }
+
+    #[test]
+    fn test_task_row_subtitle() {
+        let strip_isolates = |s: String| s.replace(['\u{2068}', '\u{2069}'], "");
+
+        let starting = make_row(
+            vec![make_stage("Fetching metadata", StageStatus::Pending, 0, 0)],
+            TaskState::Running,
+            None,
+        );
+        assert_eq!(starting.subtitle(), "Starting...");
+
+        let running_plain = make_row(
+            vec![
+                make_stage("Fetching metadata", StageStatus::Done, 0, 0),
+                make_stage("Downloading files", StageStatus::Running, 3, 10),
+            ],
+            TaskState::Running,
+            None,
+        );
+        assert_eq!(
+            strip_isolates(running_plain.subtitle()),
+            "Stage 2/2 · Downloading files"
+        );
+
+        let mut stage_with_speed = make_stage("Downloading files", StageStatus::Running, 3, 10);
+        stage_with_speed.bytes_per_sec = Some(1536 * 1024);
+        let running_speed = make_row(vec![stage_with_speed], TaskState::Running, None);
+        assert_eq!(
+            strip_isolates(running_speed.subtitle()),
+            "Stage 1/1 · Downloading files · 1.5 MB/s"
+        );
+
+        let completed_timed = make_row(vec![], TaskState::Succeeded, Some(65));
+        assert_eq!(
+            strip_isolates(completed_timed.subtitle()),
+            "Completed · 1:05"
+        );
+
+        let completed_untimed = make_row(vec![], TaskState::Succeeded, None);
+        assert_eq!(completed_untimed.subtitle(), "Completed");
+
+        let failed = make_row(vec![], TaskState::Failed("boom".to_string()), Some(2));
+        assert_eq!(failed.subtitle(), "Failed");
+
+        let cancelled = make_row(vec![], TaskState::Cancelled, Some(1));
+        assert_eq!(cancelled.subtitle(), "Cancelled");
+    }
+
+    #[test]
+    fn test_task_row_actions_and_error_text() {
+        let running = make_row(vec![], TaskState::Running, None);
+        assert_eq!(running.primary_icon(), "process-stop-symbolic");
+        assert_eq!(running.primary_tooltip(), "Cancel");
+        assert_eq!(running.error_text(), "");
+
+        let failed = make_row(vec![], TaskState::Failed("IO error".to_string()), None);
+        assert_eq!(failed.primary_icon(), "view-refresh-symbolic");
+        assert_eq!(failed.primary_tooltip(), "Retry");
+        assert_eq!(failed.error_text(), "IO error");
+
+        let succeeded = make_row(vec![], TaskState::Succeeded, Some(3));
+        assert_eq!(succeeded.primary_icon(), "user-trash-symbolic");
+        assert_eq!(succeeded.primary_tooltip(), "Remove");
+        assert_eq!(succeeded.error_text(), "");
+
+        let cancelled = make_row(vec![], TaskState::Cancelled, Some(3));
+        assert_eq!(cancelled.primary_icon(), "user-trash-symbolic");
+        assert_eq!(cancelled.primary_tooltip(), "Remove");
+        assert_eq!(cancelled.error_text(), "");
+    }
+}
