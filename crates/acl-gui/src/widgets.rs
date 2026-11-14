@@ -2,3 +2,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod ms_login;
+pub mod stage_row;

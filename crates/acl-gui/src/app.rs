@@ -13,6 +13,7 @@ use crate::{
         },
         instances::{InstancesInit, InstancesPage, InstancesPageOutput},
         settings::{SettingsOutput, SettingsPage},
+        tasks::{TasksInit, TasksPage},
     },
     t,
     widgets::ms_login::{MsLoginDialog, MsLoginInit, MsLoginInput, MsLoginOutput},
@@ -23,7 +24,7 @@ use libadwaita::NavigationPage;
 use relm4::{SharedState, prelude::*};
 
 use acl_auth::AccountStore;
-use acl_core::{LauncherConfig, LauncherDirs, manager::InstanceManager};
+use acl_core::{LauncherConfig, LauncherDirs, manager::InstanceManager, task::TaskManager};
 use tracing::error;
 
 const USER_AGENT: &str = concat!(
@@ -37,12 +38,16 @@ pub enum AppView {
     #[default]
     Main,
     InstanceDetail,
+    Download,
+    Installer,
 }
 impl AppView {
     fn as_str(self) -> &'static str {
         match self {
             Self::Main => "main",
             Self::InstanceDetail => "instance-detail",
+            Self::Download => "download",
+            Self::Installer => "installer",
         }
     }
 }
@@ -52,6 +57,7 @@ pub enum NavPage {
     #[default]
     Home,
     Instances,
+    Tasks,
     Accounts,
     Settings,
 }
@@ -63,6 +69,7 @@ impl NavPage {
             Self::Instances => "instances",
             Self::Accounts => "accounts",
             Self::Settings => "settings",
+            Self::Tasks => "tasks",
         }
     }
 
@@ -72,6 +79,7 @@ impl NavPage {
             Self::Instances => t!("navigation-page-instances", "Instances"),
             Self::Accounts => t!("navigation-page-accounts", "Accounts"),
             Self::Settings => t!("navigation-page-settings", "Settings"),
+            Self::Tasks => t!("navigation-page-tasks", "Tasks"),
         }
     }
 }
@@ -85,6 +93,7 @@ impl FromStr for NavPage {
             "instances" => Ok(Self::Instances),
             "accounts" => Ok(Self::Accounts),
             "settings" => Ok(Self::Settings),
+            "tasks" => Ok(Self::Tasks),
             _ => Err(()),
         }
     }
@@ -99,6 +108,7 @@ pub struct AppModel {
     instances_page: Controller<InstancesPage>,
     accounts_page: Controller<AccountsPage>,
     settings_page: Controller<SettingsPage>,
+    tasks_page: Controller<TasksPage>,
     ms_login: Controller<MsLoginDialog>,
 
     instance_detail: Controller<InstanceDetail>,
@@ -112,6 +122,8 @@ pub struct AppModel {
     instances: Arc<SharedState<InstanceManager>>,
     #[allow(dead_code)]
     client: reqwest::Client,
+    #[allow(dead_code)]
+    tasks: Arc<TaskManager>,
 }
 
 #[derive(Debug)]
@@ -124,6 +136,7 @@ pub enum AppMsg {
     /// Open the instance details page; the String is the instance id.
     OpenInstanceDetail(String),
     CloseInstanceDetail,
+    OpenDownload,
     Refresh,
     Quit,
 }
@@ -158,9 +171,49 @@ impl SimpleComponent for AppModel {
                             set_child = &adw::ToolbarView {
                                 add_top_bar = &adw::HeaderBar {},
                                 #[wrap(Some)]
-                                set_content = &adw::ViewSwitcherSidebar {
-                                    set_stack: Some(stack),
-                                },
+                                set_content = &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+
+                                    adw::ViewSwitcherSidebar {
+                                        set_vexpand: true,
+                                        set_stack: Some(stack),
+                                    },
+
+                                    gtk::Separator {},
+
+                                    gtk::Button {
+                                        add_css_class: "flat",
+                                        set_margin_all: 6,
+                                        connect_clicked => AppMsg::OpenDownload,
+
+                                        gtk::Box {
+                                            set_orientation: gtk::Orientation::Horizontal,
+                                            set_spacing: 12,
+                                            set_margin_start: 6,
+                                            set_margin_end: 6,
+                                            set_margin_top: 6,
+                                            set_margin_bottom: 6,
+
+                                            gtk::Image {
+                                                set_icon_name: Some("folder-download-symbolic"),
+                                            },
+
+                                            gtk::Label {
+                                                set_hexpand: true,
+                                                set_halign: gtk::Align::Start,
+                                                #[watch]
+                                                set_label: &t!("navigation-page-download", "Download Center"),
+                                            },
+
+                                            gtk::Image {
+                                                set_icon_name: Some("go-next-symbolic"),
+                                                add_css_class: "dim-label",
+                                            },
+
+                                        }
+                                    },
+
+                                }
                             },
                         },
 
@@ -181,6 +234,7 @@ impl SimpleComponent for AppModel {
 
                                     add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), &NavPage::Home.title(), "go-home-symbolic"),
                                     add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), &NavPage::Instances.title(), "view-grid-symbolic"),
+                                    add_titled_with_icon: (model.tasks_page.widget(), Some(NavPage::Tasks.as_str()), &NavPage::Tasks.title(), "view-list-symbolic"),
                                     add_titled_with_icon: (model.accounts_page.widget(), Some(NavPage::Accounts.as_str()), &NavPage::Accounts.title(), "avatar-default-symbolic"),
                                     add_titled_with_icon: (model.settings_page.widget(), Some(NavPage::Settings.as_str()), &NavPage::Settings.title(), "emblem-system-symbolic"),
 
@@ -272,6 +326,8 @@ impl SimpleComponent for AppModel {
                 reqwest::Client::new()
             });
 
+        let tasks = TaskManager::new();
+
         // Initialize ui widgets
 
         let ms_login = MsLoginDialog::builder()
@@ -315,6 +371,7 @@ impl SimpleComponent for AppModel {
                 config: Arc::clone(&config_state),
                 client: client.clone(),
                 dirs: dirs.clone(),
+                tasks: Arc::clone(&tasks),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 InstancesPageOutput::ShowToast(message) => AppMsg::ShowToast(message),
@@ -339,6 +396,16 @@ impl SimpleComponent for AppModel {
                 SettingsOutput::ShowToast(message) => AppMsg::ShowToast(message),
             });
 
+        let tasks_page = TasksPage::builder()
+            .launch(TasksInit {
+                config: Arc::clone(&config_state),
+                mgr: Arc::clone(&instances_state),
+                client: client.clone(),
+                dirs: dirs.clone(),
+                tasks: Arc::clone(&tasks),
+            })
+            .forward(sender.input_sender(), |msg| match msg {});
+
         config_state.subscribe(sender.input_sender(), |_| AppMsg::Refresh);
 
         let toast_overlay = adw::ToastOverlay::new();
@@ -350,6 +417,7 @@ impl SimpleComponent for AppModel {
             instances_page,
             accounts_page,
             settings_page,
+            tasks_page,
             ms_login,
             instance_detail,
             stack: adw::ViewStack::new(),
@@ -357,6 +425,7 @@ impl SimpleComponent for AppModel {
             accounts: accounts_state,
             instances: instances_state,
             client,
+            tasks: Arc::clone(&tasks),
         };
 
         let toast_overlay = &model.toast_overlay;
@@ -417,6 +486,7 @@ impl SimpleComponent for AppModel {
                 self.current_view = AppView::InstanceDetail;
             }
             AppMsg::CloseInstanceDetail => self.current_view = AppView::Main,
+            AppMsg::OpenDownload => self.current_view = AppView::Download,
         }
     }
 }

@@ -8,6 +8,7 @@ pub mod instance;
 pub mod java;
 pub mod launch;
 pub mod manager;
+pub mod task;
 
 pub use config::LauncherConfig;
 pub use dirs::LauncherDirs;

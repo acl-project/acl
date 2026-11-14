@@ -4,6 +4,7 @@
 pub mod app;
 pub mod i18n;
 pub mod i18n_errors_gen;
+pub mod install;
 pub mod pages;
 pub mod widgets;
 
@@ -50,6 +51,15 @@ fn main() -> ExitCode {
 
     // Load the global stylesheet embedded at compile time.
     relm4::set_global_css(include_str!("style.css"));
+
+    let rt = match relm4::tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(err) => {
+            error!("Failed to initialize Tokio runtime: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let _guard = rt.enter();
 
     app.run::<AppModel>(dirs);
 

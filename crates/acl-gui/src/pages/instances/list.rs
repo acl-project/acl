@@ -1,116 +1,25 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
-use acl_core::{
-    Instance, LauncherConfig, LauncherDirs, ModLoader, launch, manager::InstanceManager,
-};
+use acl_core::{Instance, LauncherConfig, manager::InstanceManager};
 
-use acl_minecraft::{
-    AssetIndex, DownloadSource, MetaLoaderEntry, VersionEntry, VersionMetadata,
-    download::DownloadProgress,
-    fabric::MetaLoader,
-    forge::{self, ForgeManifest, ModernInstallProfile, NeoForgeManifest},
-};
 use libadwaita::prelude::*;
-use relm4::{
-    SharedState, gtk,
-    prelude::*,
-    tokio::{self, fs},
-};
-use tracing::{error, warn};
+use relm4::{SharedState, prelude::*};
+use tracing::error;
 
-use crate::{i18n::LocalizeError, t};
-
-/// The context used during the installation phase
-struct InstallerPostContext {
-    installer_path: PathBuf,
-    temp_dir: PathBuf,
-    modern: Option<ModernInstallProfile>,
-}
-
-impl Drop for InstallerPostContext {
-    fn drop(&mut self) {
-        // Clean up the temporary files generated
-        let _ = std::fs::remove_dir_all(&self.temp_dir);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum InstallStage {
-    /// Normal and usable
-    #[default]
-    Idle,
-    /// Stage 1: Fetch the version JSON
-    FetchingMetadata,
-    /// Stage 2: Fetch the asset index JSON
-    FetchingAssetIndex,
-    /// Stage 3: Concurrently download the Jar / libraries / assets
-    Downloading(DownloadProgress),
-    /// Stage 4: Extract Natives and map legacy assets
-    PreparingRuntime,
-}
-
-impl InstallStage {
-    fn is_installing(&self) -> bool {
-        *self != InstallStage::Idle
-    }
-
-    fn fraction(&self) -> f64 {
-        match self {
-            InstallStage::Idle => 0.0,
-            InstallStage::FetchingMetadata => 0.02,
-            InstallStage::FetchingAssetIndex => 0.05,
-            InstallStage::Downloading(p) => {
-                let ratio = if p.total_bytes > 0 {
-                    (p.completed_bytes as f64 / p.total_bytes as f64).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-
-                0.05 + ratio * 0.9
-            }
-
-            InstallStage::PreparingRuntime => 0.98,
-        }
-    }
-    fn status_text(&self) -> Option<String> {
-        match self {
-            InstallStage::Idle => None,
-            InstallStage::FetchingMetadata => Some(t!(
-                "install-stage-fetching-metadata",
-                "Fetching metadata..."
-            )),
-            InstallStage::FetchingAssetIndex => Some(t!(
-                "install-stage-fetching-asset-index",
-                "Fetching asset index..."
-            )),
-            InstallStage::Downloading(p) => Some(t!(
-                "install-stage-downloading",
-                "Downloading ({completed}/{total})",
-                completed = p.completed_files,
-                total = p.total_files,
-            )),
-            InstallStage::PreparingRuntime => Some(t!(
-                "install-stage-preparing-runtime",
-                "Preparing runtime..."
-            )),
-        }
-    }
-}
+use crate::t;
 
 #[derive(Debug, Clone)]
 pub struct InstanceRow {
     instance: Instance,
     is_active: bool,
-    stage: InstallStage,
 }
 
 #[derive(Debug)]
 pub enum InstanceRowInput {
     SetActive(bool),
-    SetStage(InstallStage),
 }
 
 #[derive(Debug)]
@@ -122,17 +31,11 @@ pub enum InstanceRowOutput {
 
 impl InstanceRow {
     fn subtitle(&self) -> String {
-        let base = format!(
+        format!(
             "{} • {}",
             self.instance.config.game_version,
             self.instance.config.mod_loader.label()
-        );
-
-        if let Some(status) = self.stage.status_text() {
-            format!("{base} • {status}")
-        } else {
-            base
-        }
+        )
     }
 }
 
@@ -156,32 +59,13 @@ impl FactoryComponent for InstanceRow {
             set_selectable: false,
             set_focus_on_click: false,
 
-            // Cannot be clicked during installation.
-            #[watch]
-            set_activatable: !self.stage.is_installing(),
-
-            #[watch]
-            set_class_active: ("dim-label", self.stage.is_installing()),
 
             connect_activated[sender, id = self.instance.id().to_owned()] => move |_| {
                 let _ = sender.output(InstanceRowOutput::Select(id.clone()));
             },
 
-            add_suffix = &gtk::ProgressBar {
-                set_valign: gtk::Align::Center,
-                set_width_request: 120,
-
-                #[watch]
-                set_visible: self.stage.is_installing(),
-
-                #[watch]
-                set_fraction: self.stage.fraction(),
-            },
-
             #[name = "select_check"]
             add_suffix = &gtk::CheckButton {
-                #[watch]
-                set_visible: !self.stage.is_installing(),
 
                 set_valign: gtk::Align::Center,
                 add_css_class: "selection-mode",
@@ -192,8 +76,6 @@ impl FactoryComponent for InstanceRow {
             },
 
             add_suffix = &gtk::Button {
-                #[watch]
-                set_visible: !self.stage.is_installing(),
                 set_icon_name: "emblem-system-symbolic",
                 set_valign: gtk::Align::Center,
                     add_css_class: "flat",
@@ -205,8 +87,6 @@ impl FactoryComponent for InstanceRow {
             },
 
             add_suffix = &gtk::Button {
-                #[watch]
-                set_visible: !self.stage.is_installing(),
 
                 set_icon_name: "user-trash-symbolic",
                 set_valign: gtk::Align::Center,
@@ -260,7 +140,6 @@ impl FactoryComponent for InstanceRow {
         Self {
             instance,
             is_active,
-            stage: InstallStage::Idle,
         }
     }
 
@@ -268,9 +147,6 @@ impl FactoryComponent for InstanceRow {
         match msg {
             InstanceRowInput::SetActive(active) => {
                 self.is_active = active;
-            }
-            InstanceRowInput::SetStage(stage) => {
-                self.stage = stage;
             }
         }
     }
@@ -280,7 +156,6 @@ impl FactoryComponent for InstanceRow {
 pub enum ListInput {
     SelectInstance(String),
     RemoveInstance(String),
-    StartDownload(String, VersionEntry),
     OpenDetail(String),
     Refresh,
 }
@@ -288,12 +163,7 @@ pub enum ListInput {
 /// Management page for installed instances.
 pub struct ListPage {
     mgr: Arc<SharedState<InstanceManager>>,
-    config: Arc<SharedState<LauncherConfig>>,
-    client: reqwest::Client,
-    dirs: LauncherDirs,
     instance_rows: FactoryVecDeque<InstanceRow>,
-    /// Record the state of each instance to prevent it from being lost when rebuilding rows.
-    install_stages: HashMap<String, InstallStage>,
 }
 
 #[derive(Debug, Clone)]
@@ -321,332 +191,19 @@ impl ListPage {
             let is_active = Some(instance.id().to_string()) == active_id;
             guard.push_back((instance.clone(), is_active));
         }
-
-        drop(guard);
-        // Synchronize existing stages.
-        for (i, row) in self.instance_rows.iter().enumerate() {
-            if let Some(&stage) = self.install_stages.get(row.instance.id()) {
-                self.instance_rows
-                    .send(i, InstanceRowInput::SetStage(stage));
-            }
-        }
-    }
-
-    fn update_row_stage(&mut self, id: &str, stage: InstallStage) {
-        if stage == InstallStage::Idle {
-            self.install_stages.remove(id);
-        } else {
-            self.install_stages.insert(id.to_string(), stage);
-        }
-
-        if let Some(index) = self
-            .instance_rows
-            .iter()
-            .position(|r| r.instance.id() == id)
-        {
-            self.instance_rows
-                .send(index, InstanceRowInput::SetStage(stage));
-        }
-    }
-
-    /// Install Fabric or Quilt
-    async fn install_fabric(
-        client: &reqwest::Client,
-        instance: &Instance,
-        download_source: DownloadSource,
-        metadata: &mut VersionMetadata,
-        entry: &VersionEntry,
-        id: &str,
-    ) -> Result<(), String> {
-        let mod_loader = instance.config.mod_loader;
-        let meta_loader = match mod_loader {
-            ModLoader::Quilt => MetaLoader::Quilt,
-            _ => MetaLoader::Fabric,
-        };
-
-        if let Some(loader_ver) = &instance.config.mod_loader_version {
-            let patch = MetaLoaderEntry::fetch_profile(
-                meta_loader,
-                client,
-                &entry.id,
-                loader_ver,
-                &instance.loader_json(),
-                download_source,
-            )
-            .await
-            .map_err(|e| e.to_i18n())?;
-
-            metadata.apply_patch(patch);
-        } else {
-            warn!(
-                "Mod loader {} is configured without loader version for instance {}",
-                mod_loader.label(),
-                id,
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Install Forge or NeoForge
-    async fn install_forge(
-        client: &reqwest::Client,
-        instance: &Instance,
-        dirs: &LauncherDirs,
-        download_source: DownloadSource,
-        metadata: &mut VersionMetadata,
-        id: &str,
-        installer_context: &mut Option<InstallerPostContext>,
-    ) -> Result<(), String> {
-        let loader = instance.config.mod_loader;
-        if let Some(loader_ver) = &instance.config.mod_loader_version {
-            let raw_url = match loader {
-                ModLoader::NeoForge => NeoForgeManifest::download_url(loader_ver),
-                _ => ForgeManifest::download_url(loader_ver),
-            };
-
-            let url = download_source.rewrite_url(&raw_url);
-
-            let temp_dir = std::env::temp_dir().join(format!(
-                "acl-{}-{}",
-                loader.label().to_ascii_lowercase(),
-                id
-            ));
-
-            fs::create_dir_all(&temp_dir)
-                .await
-                .map_err(|e| format!("Failed to create temp dir: {e}"))?;
-
-            let installer_path = temp_dir.join("installer.jar");
-
-            forge::download_installer(client, &url, &installer_path)
-                .await
-                .map_err(|e| e.to_i18n())?;
-
-            let installer =
-                forge::extract_installer(&installer_path, &dirs.libraries_dir(), &temp_dir)
-                    .map_err(|e| e.to_i18n())?;
-
-            // Save as loader.json
-            let patch_json =
-                serde_json::to_string_pretty(&installer.patch).map_err(|e| e.to_string())?;
-            tokio::fs::write(instance.loader_json(), patch_json)
-                .await
-                .map_err(|e| e.to_string())?;
-
-            metadata.apply_patch(installer.patch);
-
-            // Add processor dependency library
-            if let Some(modern) = &installer.modern {
-                metadata.libraries.extend(modern.libraries.clone());
-            }
-
-            *installer_context = Some(InstallerPostContext {
-                installer_path,
-                temp_dir,
-                modern: installer.modern,
-            });
-        } else {
-            warn!(
-                "Mod loader {} is configured without loader version for instance {}",
-                loader.label(),
-                id
-            );
-        }
-
-        Ok(())
-    }
-
-    fn spawn_install(&mut self, id: String, entry: VersionEntry, sender: &ComponentSender<Self>) {
-        let instance = self
-            .mgr
-            .read()
-            .instances
-            .iter()
-            .find(|i| i.id() == id)
-            .cloned();
-        let Some(instance) = instance else {
-            return;
-        };
-
-        self.update_row_stage(&id, InstallStage::FetchingMetadata);
-
-        let client = self.client.clone();
-        let dirs = self.dirs.clone();
-        let global_config = self.config.read().clone();
-        let max_concurrent = global_config.max_concurrent_downloads;
-        let download_source = global_config.download_source;
-
-        sender.command(move |out, shutdown| {
-            shutdown
-                .register(async move {
-                    let result: Result<(), String> = async {
-                        // Fetch metadata
-                        let _ = out.send(ListCmdOutput::StageChanged {
-                            id: id.clone(),
-                            stage: InstallStage::FetchingMetadata,
-                        });
-                        let mut metadata = instance
-                            .fetch_metadata(&client, &entry, &dirs, download_source)
-                            .await
-                            .map_err(|e| e.to_i18n())?;
-
-                        let mut installer_context = None;
-
-                        // Handle mod loader
-                        match instance.config.mod_loader {
-                            ModLoader::Vanilla => {}
-                            ModLoader::Fabric | ModLoader::Quilt => {
-                                Self::install_fabric(
-                                    &client,
-                                    &instance,
-                                    download_source,
-                                    &mut metadata,
-                                    &entry,
-                                    &id,
-                                )
-                                .await?
-                            }
-                            ModLoader::Forge | ModLoader::NeoForge => {
-                                Self::install_forge(
-                                    &client,
-                                    &instance,
-                                    &dirs,
-                                    download_source,
-                                    &mut metadata,
-                                    &id,
-                                    &mut installer_context,
-                                )
-                                .await?
-                            }
-                        }
-
-                        // Fetch asset index
-                        let _ = out.send(ListCmdOutput::StageChanged {
-                            id: id.clone(),
-                            stage: InstallStage::FetchingAssetIndex,
-                        });
-                        let asset_index = AssetIndex::fetch_and_verify(
-                            &client,
-                            &metadata.asset_index,
-                            &dirs.assets_dir(),
-                            download_source,
-                        )
-                        .await
-                        .map_err(|e| e.to_i18n())?;
-
-                        // Collect download tasks
-                        let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
-                        let total_files = tasks.len();
-                        let total_bytes = tasks.iter().map(|t| t.size).sum();
-
-                        let _ = out.send(ListCmdOutput::StageChanged {
-                            id: id.clone(),
-                            stage: InstallStage::Downloading(DownloadProgress {
-                                completed_files: 0,
-                                total_files,
-                                completed_bytes: 0,
-                                total_bytes,
-                            }),
-                        });
-
-                        // Create a channel to obtain and asynchronously send download progress.
-                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                        let out_prog = out.clone();
-                        let id_prog = id.clone();
-                        let forward_handle = tokio::spawn(async move {
-                            while let Some(prog) = rx.recv().await {
-                                let _ = out_prog.send(ListCmdOutput::StageChanged {
-                                    id: id_prog.clone(),
-                                    stage: InstallStage::Downloading(prog),
-                                });
-                            }
-                        });
-
-                        acl_minecraft::download::download_all(
-                            &client,
-                            tasks,
-                            download_source,
-                            max_concurrent,
-                            Some(tx),
-                        )
-                        .await
-                        .map_err(|e| e.to_i18n())?;
-                        // Ownership of tx has already been moved; tx will be dropped once the download completes.
-                        let _ = forward_handle.await;
-
-                        let _ = out.send(ListCmdOutput::StageChanged {
-                            id: id.clone(),
-                            stage: InstallStage::PreparingRuntime,
-                        });
-                        let inst_c = instance.clone();
-                        let dirs_c = dirs.clone();
-
-                        let metadata_c = metadata.clone();
-
-                        // Prepare runtime
-                        tokio::task::spawn_blocking(move || {
-                            inst_c.prepare_runtime(&metadata_c, &asset_index, &dirs_c)
-                        })
-                        .await
-                        .map_err(|e| e.to_string())?
-                        .map_err(|e| e.to_i18n())?;
-
-                        // Run the forge processors (1.13+)
-                        if let Some(ctx) = installer_context
-                            && let Some(modern) = &ctx.modern
-                        {
-                            let java = launch::select_java(&instance, &global_config, &metadata)
-                                .map_err(|e| e.to_i18n())?;
-
-                            modern
-                                .run_processors(
-                                    &java.path,
-                                    &ctx.installer_path,
-                                    &instance.client_jar(),
-                                    &dirs.libraries_dir(),
-                                    &ctx.temp_dir,
-                                )
-                                .await
-                                .map_err(|e| e.to_i18n())?;
-                        }
-
-                        Ok(())
-                    }
-                    .await;
-
-                    let _ = out.send(ListCmdOutput::InstallFinished { id, result });
-                })
-                .drop_on_shutdown()
-        });
     }
 }
 
 pub struct ListPageInit {
     pub mgr: Arc<SharedState<InstanceManager>>,
     pub config: Arc<SharedState<LauncherConfig>>,
-    pub client: reqwest::Client,
-    pub dirs: LauncherDirs,
-}
-
-#[derive(Debug)]
-pub enum ListCmdOutput {
-    StageChanged {
-        id: String,
-        stage: InstallStage,
-    },
-    InstallFinished {
-        id: String,
-        result: Result<(), String>,
-    },
 }
 
 #[relm4::component(pub)]
-impl Component for ListPage {
+impl SimpleComponent for ListPage {
     type Init = ListPageInit;
     type Input = ListInput;
     type Output = ListOutput;
-    type CommandOutput = ListCmdOutput;
 
     view! {
         #[root]
@@ -702,14 +259,12 @@ impl Component for ListPage {
 
         init.config
             .subscribe(sender.input_sender(), |_| ListInput::Refresh);
+        init.mgr
+            .subscribe(sender.input_sender(), |_| ListInput::Refresh);
 
         let mut model = Self {
             mgr: init.mgr,
-            client: init.client,
-            config: init.config,
-            dirs: init.dirs,
             instance_rows,
-            install_stages: HashMap::new(),
         };
 
         model.rebuild_rows();
@@ -720,12 +275,9 @@ impl Component for ListPage {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
         match msg {
             ListInput::SelectInstance(id) => {
-                if self.install_stages.contains_key(&id) {
-                    return; // Selection is disabled while downloading.
-                }
                 let res = self.mgr.write().set_active_instance(&id).map(|_| ());
 
                 if let Err(err) = res {
@@ -763,134 +315,10 @@ impl Component for ListPage {
             ListInput::Refresh => {
                 self.rebuild_rows();
             }
-            ListInput::StartDownload(id, entry) => {
-                self.spawn_install(id, entry, &sender);
-            }
+
             ListInput::OpenDetail(id) => {
                 let _ = sender.output(ListOutput::OpenDetail(id));
             }
         }
-    }
-
-    fn update_cmd(
-        &mut self,
-        msg: Self::CommandOutput,
-        sender: ComponentSender<Self>,
-        _root: &Self::Root,
-    ) {
-        match msg {
-            ListCmdOutput::StageChanged { id, stage } => {
-                self.update_row_stage(&id, stage);
-            }
-
-            ListCmdOutput::InstallFinished { id, result } => {
-                self.update_row_stage(&id, InstallStage::Idle);
-
-                match result {
-                    Ok(()) => {
-                        let _ = sender.output(ListOutput::ShowToast(t!(
-                            "instance-list-ready-to-play",
-                            "Instance \"{id}\" is ready to play",
-                            id = id
-                        )));
-                    }
-                    Err(err) => {
-                        error!("Instance '{id}' installation failed: {err}");
-                        let _ = sender.output(ListOutput::ShowToast(err));
-                        // Automatically clean up incomplete instances when the download fails.
-                        let _ = self.mgr.write().remove_instance(&id);
-                        self.save_config(&sender);
-                        self.rebuild_rows();
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use acl_minecraft::download::DownloadProgress;
-
-    #[test]
-    fn test_install_stage_default_and_is_installing() {
-        assert_eq!(InstallStage::default(), InstallStage::Idle);
-        assert!(!InstallStage::Idle.is_installing());
-        assert!(InstallStage::FetchingMetadata.is_installing());
-        assert!(InstallStage::FetchingAssetIndex.is_installing());
-        assert!(
-            InstallStage::Downloading(DownloadProgress {
-                completed_files: 0,
-                total_files: 10,
-                completed_bytes: 0,
-                total_bytes: 100,
-            })
-            .is_installing()
-        );
-        assert!(InstallStage::PreparingRuntime.is_installing());
-    }
-
-    #[test]
-    fn test_install_stage_fraction() {
-        assert_eq!(InstallStage::Idle.fraction(), 0.0);
-        assert_eq!(InstallStage::FetchingMetadata.fraction(), 0.02);
-        assert_eq!(InstallStage::FetchingAssetIndex.fraction(), 0.05);
-        assert_eq!(InstallStage::PreparingRuntime.fraction(), 0.98);
-
-        // When total_bytes is 0
-        let zero_progress = InstallStage::Downloading(DownloadProgress {
-            completed_files: 0,
-            total_files: 0,
-            completed_bytes: 0,
-            total_bytes: 0,
-        });
-        assert_eq!(zero_progress.fraction(), 0.05);
-
-        // 50% completed: 0.05 + 0.5 * 0.9 = 0.50
-        let half_progress = InstallStage::Downloading(DownloadProgress {
-            completed_files: 5,
-            total_files: 10,
-            completed_bytes: 50,
-            total_bytes: 100,
-        });
-        assert!((half_progress.fraction() - 0.50).abs() < f64::EPSILON);
-
-        // Clamped at 100% when completed_bytes exceeds total_bytes
-        let overflow_progress = InstallStage::Downloading(DownloadProgress {
-            completed_files: 11,
-            total_files: 10,
-            completed_bytes: 120,
-            total_bytes: 100,
-        });
-        assert!((overflow_progress.fraction() - 0.95).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_install_stage_status_text() {
-        assert_eq!(InstallStage::Idle.status_text(), None);
-        assert_eq!(
-            InstallStage::FetchingMetadata.status_text(),
-            Some("Fetching metadata...".to_string())
-        );
-        assert_eq!(
-            InstallStage::FetchingAssetIndex.status_text(),
-            Some("Fetching asset index...".to_string())
-        );
-        assert_eq!(
-            InstallStage::PreparingRuntime.status_text(),
-            Some("Preparing runtime...".to_string())
-        );
-
-        let downloading = InstallStage::Downloading(DownloadProgress {
-            completed_files: 3,
-            total_files: 10,
-            completed_bytes: 300,
-            total_bytes: 1000,
-        });
-        assert_eq!(
-            downloading.status_text(),
-            Some("Downloading (\u{2068}3\u{2069}/\u{2068}10\u{2069})".to_string())
-        );
     }
 }
