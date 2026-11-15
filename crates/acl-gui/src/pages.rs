@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod accounts;
+pub mod download;
 pub mod home;
+pub mod installer;
 pub mod instance_detail;
 pub mod instances;
 pub mod settings;

@@ -329,93 +329,93 @@ impl Component for LoaderSelectPage {
     type CommandOutput = LoaderSelectCmdOutput;
 
     view! {
-        #[root]
-        gtk::Box {
-            set_orientation: gtk::Orientation::Vertical,
+        adw::ToolbarView {
+            add_top_bar = &adw::HeaderBar {
 
-            adw::Clamp {
-                set_maximum_size: 720,
-                set_margin_top: 24,
-                set_margin_start: 12,
-                set_margin_end: 12,
-
-                gtk::Box {
-                    set_orientation: gtk::Orientation::Vertical,
-                    set_spacing: 12,
-                    // Top action bar
-                    gtk::Box {
-
-                        set_orientation: gtk::Orientation::Horizontal,
-
-                        gtk::Button {
-                            connect_clicked => LoaderSelectInput::BackClicked,
-
-                            adw::ButtonContent {
-                                set_icon_name: "go-previous-symbolic",
-                                #[watch]
-                                set_label: &t!("instances-create-button-back","Back"),
-                            },
-                        },
-
-                        gtk::Button {
-                            set_hexpand: true,
-                            set_halign: gtk::Align::End,
-
-                            connect_clicked => LoaderSelectInput::ClearSelection,
-                            adw::ButtonContent {
-                                set_icon_name: "edit-clear-symbolic",
-                                #[watch]
-                                set_label: &t!("instances-create-button-clear", "Clear"),
-                            },
-                        },
-
-
-                    },
-
-                    // Search bar and Filter ToggleGroup
-                    gtk::Box {
-                        set_spacing: 8,
-                        gtk::SearchEntry {
-                            set_hexpand: true,
-                            #[watch]
-                            set_placeholder_text: Some(&t!("instances-create-search-versions","Search versions...")),
-                            connect_search_changed[sender] => move |entry| {
-                                sender.input(LoaderSelectInput::SearchChanged(entry.text().to_string()));
-                            },
-                        },
-
-
-                        gtk::Button {
-                            set_icon_name: "view-refresh-symbolic",
-                            #[watch]
-                            set_tooltip_text: Some(&t!("instances-create-refresh-version","Refresh version list")),
-                            #[watch]
-                            set_sensitive: !model.is_loading,
-                            connect_clicked => LoaderSelectInput::RefreshVersions,
-                        },
-                    },
-
+                #[wrap(Some)]
+                set_title_widget = &adw::WindowTitle {
+                    #[watch]
+                    set_title: model.current_loader.label(),
                 },
 
+                pack_start = &gtk::Button {
+                    connect_clicked => LoaderSelectInput::BackClicked,
 
+                    adw::ButtonContent {
+                        set_icon_name: "go-previous-symbolic",
+                        #[watch]
+                        set_label: &t!("instances-create-button-back","Back"),
+                    },
+                },
+
+                pack_end =  &gtk::Button {
+                    connect_clicked => LoaderSelectInput::ClearSelection,
+                    adw::ButtonContent {
+                        set_icon_name: "edit-clear-symbolic",
+                        #[watch]
+                        set_label: &t!("instances-create-button-clear", "Clear"),
+                    },
+                },
             },
-            // Virtualized version list: only visible rows are instantiated
-            gtk::ScrolledWindow {
-                set_vexpand: true,
-                set_hscrollbar_policy: gtk::PolicyType::Never,
-                set_margin_top: 12,
-                set_margin_bottom: 24,
 
-                #[name = "list_clamp"]
-                adw::ClampScrollable {
+            #[wrap(Some)]
+            set_content = &gtk::Box {
+                set_orientation: gtk::Orientation::Vertical,
+
+                adw::Clamp {
                     set_maximum_size: 720,
+                    set_margin_top: 24,
                     set_margin_start: 12,
                     set_margin_end: 12,
+
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Vertical,
+                        set_spacing: 12,
+                        // Search bar and Filter ToggleGroup
+                        gtk::Box {
+                            set_spacing: 8,
+                            gtk::SearchEntry {
+                                set_hexpand: true,
+                                #[watch]
+                                set_placeholder_text: Some(&t!("instances-create-search-versions","Search versions...")),
+                                connect_search_changed[sender] => move |entry| {
+                                    sender.input(LoaderSelectInput::SearchChanged(entry.text().to_string()));
+                                },
+                            },
+
+
+                            gtk::Button {
+                                set_icon_name: "view-refresh-symbolic",
+                                #[watch]
+                                set_tooltip_text: Some(&t!("instances-create-refresh-version","Refresh version list")),
+                                #[watch]
+                                set_sensitive: !model.is_loading,
+                                connect_clicked => LoaderSelectInput::RefreshVersions,
+                            },
+                        },
+
+                    },
+
+
                 },
+                // Virtualized version list: only visible rows are instantiated
+                gtk::ScrolledWindow {
+                    set_vexpand: true,
+                    set_hscrollbar_policy: gtk::PolicyType::Never,
+                    set_margin_top: 12,
+                    set_margin_bottom: 24,
 
-            }
+                    #[name = "list_clamp"]
+                    adw::ClampScrollable {
+                        set_maximum_size: 720,
+                        set_margin_start: 12,
+                        set_margin_end: 12,
+                    },
+
+                }
+            },
+
         },
-
 
     }
 

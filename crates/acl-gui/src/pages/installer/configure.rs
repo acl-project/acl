@@ -96,150 +96,134 @@ impl SimpleComponent for ConfigurePage {
     type Output = ConfigureOutput;
 
     view! {
-
         #[root]
-        gtk::Box {
-            set_orientation: gtk::Orientation::Vertical,
+        adw::ToolbarView {
 
-            adw::Clamp {
-                set_maximum_size: 720,
-                set_margin_top: 24,
-                set_margin_start: 12,
-                set_margin_end: 12,
-                gtk::Box {
-                    set_orientation: gtk::Orientation::Vertical,
-                    set_spacing: 12,
+            add_top_bar = &adw::HeaderBar {
 
-                    // Top bar
-                    gtk::Box {
-                        set_orientation: gtk::Orientation::Vertical,
-                        set_spacing: 12,
-
-                        gtk::Box {
-                            set_orientation: gtk::Orientation::Horizontal,
-
-                            gtk::Button {
-                                connect_clicked => ConfigureInput::BackClicked,
-                                adw::ButtonContent {
-                                    set_icon_name: "go-previous-symbolic",
-                                    #[watch]
-                                    set_label: &t!("instances-create-button-back", "Back"),
-                                },
-                            },
-
-                            gtk::Button {
-                                set_hexpand: true,
-                                set_halign: gtk::Align::End,
-                                add_css_class: "suggested-action",
-                                #[watch]
-                                set_sensitive: model.can_create(),
-                                connect_clicked => ConfigureInput::CreateClicked,
-                                adw::ButtonContent {
-                                    set_icon_name: "list-add-symbolic",
-                                    #[watch]
-                                    set_label: &t!("instances-create-button-create", "Create"),
-                                },
-                            },
-                        },
-
-                    },
-
-                    // Base settings group
-                    adw::PreferencesGroup {
-                        #[watch]
-                        set_title: &t!("instances-create-settings-title", "Instance Settings"),
-
-                        #[local_ref]
-                        name_entry -> adw::EntryRow {
-                            add_css_class: "monospace",
-                            #[watch]
-                            set_title: &t!("instances-create-settings-instance-name", "Instance Name"),
-                            connect_changed[sender] => move |entry| {
-                                sender.input(ConfigureInput::NameChanged(entry.text().to_string()));
-                            },
-                        },
-
-                        adw::ActionRow {
-                            #[watch]
-                            set_title: &t!("instances-create-settings-game-version", "Game Version"),
-                            #[watch]
-                            set_subtitle: &model.game_version,
-                        },
-
-                    },
-
-                    // Mod Loader settings group
-                    adw::PreferencesGroup {
-                        #[watch]
-                        set_title: &t!("instances-create-settings-loader-title","Mod Loader"),
-
-                        adw::ActionRow {
-                            // No translation needed
-                            set_title: "Fabric",
-
-                            #[watch]
-                            set_subtitle: &model.loader_subtitle(ModLoader::Fabric),
-                            #[watch]
-                            set_activatable: model.is_loader_compatible(ModLoader::Fabric),
-
-                            connect_activated[sender] => move |_| {
-                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Fabric));
-                            },
-                            add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
-
-                        },
-
-                        adw::ActionRow {
-                            // No translation needed
-                            set_title: "NeoForge",
-
-                            #[watch]
-                            set_subtitle: &model.loader_subtitle(ModLoader::NeoForge),
-                            #[watch]
-                            set_activatable: model.is_loader_compatible(ModLoader::NeoForge),
-
-                            connect_activated[sender] => move |_| {
-                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::NeoForge));
-                            },
-                            add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
-                        },
-
-                        adw::ActionRow {
-                            // No translation needed
-                            set_title: "Forge",
-
-                            #[watch]
-                            set_subtitle: &model.loader_subtitle(ModLoader::Forge),
-                            #[watch]
-                            set_activatable: model.is_loader_compatible(ModLoader::Forge),
-
-                            connect_activated[sender] => move |_| {
-                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Forge));
-                            },
-                            add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
-                        },
-
-                        adw::ActionRow {
-                            // No translation needed
-                            set_title: "Quilt",
-
-                            #[watch]
-                            set_subtitle: &model.loader_subtitle(ModLoader::Quilt),
-                            #[watch]
-                            set_activatable: model.is_loader_compatible(ModLoader::Quilt),
-
-                            connect_activated[sender] => move |_| {
-                                let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Quilt));
-                            },
-                            add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
-
-                        },
-
-                    }
+                #[wrap(Some)]
+                set_title_widget = &adw::WindowTitle {
+                    #[watch]
+                    set_title: &t!("installer-toolbar-title", "Installer"),
                 },
-            }
-        }
 
+                pack_start = &gtk::Button {
+                    connect_clicked => ConfigureInput::BackClicked,
+                    adw::ButtonContent {
+                        set_icon_name: "go-previous-symbolic",
+                        #[watch]
+                        set_label: &t!("instances-create-button-back", "Back"),
+                    },
+                },
+
+                pack_end = &gtk::Button {
+                    add_css_class: "suggested-action",
+                    #[watch]
+                    set_sensitive: model.can_create(),
+                    connect_clicked => ConfigureInput::CreateClicked,
+                    adw::ButtonContent {
+                        set_icon_name: "list-add-symbolic",
+                        #[watch]
+                        set_label: &t!("instances-create-button-create", "Create"),
+                    },
+                },
+            },
+            #[wrap(Some)]
+            set_content =  &adw::PreferencesPage {
+                // Base settings group
+                adw::PreferencesGroup {
+                    #[watch]
+                    set_title: &t!("instances-create-settings-title", "Instance Settings"),
+
+                    #[local_ref]
+                    name_entry -> adw::EntryRow {
+                        add_css_class: "monospace",
+                        #[watch]
+                        set_title: &t!("instances-create-settings-instance-name", "Instance Name"),
+                        connect_changed[sender] => move |entry| {
+                            sender.input(ConfigureInput::NameChanged(entry.text().to_string()));
+                        },
+                    },
+
+                    adw::ActionRow {
+                        #[watch]
+                        set_title: &t!("instances-create-settings-game-version", "Game Version"),
+                        #[watch]
+                        set_subtitle: &model.game_version,
+                    },
+
+                },
+
+                // Mod Loader settings group
+                adw::PreferencesGroup {
+                    #[watch]
+                    set_title: &t!("instances-create-settings-loader-title","Mod Loader"),
+
+                    adw::ActionRow {
+                        // No translation needed
+                        set_title: "Fabric",
+
+                        #[watch]
+                        set_subtitle: &model.loader_subtitle(ModLoader::Fabric),
+                        #[watch]
+                        set_activatable: model.is_loader_compatible(ModLoader::Fabric),
+
+                        connect_activated[sender] => move |_| {
+                            let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Fabric));
+                        },
+                        add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
+
+                    },
+
+                    adw::ActionRow {
+                        // No translation needed
+                        set_title: "NeoForge",
+
+                        #[watch]
+                        set_subtitle: &model.loader_subtitle(ModLoader::NeoForge),
+                        #[watch]
+                        set_activatable: model.is_loader_compatible(ModLoader::NeoForge),
+
+                        connect_activated[sender] => move |_| {
+                            let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::NeoForge));
+                        },
+                        add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
+                    },
+
+                    adw::ActionRow {
+                        // No translation needed
+                        set_title: "Forge",
+
+                        #[watch]
+                        set_subtitle: &model.loader_subtitle(ModLoader::Forge),
+                        #[watch]
+                        set_activatable: model.is_loader_compatible(ModLoader::Forge),
+
+                        connect_activated[sender] => move |_| {
+                            let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Forge));
+                        },
+                        add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
+                    },
+
+                    adw::ActionRow {
+                        // No translation needed
+                        set_title: "Quilt",
+
+                        #[watch]
+                        set_subtitle: &model.loader_subtitle(ModLoader::Quilt),
+                        #[watch]
+                        set_activatable: model.is_loader_compatible(ModLoader::Quilt),
+
+                        connect_activated[sender] => move |_| {
+                            let _ = sender.output(ConfigureOutput::OpenLoader(ModLoader::Quilt));
+                        },
+                        add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
+
+                    },
+
+                }
+            }
+        },
     }
 
     fn init(

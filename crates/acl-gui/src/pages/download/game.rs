@@ -131,46 +131,42 @@ struct FilterState {
     type_filter: VersionFilter,
 }
 
-pub struct VersionSelectPage {
+pub struct GamePage {
     config: Arc<SharedState<LauncherConfig>>,
     client: reqwest::Client,
     cache_dir: PathBuf,
-    selected_version: Option<VersionEntry>,
     filter_state: Rc<RefCell<FilterState>>,
     version_list: TypedListView<VersionItem, gtk::SingleSelection>,
     is_loading: bool,
 }
 
-pub struct VersionSelectInit {
+pub struct GameInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
     pub cache_dir: PathBuf,
 }
 
 #[derive(Debug)]
-pub enum VersionSelectInput {
+pub enum GameInput {
     SearchChanged(String),
     FilterChanged(VersionFilter),
     SelectVersion(VersionEntry),
     RefreshVersions,
-    NextClicked,
-    CancelClicked,
     Refresh,
 }
 
 #[derive(Debug, Clone)]
-pub enum VersionSelectOutput {
-    Cancel,                 // User clicked Back to exit creation
-    Selected(VersionEntry), // User selected and clicked Next
+pub enum GameOutput {
+    Selected(VersionEntry), // User selected
     ShowToast(String),
 }
 
 #[derive(Debug)]
-pub enum VersionSelectCmdOutput {
+pub enum GameCmdOutput {
     ManifestLoaded(Result<VersionManifest, String>),
 }
 
-impl VersionSelectPage {
+impl GamePage {
     fn spawn_fetch_manifest(&mut self, sender: &ComponentSender<Self>, force_refresh: bool) {
         self.is_loading = true;
         let client = self.client.clone();
@@ -188,41 +184,22 @@ impl VersionSelectPage {
             .await
             .map_err(|err| err.to_string());
 
-            VersionSelectCmdOutput::ManifestLoaded(result)
+            GameCmdOutput::ManifestLoaded(result)
         });
-    }
-
-    /// Highlight `selected_version` in the list if it is currently visible.
-    fn sync_selection(&self) {
-        let selection = &self.version_list.selection_model;
-        let position = self.selected_version.as_ref().and_then(|selected| {
-            (0..selection.n_items()).find(|&i| {
-                selection
-                    .item(i)
-                    .and_then(|obj| obj.downcast::<BoxedAnyObject>().ok())
-                    .is_some_and(|boxed| {
-                        boxed
-                            .try_borrow::<VersionItem>()
-                            .is_ok_and(|item| item.entry.id == selected.id)
-                    })
-            })
-        });
-        selection.set_selected(position.unwrap_or(gtk::INVALID_LIST_POSITION));
     }
 
     /// Re-evaluate the list filter without recreating any row widgets.
     fn refilter(&self) {
         self.version_list.notify_filter_changed(0);
-        self.sync_selection();
     }
 }
 
 #[relm4::component(pub)]
-impl Component for VersionSelectPage {
-    type Init = VersionSelectInit;
-    type Output = VersionSelectOutput;
-    type Input = VersionSelectInput;
-    type CommandOutput = VersionSelectCmdOutput;
+impl Component for GamePage {
+    type Init = GameInit;
+    type Output = GameOutput;
+    type Input = GameInput;
+    type CommandOutput = GameCmdOutput;
 
     view! {
         #[root]
@@ -238,37 +215,7 @@ impl Component for VersionSelectPage {
                 gtk::Box {
                     set_orientation: gtk::Orientation::Vertical,
                     set_spacing: 12,
-                    // Top action bar
-                    gtk::Box {
 
-                        set_orientation: gtk::Orientation::Horizontal,
-
-                        gtk::Button {
-                            connect_clicked => VersionSelectInput::CancelClicked,
-
-                            adw::ButtonContent {
-                                set_icon_name: "go-previous-symbolic",
-                                #[watch]
-                                set_label: &t!("instances-create-button-back","Back"),
-                            },
-                        },
-
-                        gtk::Button {
-                            set_hexpand: true,
-                            set_halign: gtk::Align::End,
-                            add_css_class: "suggested-action",
-                            #[watch]
-                            set_sensitive: model.selected_version.is_some() && !model.is_loading,
-                            connect_clicked => VersionSelectInput::NextClicked,
-                            adw::ButtonContent {
-                                set_icon_name: "go-next-symbolic",
-                                #[watch]
-                                set_label: &t!("instances-create-button-next", "Next"),
-                            },
-                        },
-
-
-                    },
 
                     // Search bar and Filter ToggleGroup
                     gtk::Box {
@@ -276,16 +223,16 @@ impl Component for VersionSelectPage {
                         gtk::SearchEntry {
                             set_hexpand: true,
                             #[watch]
-                            set_placeholder_text: Some(&t!("instances-create-search-versions","Search versions...")),
+                            set_placeholder_text: Some(&t!("download-game-search-versions","Search versions...")),
                             connect_search_changed[sender] => move |entry| {
-                                sender.input(VersionSelectInput::SearchChanged(entry.text().to_string()));
+                                sender.input(GameInput::SearchChanged(entry.text().to_string()));
                             },
                         },
 
                         adw::ToggleGroup {
                             connect_active_name_notify[sender] => move |group| {
                                 let filter = VersionFilter::from_toggle_name(group.active_name().as_deref());
-                                sender.input(VersionSelectInput::FilterChanged(filter));
+                                sender.input(GameInput::FilterChanged(filter));
                             },
 
                             #[wrap(Clone::clone)]
@@ -313,10 +260,10 @@ impl Component for VersionSelectPage {
                         gtk::Button {
                             set_icon_name: "view-refresh-symbolic",
                             #[watch]
-                            set_tooltip_text: Some(&t!("instances-create-refresh-version","Refresh version list")),
+                            set_tooltip_text: Some(&t!("download-game-refresh-version","Refresh version list")),
                             #[watch]
                             set_sensitive: !model.is_loading,
-                            connect_clicked => VersionSelectInput::RefreshVersions,
+                            connect_clicked => GameInput::RefreshVersions,
                         },
                     },
 
@@ -355,6 +302,7 @@ impl Component for VersionSelectPage {
         version_list.selection_model.set_autoselect(false);
         version_list.selection_model.set_can_unselect(true);
         version_list.view.add_css_class("navigation-sidebar");
+        version_list.view.set_single_click_activate(true);
 
         version_list.add_filter({
             let state = Rc::clone(&filter_state);
@@ -364,12 +312,12 @@ impl Component for VersionSelectPage {
             }
         });
 
-        // Read the selected version id synchronously so filtering can't race with it.
-        version_list.selection_model.connect_selected_item_notify({
+        version_list.view.connect_activate({
             let sender = sender.clone();
-            move |selection| {
-                let id = selection
-                    .selected_item()
+            move |list_view, pos| {
+                let entry = list_view
+                    .model()
+                    .and_then(|model| model.item(pos))
                     .and_then(|obj| obj.downcast::<BoxedAnyObject>().ok())
                     .and_then(|boxed| {
                         boxed
@@ -378,21 +326,19 @@ impl Component for VersionSelectPage {
                             .map(|item| item.entry.clone())
                     });
 
-                // `None` means the selected row was filtered out; keep the previous choice.
-                if let Some(entry) = id {
-                    sender.input(VersionSelectInput::SelectVersion(entry));
+                if let Some(entry) = entry {
+                    sender.input(GameInput::SelectVersion(entry));
                 }
             }
         });
 
         init.config
-            .subscribe(sender.input_sender(), |_| VersionSelectInput::Refresh);
+            .subscribe(sender.input_sender(), |_| GameInput::Refresh);
 
-        let mut model = VersionSelectPage {
+        let mut model = GamePage {
             config: init.config,
             client: init.client,
             cache_dir: init.cache_dir,
-            selected_version: None,
             filter_state,
             version_list,
             is_loading: false,
@@ -409,35 +355,31 @@ impl Component for VersionSelectPage {
 
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
-            VersionSelectInput::SearchChanged(query) => {
+            GameInput::SearchChanged(query) => {
                 if let Ok(mut state) = self.filter_state.try_borrow_mut() {
                     state.query = query;
                 }
                 self.refilter();
             }
-            VersionSelectInput::FilterChanged(filter) => {
+            GameInput::FilterChanged(filter) => {
                 if let Ok(mut state) = self.filter_state.try_borrow_mut() {
                     state.type_filter = filter;
                 }
                 self.refilter();
             }
 
-            VersionSelectInput::SelectVersion(entry) => {
-                self.selected_version = Some(entry);
+            GameInput::SelectVersion(entry) => {
+                self.version_list
+                    .selection_model
+                    .set_selected(gtk::INVALID_LIST_POSITION);
+                let _ = sender.output(GameOutput::Selected(entry));
             }
 
-            VersionSelectInput::RefreshVersions => {
+            GameInput::RefreshVersions => {
                 self.spawn_fetch_manifest(&sender, true);
             }
-            VersionSelectInput::CancelClicked => {
-                let _ = sender.output(VersionSelectOutput::Cancel);
-            }
-            VersionSelectInput::NextClicked => {
-                if let Some(entry) = &self.selected_version {
-                    let _ = sender.output(VersionSelectOutput::Selected(entry.clone()));
-                }
-            }
-            VersionSelectInput::Refresh => {}
+
+            GameInput::Refresh => {}
         }
     }
 
@@ -448,16 +390,10 @@ impl Component for VersionSelectPage {
         _root: &Self::Root,
     ) {
         match msg {
-            VersionSelectCmdOutput::ManifestLoaded(result) => {
+            GameCmdOutput::ManifestLoaded(result) => {
                 self.is_loading = false;
                 match result {
                     Ok(manifest) => {
-                        // Auto-select latest release version
-                        if self.selected_version.is_none() {
-                            self.selected_version =
-                                manifest.find_version(&manifest.latest.release).cloned();
-                        }
-
                         self.version_list.clear();
                         self.version_list.extend_from_iter(
                             manifest
@@ -465,18 +401,16 @@ impl Component for VersionSelectPage {
                                 .into_iter()
                                 .map(|entry| VersionItem { entry }),
                         );
-
-                        self.sync_selection();
                     }
 
                     Err(err) => {
                         error!("Failed to load version manifest: {err}");
                         let msg = t!(
-                            "instances-create-error-load-version-manifest",
+                            "download-game-error-load-version-manifest",
                             "Failed to load version manifest: {err}",
                             err = err
                         );
-                        let _ = sender.output(VersionSelectOutput::ShowToast(msg));
+                        let _ = sender.output(GameOutput::ShowToast(msg));
                     }
                 }
             }
