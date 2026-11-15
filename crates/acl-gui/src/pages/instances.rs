@@ -1,72 +1,52 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-mod create;
 mod list;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use acl_core::LauncherConfig;
 use acl_core::manager::InstanceManager;
-use acl_core::task::TaskManager;
-use acl_core::{Instance, LauncherConfig, LauncherDirs};
-use acl_minecraft::VersionEntry;
 use relm4::{ComponentParts, SimpleComponent};
 use relm4::{SharedState, prelude::*};
 
-use crate::install::{InstallContext, spawn_install};
-use crate::pages::instances::create::{CreateOutput, CreatePage, CreatePageInit};
 use crate::pages::instances::list::{ListOutput, ListPage, ListPageInit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstancesView {
     #[default]
     List,
-    Create,
 }
 
 impl InstancesView {
     fn as_str(self) -> &'static str {
         match self {
             Self::List => "list",
-            Self::Create => "create",
         }
     }
 }
 
 pub struct InstancesPage {
-    mgr: Arc<SharedState<InstanceManager>>,
-    config: Arc<SharedState<LauncherConfig>>,
-    client: reqwest::Client,
-    dirs: LauncherDirs,
-    tasks: Arc<TaskManager>,
     current_view: InstancesView,
     list_page: Controller<ListPage>,
-    create_page: Controller<CreatePage>,
-    active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
 pub enum InstancesPageOutput {
     ShowToast(String),
     OpenDetail(String),
-    OpenTasks,
 }
 
 #[derive(Debug, Clone)]
 pub enum InstancesPageInput {
     ChangeView(InstancesView),
     ShowToast(String),
-    InstanceCreated(Box<Instance>, VersionEntry),
     OpenDetail(String),
 }
 
 pub struct InstancesInit {
     pub mgr: Arc<SharedState<InstanceManager>>,
     pub config: Arc<SharedState<LauncherConfig>>,
-    pub client: reqwest::Client,
-    pub dirs: LauncherDirs,
-    pub tasks: Arc<TaskManager>,
-    pub active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[relm4::component(pub)]
@@ -81,7 +61,6 @@ impl SimpleComponent for InstancesPage {
             set_transition_type: gtk::StackTransitionType::SlideLeftRight,
 
             add_named[Some(InstancesView::List.as_str())] = model.list_page.widget(),
-            add_named[Some(InstancesView::Create.as_str())] = model.create_page.widget(),
 
             #[watch]
             set_visible_child_name: model.current_view.as_str(),
@@ -101,36 +80,12 @@ impl SimpleComponent for InstancesPage {
             })
             .forward(sender.input_sender(), |msg| match msg {
                 ListOutput::ShowToast(message) => InstancesPageInput::ShowToast(message),
-                ListOutput::OpenCreate => InstancesPageInput::ChangeView(InstancesView::Create),
                 ListOutput::OpenDetail(id) => InstancesPageInput::OpenDetail(id),
             });
 
-        let create_page = CreatePage::builder()
-            .launch(CreatePageInit {
-                mgr: Arc::clone(&init.mgr),
-                config: Arc::clone(&init.config),
-                client: init.client.clone(),
-                cache_dir: init.dirs.cache_dir().to_path_buf(),
-                active_install: Arc::clone(&init.active_install),
-            })
-            .forward(sender.input_sender(), |msg| match msg {
-                CreateOutput::Cancel => InstancesPageInput::ChangeView(InstancesView::List),
-                CreateOutput::Created(instance, entry) => {
-                    InstancesPageInput::InstanceCreated(instance, entry)
-                }
-                CreateOutput::ShowToast(text) => InstancesPageInput::ShowToast(text),
-            });
-
         let model = InstancesPage {
-            mgr: init.mgr,
-            config: init.config,
-            client: init.client,
-            dirs: init.dirs,
-            tasks: init.tasks,
             current_view: InstancesView::List,
             list_page,
-            create_page,
-            active_install: init.active_install,
         };
 
         let widgets = view_output!();
@@ -145,22 +100,6 @@ impl SimpleComponent for InstancesPage {
             }
             InstancesPageInput::ShowToast(message) => {
                 let _ = sender.output(InstancesPageOutput::ShowToast(message));
-            }
-            InstancesPageInput::InstanceCreated(instance, entry) => {
-                spawn_install(
-                    &self.tasks,
-                    *instance,
-                    entry,
-                    InstallContext {
-                        mgr: Arc::clone(&self.mgr),
-                        client: self.client.clone(),
-                        dirs: self.dirs.clone(),
-                        config: Arc::clone(&self.config),
-                        active_install: Arc::clone(&self.active_install),
-                    },
-                );
-                self.current_view = InstancesView::List;
-                let _ = sender.output(InstancesPageOutput::OpenTasks);
             }
             InstancesPageInput::OpenDetail(id) => {
                 let _ = sender.output(InstancesPageOutput::OpenDetail(id));
@@ -177,6 +116,5 @@ mod tests {
     fn test_instances_view_as_str_and_default() {
         assert_eq!(InstancesView::default(), InstancesView::List);
         assert_eq!(InstancesView::List.as_str(), "list");
-        assert_eq!(InstancesView::Create.as_str(), "create");
     }
 }

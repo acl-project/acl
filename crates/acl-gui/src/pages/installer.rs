@@ -3,7 +3,6 @@
 
 pub mod configure;
 pub mod loader_select;
-pub mod version_select;
 
 use std::{
     path::PathBuf,
@@ -20,35 +19,32 @@ use tracing::{error, info};
 
 use crate::{
     i18n::LocalizeError,
-    pages::instances::create::{
+    pages::installer::{
         configure::{ConfigureInit, ConfigureInput, ConfigureOutput, ConfigurePage},
         loader_select::{
             LoaderSelectInit, LoaderSelectInput, LoaderSelectOutput, LoaderSelectPage,
         },
-        version_select::{VersionSelectInit, VersionSelectOutput, VersionSelectPage},
     },
     t,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CreateStep {
+pub enum InstallerStep {
     #[default]
-    SelectVersion,
     Configure,
     SelectLoader,
 }
 
-impl CreateStep {
+impl InstallerStep {
     fn as_str(self) -> &'static str {
         match self {
-            Self::SelectVersion => "select_version",
             Self::Configure => "configure",
             Self::SelectLoader => "select_loader",
         }
     }
 }
 
-pub struct CreatePageInit {
+pub struct InstallerInit {
     pub mgr: Arc<SharedState<InstanceManager>>,
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
@@ -57,11 +53,10 @@ pub struct CreatePageInit {
 }
 
 #[derive(Debug)]
-pub enum CreateInput {
-    VersionSelected(VersionEntry),
+pub enum InstallerInput {
     ShowToast(String),
     CancelClicked,
-    BackTo(CreateStep),
+    BackTo(InstallerStep),
     OpenLoader(ModLoader),
     Create {
         name: String,
@@ -70,40 +65,41 @@ pub enum CreateInput {
     },
     Refresh,
     SetLoader(ModLoader, Option<String>),
+    OpenVanilla(VersionEntry),
 }
 
 #[derive(Debug, Clone)]
-pub enum CreateOutput {
+pub enum InstallerOutput {
     Cancel,
     Created(Box<Instance>, VersionEntry),
     ShowToast(String),
 }
 
-pub struct CreatePage {
+pub struct InstallerPage {
     mgr: Arc<SharedState<InstanceManager>>,
-    step: CreateStep,
+    step: InstallerStep,
     selected_version: Option<VersionEntry>,
-    version_select: Controller<VersionSelectPage>,
+
     configure: Controller<ConfigurePage>,
     loader_select: Controller<LoaderSelectPage>,
     active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[relm4::component(pub)]
-impl Component for CreatePage {
-    type Init = CreatePageInit;
-    type Input = CreateInput;
-    type Output = CreateOutput;
+impl Component for InstallerPage {
+    type Init = InstallerInit;
+    type Input = InstallerInput;
+    type Output = InstallerOutput;
     type CommandOutput = ();
 
     view! {
         #[root]
         gtk::Stack {
-            set_transition_type: gtk::StackTransitionType::SlideLeftRight,
+            set_transition_type: gtk::StackTransitionType::Crossfade,
+            set_transition_duration: 150,
 
-            add_named[Some(CreateStep::SelectVersion.as_str())] = model.version_select.widget(),
-            add_named[Some(CreateStep::Configure.as_str())] = model.configure.widget(),
-            add_named[Some(CreateStep::SelectLoader.as_str())] = model.loader_select.widget(),
+            add_named[Some(InstallerStep::Configure.as_str())] = model.configure.widget(),
+            add_named[Some(InstallerStep::SelectLoader.as_str())] = model.loader_select.widget(),
 
             #[watch]
             set_visible_child_name: model.step.as_str(),
@@ -116,34 +112,22 @@ impl Component for CreatePage {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let version_select = VersionSelectPage::builder()
-            .launch(VersionSelectInit {
-                config: Arc::clone(&init.config),
-                client: init.client.clone(),
-                cache_dir: init.cache_dir.clone(),
-            })
-            .forward(sender.input_sender(), |msg| match msg {
-                VersionSelectOutput::Cancel => CreateInput::CancelClicked,
-                VersionSelectOutput::Selected(entry) => CreateInput::VersionSelected(entry),
-                VersionSelectOutput::ShowToast(text) => CreateInput::ShowToast(text),
-            });
-
         let configure = ConfigurePage::builder()
             .launch(ConfigureInit {
                 config: Arc::clone(&init.config),
             })
             .forward(sender.input_sender(), |msg| match msg {
-                ConfigureOutput::Back => CreateInput::BackTo(CreateStep::SelectVersion),
+                ConfigureOutput::Back => InstallerInput::CancelClicked,
                 ConfigureOutput::Create {
                     name,
                     loader,
                     loader_version,
-                } => CreateInput::Create {
+                } => InstallerInput::Create {
                     name,
                     loader,
                     loader_version,
                 },
-                ConfigureOutput::OpenLoader(loader) => CreateInput::OpenLoader(loader),
+                ConfigureOutput::OpenLoader(loader) => InstallerInput::OpenLoader(loader),
             });
 
         let loader_select = LoaderSelectPage::builder()
@@ -153,22 +137,21 @@ impl Component for CreatePage {
                 cache_dir: init.cache_dir.clone(),
             })
             .forward(sender.input_sender(), |msg| match msg {
-                LoaderSelectOutput::Back => CreateInput::BackTo(CreateStep::Configure),
+                LoaderSelectOutput::Back => InstallerInput::BackTo(InstallerStep::Configure),
                 LoaderSelectOutput::Selected { loader, version } => {
-                    CreateInput::SetLoader(loader, version)
+                    InstallerInput::SetLoader(loader, version)
                 }
-                LoaderSelectOutput::ShowToast(message) => CreateInput::ShowToast(message),
+                LoaderSelectOutput::ShowToast(message) => InstallerInput::ShowToast(message),
             });
 
         init.config
-            .subscribe(sender.input_sender(), |_| CreateInput::Refresh);
+            .subscribe(sender.input_sender(), |_| InstallerInput::Refresh);
 
         let model = Self {
             mgr: init.mgr,
             selected_version: None,
-            step: CreateStep::SelectVersion,
+            step: InstallerStep::Configure,
 
-            version_select,
             configure,
             loader_select,
             active_install: init.active_install,
@@ -181,12 +164,13 @@ impl Component for CreatePage {
 
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
-            CreateInput::CancelClicked => {
-                let _ = sender.output(CreateOutput::Cancel);
+            InstallerInput::CancelClicked => {
+                self.loader_select.emit(LoaderSelectInput::Abort);
+                let _ = sender.output(InstallerOutput::Cancel);
             }
 
             // Create version metadata without downloading resource files, file downloads are handled upstream.
-            CreateInput::Create {
+            InstallerInput::Create {
                 name,
                 loader,
                 loader_version,
@@ -197,7 +181,7 @@ impl Component for CreatePage {
                     .lock()
                     .map_or(true, |active| active.is_some())
                 {
-                    let _ = sender.output(CreateOutput::ShowToast(t!(
+                    let _ = sender.output(InstallerOutput::ShowToast(t!(
                         "instances-create-error-active-install",
                         "Another installation is already in progress"
                     )));
@@ -205,7 +189,7 @@ impl Component for CreatePage {
                 }
 
                 let Some(version_entry) = self.selected_version.clone() else {
-                    let _ = sender.output(CreateOutput::ShowToast(t!(
+                    let _ = sender.output(InstallerOutput::ShowToast(t!(
                         "instances-create-error-empty-version",
                         "Please select a Minecraft version"
                     )));
@@ -224,7 +208,7 @@ impl Component for CreatePage {
                                 "Failed to create instance: {err}",
                                 err = err
                             );
-                            let _ = sender.output(CreateOutput::ShowToast(msg));
+                            let _ = sender.output(InstallerOutput::ShowToast(msg));
                             return;
                         }
                     };
@@ -233,7 +217,7 @@ impl Component for CreatePage {
                     || self.mgr.read().instances.iter().any(|i| i.id() == name);
                 if already_exists {
                     let msg = CoreError::InstanceAlreadyExists { id: name }.to_i18n();
-                    let _ = sender.output(CreateOutput::ShowToast(msg));
+                    let _ = sender.output(InstallerOutput::ShowToast(msg));
                     return;
                 }
 
@@ -248,36 +232,49 @@ impl Component for CreatePage {
                 );
 
                 self.selected_version = None;
-                self.step = CreateStep::SelectVersion;
-                let _ = sender.output(CreateOutput::Created(Box::new(instance), version_entry));
+                self.step = InstallerStep::Configure;
+                let _ = sender.output(InstallerOutput::Created(Box::new(instance), version_entry));
             }
-            CreateInput::ShowToast(message) => {
-                let _ = sender.output(CreateOutput::ShowToast(message));
+            InstallerInput::ShowToast(message) => {
+                let _ = sender.output(InstallerOutput::ShowToast(message));
             }
-            CreateInput::VersionSelected(entry) => {
-                self.configure
-                    .emit(ConfigureInput::SetGameVersion(entry.id.clone()));
-                self.selected_version = Some(entry);
-                self.step = CreateStep::Configure;
-            }
-            CreateInput::Refresh => {}
-            CreateInput::BackTo(step) => {
+
+            InstallerInput::Refresh => {}
+            InstallerInput::BackTo(step) => {
                 self.step = step;
             }
-            CreateInput::OpenLoader(loader) => {
+            InstallerInput::OpenLoader(loader) => {
                 if let Some(entry) = &self.selected_version {
                     self.loader_select.emit(LoaderSelectInput::Load {
                         loader,
                         game_version: entry.id.clone(),
                     });
-                    self.step = CreateStep::SelectLoader;
+                    self.step = InstallerStep::SelectLoader;
                 }
             }
-            CreateInput::SetLoader(loader, version) => {
+            InstallerInput::SetLoader(loader, version) => {
                 self.configure
                     .emit(ConfigureInput::SetLoader(loader, version));
-                self.step = CreateStep::Configure;
+                self.step = InstallerStep::Configure;
+            }
+            InstallerInput::OpenVanilla(version) => {
+                self.selected_version = Some(version.clone());
+                self.configure
+                    .emit(ConfigureInput::SetGameVersion(version.id));
+                self.step = InstallerStep::Configure;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_installer_step_default_and_as_str() {
+        assert_eq!(InstallerStep::default(), InstallerStep::Configure);
+        assert_eq!(InstallerStep::Configure.as_str(), "configure");
+        assert_eq!(InstallerStep::SelectLoader.as_str(), "select_loader");
     }
 }

@@ -173,16 +173,6 @@ impl FactoryComponent for TaskRow {
             #[watch]
             set_subtitle: &self.subtitle(),
 
-            add_suffix = &gtk::Label {
-                set_valign: gtk::Align::Center,
-                add_css_class: "numeric",
-                add_css_class: "dim-label",
-                #[watch]
-                set_visible: !self.snap.state.is_finished(),
-                #[watch]
-                set_label: &self.percent_text(),
-            },
-
             add_suffix = &gtk::Button {
                 set_valign: gtk::Align::Center,
                 add_css_class: "flat",
@@ -192,6 +182,16 @@ impl FactoryComponent for TaskRow {
                 #[watch]
                 set_tooltip_text: Some(&self.primary_tooltip()),
                 connect_clicked => TaskRowInput::Primary,
+            },
+
+            add_suffix = &gtk::Label {
+                set_valign: gtk::Align::Center,
+                add_css_class: "numeric",
+                add_css_class: "dim-label",
+                #[watch]
+                set_visible: !self.snap.state.is_finished(),
+                #[watch]
+                set_label: &self.percent_text(),
             },
 
            // The row that displays the error message should be the last one added

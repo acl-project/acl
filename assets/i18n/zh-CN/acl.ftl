@@ -129,6 +129,16 @@ delete-dialog-cancel = 取消
 delete-dialog-delete = 删除
 # Source: Delete Instance
 delete-dialog-heading = 删除实例
+# Source: Failed to load version manifest: { $err }
+download-game-error-load-version-manifest = 加载版本清单失败：{ $err }
+# Source: Refresh version list
+download-game-refresh-version = 刷新版本列表
+# Source: Search versions...
+download-game-search-versions = 搜索版本...
+# Source: Game
+download-navigation-page-game = 游戏
+# Source: Download Center
+download-page-title = 下载中心
 # Source: Start Game
 home-page-button-start-game = 启动游戏
 # Source: Please select an instance
@@ -149,6 +159,8 @@ install-stage-fetching-asset-index = 获取资源索引...
 install-stage-fetching-metadata = 获取版本元数据...
 # Source: Preparing runtime
 install-stage-preparing-runtime = 准备运行环境...
+# Source: Installer
+installer-toolbar-title = 安装配置
 # Source: Back
 instance-detail-button-back = 返回
 # Source: Failed to create directory: { $err }
@@ -197,10 +209,8 @@ instance-settings-version-title = 游戏版本
 instances-create-button-back = 返回
 # Source: Clear
 instances-create-button-clear = 清除
-# Source: Create
-instances-create-button-create = 创建
-# Source: Next
-instances-create-button-next = 下一步
+# Source: Start Install
+instances-create-button-create = 开始安装
 # Source: Another installation is already in progress
 instances-create-error-active-install = 已有另一个安装任务正在进行中
 # Source: Failed to create instance: { $err }
@@ -209,8 +219,6 @@ instances-create-error-create-instance = 创建实例失败：{ $err }
 instances-create-error-empty-version = 请选择 Minecraft 版本
 # Source: Failed to get { $game } forge manifest
 instances-create-error-forge-version = 获取 { $game } 的 Forge 清单失败
-# Source: Failed to load version manifest: { $err }
-instances-create-error-load-version-manifest = 加载版本清单失败：{ $err }
 # Source: Not implemented or unsupported loader
 instances-create-error-unsupported-loader = 未实现或不支持的模组加载器
 # Source: { $candidate } is incompatible with { $selected }
@@ -229,14 +237,10 @@ instances-create-settings-instance-name = 实例名称
 instances-create-settings-loader-title = 模组加载器
 # Source: Instance Settings
 instances-create-settings-title = 实例设置
-# Source: Create
-instances-list-button-create = 创建
 # Source: Select an instance to launch Minecraft
 instances-list-description = 选择一个用于启动 Minecraft 的实例
 # Source: Instances
 instances-list-title = 实例
-# Source: Create an instance
-instances-list-tooltip-create = 创建实例
 # Source: System
 language-system = 系统默认
 # Source: Please select an account first

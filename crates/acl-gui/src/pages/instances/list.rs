@@ -169,7 +169,6 @@ pub struct ListPage {
 #[derive(Debug, Clone)]
 pub enum ListOutput {
     ShowToast(String),
-    OpenCreate,
     OpenDetail(String),
 }
 
@@ -219,23 +218,6 @@ impl SimpleComponent for ListPage {
                 #[watch]
                 set_description: Some(&t!("instances-list-description","Select an instance to launch Minecraft")),
 
-                #[wrap(Some)]
-                set_header_suffix = &gtk::Button {
-                    add_css_class: "flat",
-                    set_valign: gtk::Align::Center,
-                    #[watch]
-                    set_tooltip_text: Some(&t!("instances-list-tooltip-create","Create an instance")),
-
-                    adw::ButtonContent {
-                        set_icon_name: "list-add-symbolic",
-                        #[watch]
-                        set_label: &t!("instances-list-button-create","Create"),
-                    },
-
-                    connect_clicked[sender] => move |_| {
-                        let _ = sender.output(ListOutput::OpenCreate);
-                    },
-                },
 
             },
 

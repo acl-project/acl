@@ -9,9 +9,12 @@ use std::{
 
 use crate::{
     i18n::apply_language,
+    install::{InstallContext, spawn_install},
     pages::{
         accounts::{AccountsInit, AccountsOutput, AccountsPage},
+        download::{DownloadInit, DownloadOutput, DownloadPage},
         home::{HomeInit, HomeOutput, HomePage},
+        installer::{InstallerInit, InstallerInput, InstallerOutput, InstallerPage},
         instance_detail::{
             InstanceDetail, InstanceDetailInit, InstanceDetailInput, InstanceDetailOutput,
         },
@@ -22,13 +25,16 @@ use crate::{
     t,
     widgets::ms_login::{MsLoginDialog, MsLoginInit, MsLoginInput, MsLoginOutput},
 };
+use acl_minecraft::VersionEntry;
 use adw::prelude::*;
 use gtk::prelude::GtkWindowExt;
 use libadwaita::NavigationPage;
 use relm4::{SharedState, prelude::*};
 
 use acl_auth::AccountStore;
-use acl_core::{LauncherConfig, LauncherDirs, manager::InstanceManager, task::TaskManager};
+use acl_core::{
+    Instance, LauncherConfig, LauncherDirs, manager::InstanceManager, task::TaskManager,
+};
 use tracing::error;
 
 const USER_AGENT: &str = concat!(
@@ -106,6 +112,7 @@ impl FromStr for NavPage {
 pub struct AppModel {
     current_page: NavPage,
     current_view: AppView,
+    installer_return_to: AppView,
     /// Used to pop up hint messages or errors below.
     toast_overlay: adw::ToastOverlay,
     home_page: Controller<HomePage>,
@@ -113,6 +120,8 @@ pub struct AppModel {
     accounts_page: Controller<AccountsPage>,
     settings_page: Controller<SettingsPage>,
     tasks_page: Controller<TasksPage>,
+    download_page: Controller<DownloadPage>,
+    installer_page: Controller<InstallerPage>,
     ms_login: Controller<MsLoginDialog>,
 
     instance_detail: Controller<InstanceDetail>,
@@ -128,6 +137,8 @@ pub struct AppModel {
     client: reqwest::Client,
     #[allow(dead_code)]
     tasks: Arc<TaskManager>,
+    dirs: LauncherDirs,
+    active_install: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug)]
@@ -139,9 +150,12 @@ pub enum AppMsg {
     PromptReauth(String),
     /// Open the instance details page; the String is the instance id.
     OpenInstanceDetail(String),
-    OpenTasks,
     CloseInstanceDetail,
     OpenDownload,
+    CloseDownload,
+    OpenVanillaInstaller(VersionEntry),
+    CloseInstaller,
+    InstanceCreated(Box<Instance>, VersionEntry),
     Refresh,
     Quit,
 }
@@ -164,7 +178,8 @@ impl SimpleComponent for AppModel {
             toast_overlay -> adw::ToastOverlay {
 
                 gtk::Stack  {
-                    set_transition_type: gtk::StackTransitionType::SlideLeftRight,
+                    set_transition_type: gtk::StackTransitionType::Crossfade,
+                    set_transition_duration: 150,
                     #[name = "split_view"]
                     add_named[Some(AppView::Main.as_str())] = &adw::NavigationSplitView {
                         #[wrap(Some)]
@@ -236,7 +251,7 @@ impl SimpleComponent for AppModel {
                                 #[wrap(Some)]
                                 #[local_ref]
                                 set_content = stack ->adw::ViewStack {
-
+                                    set_enable_transitions: true,
                                     add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), &NavPage::Home.title(), "go-home-symbolic"),
                                     add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), &NavPage::Instances.title(), "view-grid-symbolic"),
                                     add_titled_with_icon: (model.tasks_page.widget(), Some(NavPage::Tasks.as_str()), &NavPage::Tasks.title(), "view-list-symbolic"),
@@ -252,6 +267,8 @@ impl SimpleComponent for AppModel {
                     },
 
                     add_named[Some(AppView::InstanceDetail.as_str())] = model.instance_detail.widget(),
+                    add_named[Some(AppView::Download.as_str())] = model.download_page.widget(),
+                    add_named[Some(AppView::Installer.as_str())] = model.installer_page.widget(),
 
                     #[watch]
                     set_visible_child_name: model.current_view.as_str(),
@@ -376,15 +393,10 @@ impl SimpleComponent for AppModel {
             .launch(InstancesInit {
                 mgr: Arc::clone(&instances_state),
                 config: Arc::clone(&config_state),
-                client: client.clone(),
-                dirs: dirs.clone(),
-                tasks: Arc::clone(&tasks),
-                active_install: Arc::clone(&active_install),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 InstancesPageOutput::ShowToast(message) => AppMsg::ShowToast(message),
                 InstancesPageOutput::OpenDetail(id) => AppMsg::OpenInstanceDetail(id),
-                InstancesPageOutput::OpenTasks => AppMsg::OpenTasks,
             });
 
         let accounts_page = AccountsPage::builder()
@@ -412,18 +424,47 @@ impl SimpleComponent for AppModel {
             })
             .forward(sender.input_sender(), |msg| match msg {});
 
+        let download_page = DownloadPage::builder()
+            .launch(DownloadInit {
+                config: Arc::clone(&config_state),
+                client: client.clone(),
+                cache_dir: dirs.cache_dir().to_path_buf(),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                DownloadOutput::Back => AppMsg::CloseDownload,
+                DownloadOutput::SelectGameVersion(entry) => AppMsg::OpenVanillaInstaller(entry),
+                DownloadOutput::ShowToast(m) => AppMsg::ShowToast(m),
+            });
+
+        let installer_page = InstallerPage::builder()
+            .launch(InstallerInit {
+                mgr: Arc::clone(&instances_state),
+                config: Arc::clone(&config_state),
+                client: client.clone(),
+                cache_dir: dirs.cache_dir().to_path_buf(),
+                active_install: Arc::clone(&active_install),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                InstallerOutput::Cancel => AppMsg::CloseInstaller,
+                InstallerOutput::ShowToast(m) => AppMsg::ShowToast(m),
+                InstallerOutput::Created(ins, entry) => AppMsg::InstanceCreated(ins, entry),
+            });
+
         config_state.subscribe(sender.input_sender(), |_| AppMsg::Refresh);
 
         let toast_overlay = adw::ToastOverlay::new();
         let model = AppModel {
             current_page: NavPage::Home,
             current_view: AppView::Main,
+            installer_return_to: AppView::Main,
             toast_overlay,
             home_page,
             instances_page,
             accounts_page,
             settings_page,
             tasks_page,
+            download_page,
+            installer_page,
             ms_login,
             instance_detail,
             stack: adw::ViewStack::new(),
@@ -432,6 +473,8 @@ impl SimpleComponent for AppModel {
             instances: instances_state,
             client,
             tasks: Arc::clone(&tasks),
+            dirs,
+            active_install,
         };
 
         let toast_overlay = &model.toast_overlay;
@@ -496,7 +539,30 @@ impl SimpleComponent for AppModel {
             }
             AppMsg::CloseInstanceDetail => self.current_view = AppView::Main,
             AppMsg::OpenDownload => self.current_view = AppView::Download,
-            AppMsg::OpenTasks => self.current_page = NavPage::Tasks,
+
+            AppMsg::CloseDownload => self.current_view = AppView::Main,
+            AppMsg::CloseInstaller => self.current_view = self.installer_return_to,
+            AppMsg::InstanceCreated(instance, entry) => {
+                spawn_install(
+                    &self.tasks,
+                    *instance,
+                    entry,
+                    InstallContext {
+                        mgr: Arc::clone(&self.instances),
+                        client: self.client.clone(),
+                        dirs: self.dirs.clone(),
+                        config: Arc::clone(&self.config),
+                        active_install: Arc::clone(&self.active_install),
+                    },
+                );
+                self.current_page = NavPage::Tasks;
+                self.current_view = AppView::Main;
+            }
+            AppMsg::OpenVanillaInstaller(entry) => {
+                self.installer_return_to = self.current_view;
+                self.installer_page.emit(InstallerInput::OpenVanilla(entry));
+                self.current_view = AppView::Installer
+            }
         }
     }
 }
@@ -504,6 +570,22 @@ impl SimpleComponent for AppModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_app_view_default_and_as_str() {
+        assert_eq!(AppView::default(), AppView::Main);
+
+        let cases = [
+            (AppView::Main, "main"),
+            (AppView::InstanceDetail, "instance-detail"),
+            (AppView::Download, "download"),
+            (AppView::Installer, "installer"),
+        ];
+
+        for (view, expected_str) in cases {
+            assert_eq!(view.as_str(), expected_str);
+        }
+    }
 
     #[test]
     fn test_nav_page_default() {
