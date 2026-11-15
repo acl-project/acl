@@ -266,3 +266,15 @@ impl Component for InstallerPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_installer_step_default_and_as_str() {
+        assert_eq!(InstallerStep::default(), InstallerStep::Configure);
+        assert_eq!(InstallerStep::Configure.as_str(), "configure");
+        assert_eq!(InstallerStep::SelectLoader.as_str(), "select_loader");
+    }
+}

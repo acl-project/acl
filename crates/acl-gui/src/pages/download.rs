@@ -176,3 +176,15 @@ impl SimpleComponent for DownloadPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_download_nav_page_default_as_str_and_title() {
+        assert_eq!(NavPage::default(), NavPage::Game);
+        assert_eq!(NavPage::Game.as_str(), "game");
+        assert_eq!(NavPage::Game.title(), "Game");
+    }
+}

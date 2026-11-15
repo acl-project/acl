@@ -572,6 +572,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_app_view_default_and_as_str() {
+        assert_eq!(AppView::default(), AppView::Main);
+
+        let cases = [
+            (AppView::Main, "main"),
+            (AppView::InstanceDetail, "instance-detail"),
+            (AppView::Download, "download"),
+            (AppView::Installer, "installer"),
+        ];
+
+        for (view, expected_str) in cases {
+            assert_eq!(view.as_str(), expected_str);
+        }
+    }
+
+    #[test]
     fn test_nav_page_default() {
         assert_eq!(NavPage::default(), NavPage::Home);
     }

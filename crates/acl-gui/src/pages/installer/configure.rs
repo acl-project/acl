@@ -313,12 +313,21 @@ mod tests {
         page.selected_loader = ModLoader::Quilt;
         assert_eq!(page.effective_name(), "1.21.1-Quilt");
 
+        page.selected_loader = ModLoader::Forge;
+        assert_eq!(page.effective_name(), "1.21.1-Forge");
+
+        page.selected_loader = ModLoader::NeoForge;
+        assert_eq!(page.effective_name(), "1.21.1-NeoForge");
+
         // 2. can_create tests
         page.game_version = "".to_string();
         page.instance_name = "valid-name".to_string();
         assert!(!page.can_create());
 
         page.game_version = "1.21.1".to_string();
+        assert!(page.can_create());
+
+        page.instance_name = "   ".to_string();
         assert!(page.can_create());
 
         page.instance_name = "invalid/name".to_string();
