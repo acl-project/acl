@@ -165,6 +165,7 @@ impl Component for InstallerPage {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             InstallerInput::CancelClicked => {
+                self.loader_select.emit(LoaderSelectInput::Abort);
                 let _ = sender.output(InstallerOutput::Cancel);
             }
 

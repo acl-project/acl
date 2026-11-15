@@ -109,6 +109,7 @@ pub enum LoaderSelectInput {
     BackClicked,
     RefreshUi,
     RefreshVersions,
+    Abort,
 }
 
 #[derive(Debug, Clone)]
@@ -314,6 +315,13 @@ impl LoaderSelectPage {
 
         self.loading_abort = Some(join_handle.abort_handle());
     }
+
+    pub fn abort(&mut self) {
+        if let Some(handle) = self.loading_abort.take() {
+            handle.abort();
+        }
+        self.is_loading = false;
+    }
 }
 pub struct LoaderSelectInit {
     pub config: Arc<SharedState<LauncherConfig>>,
@@ -371,7 +379,7 @@ impl Component for LoaderSelectPage {
                     gtk::Box {
                         set_orientation: gtk::Orientation::Vertical,
                         set_spacing: 12,
-                        // Search bar and Filter ToggleGroup
+
                         gtk::Box {
                             set_spacing: 8,
                             gtk::SearchEntry {
@@ -483,6 +491,7 @@ impl Component for LoaderSelectPage {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             LoaderSelectInput::BackClicked => {
+                self.abort();
                 let _ = sender.output(LoaderSelectOutput::Back);
             }
             LoaderSelectInput::ClearSelection => {
@@ -517,11 +526,13 @@ impl Component for LoaderSelectPage {
                 self.current_loader = loader;
                 self.current_game_version = game_version;
                 // Cancel ongoing tasks to prevent contamination between different versions and different mod loaders.
-                if let Some(handle) = self.loading_abort.take() {
-                    handle.abort();
-                }
+                self.abort();
+
                 self.version_list.clear();
                 self.spawn_fetch_loader(&sender, false);
+            }
+            LoaderSelectInput::Abort => {
+                self.abort();
             }
         }
     }
