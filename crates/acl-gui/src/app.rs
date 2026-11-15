@@ -178,7 +178,8 @@ impl SimpleComponent for AppModel {
             toast_overlay -> adw::ToastOverlay {
 
                 gtk::Stack  {
-                    set_transition_type: gtk::StackTransitionType::SlideLeftRight,
+                    set_transition_type: gtk::StackTransitionType::Crossfade,
+                    set_transition_duration: 150,
                     #[name = "split_view"]
                     add_named[Some(AppView::Main.as_str())] = &adw::NavigationSplitView {
                         #[wrap(Some)]
@@ -250,7 +251,7 @@ impl SimpleComponent for AppModel {
                                 #[wrap(Some)]
                                 #[local_ref]
                                 set_content = stack ->adw::ViewStack {
-
+                                    set_enable_transitions: true,
                                     add_titled_with_icon: (model.home_page.widget(), Some(NavPage::Home.as_str()), &NavPage::Home.title(), "go-home-symbolic"),
                                     add_titled_with_icon: (model.instances_page.widget(), Some(NavPage::Instances.as_str()), &NavPage::Instances.title(), "view-grid-symbolic"),
                                     add_titled_with_icon: (model.tasks_page.widget(), Some(NavPage::Tasks.as_str()), &NavPage::Tasks.title(), "view-list-symbolic"),

@@ -209,8 +209,8 @@ instance-settings-version-title = 游戏版本
 instances-create-button-back = 返回
 # Source: Clear
 instances-create-button-clear = 清除
-# Source: Create
-instances-create-button-create = 创建
+# Source: Start Install
+instances-create-button-create = 开始安装
 # Source: Another installation is already in progress
 instances-create-error-active-install = 已有另一个安装任务正在进行中
 # Source: Failed to create instance: { $err }

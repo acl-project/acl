@@ -95,7 +95,8 @@ impl Component for InstallerPage {
     view! {
         #[root]
         gtk::Stack {
-            set_transition_type: gtk::StackTransitionType::SlideLeftRight,
+            set_transition_type: gtk::StackTransitionType::Crossfade,
+            set_transition_duration: 150,
 
             add_named[Some(InstallerStep::Configure.as_str())] = model.configure.widget(),
             add_named[Some(InstallerStep::SelectLoader.as_str())] = model.loader_select.widget(),

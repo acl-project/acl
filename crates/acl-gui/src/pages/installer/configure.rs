@@ -121,11 +121,9 @@ impl SimpleComponent for ConfigurePage {
                     #[watch]
                     set_sensitive: model.can_create(),
                     connect_clicked => ConfigureInput::CreateClicked,
-                    adw::ButtonContent {
-                        set_icon_name: "list-add-symbolic",
-                        #[watch]
-                        set_label: &t!("instances-create-button-create", "Create"),
-                    },
+                    #[watch]
+                    set_label: &t!("instances-create-button-create", "Start Install"),
+
                 },
             },
             #[wrap(Some)]
