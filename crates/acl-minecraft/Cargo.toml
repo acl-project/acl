@@ -15,3 +15,4 @@ tracing = { workspace = true }
 sha1 = { workspace = true }
 hex = { workspace = true }
 zip = { workspace = true }
+url = { workspace = true }

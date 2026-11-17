@@ -9,6 +9,7 @@ pub mod fabric;
 pub mod forge;
 pub mod manifest;
 pub mod mirror;
+pub mod modrinth;
 pub mod native;
 pub mod rule;
 pub mod version;
