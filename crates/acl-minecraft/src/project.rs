@@ -101,3 +101,30 @@ pub struct AssetItemData {
     pub display_categories: Vec<String>,
     pub latest_version: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_project_type_curseforge_class_id() {
+        assert_eq!(ProjectType::Mod.curseforge_class_id(), 6);
+        assert_eq!(ProjectType::Modpack.curseforge_class_id(), 4471);
+        assert_eq!(ProjectType::ResourcePack.curseforge_class_id(), 12);
+        assert_eq!(ProjectType::Shader.curseforge_class_id(), 6552);
+    }
+
+    #[test]
+    fn test_search_index_curseforge_sort_field() {
+        assert_eq!(SearchIndex::Relevance.curseforge_sort_field(), 1);
+        assert_eq!(SearchIndex::Follows.curseforge_sort_field(), 2);
+        assert_eq!(SearchIndex::Updated.curseforge_sort_field(), 3);
+        assert_eq!(SearchIndex::Downloads.curseforge_sort_field(), 6);
+        assert_eq!(SearchIndex::Newest.curseforge_sort_field(), 11);
+    }
+
+    #[test]
+    fn test_project_host_default() {
+        assert_eq!(ProjectHost::default(), ProjectHost::Modrinth);
+    }
+}

@@ -650,3 +650,19 @@ impl Component for BrowserPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_downloads() {
+        assert_eq!(format_downloads(0), "0");
+        assert_eq!(format_downloads(999), "999");
+        assert_eq!(format_downloads(1_000), "1.0K");
+        assert_eq!(format_downloads(1_540), "1.5K");
+        assert_eq!(format_downloads(999_949), "999.9K");
+        assert_eq!(format_downloads(1_000_000), "1.0M");
+        assert_eq!(format_downloads(45_670_000), "45.7M");
+    }
+}

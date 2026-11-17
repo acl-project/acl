@@ -273,7 +273,32 @@ mod tests {
     #[test]
     fn test_download_nav_page_default_as_str_and_title() {
         assert_eq!(NavPage::default(), NavPage::Game);
-        assert_eq!(NavPage::Game.as_str(), "game");
-        assert_eq!(NavPage::Game.title(), "Game");
+
+        let cases = [
+            (NavPage::Game, "game", "Game"),
+            (NavPage::Mod, "mod", "Mods"),
+            (NavPage::Modpack, "modpack", "Modpacks"),
+            (NavPage::ResourcePack, "resource-pack", "Resource Packs"),
+            (NavPage::Shader, "shader", "Shaders"),
+        ];
+        for (page, expected_str, expected_title) in cases {
+            assert_eq!(page.as_str(), expected_str);
+            assert_eq!(page.title(), expected_title);
+        }
+    }
+
+    #[test]
+    fn test_download_nav_page_from_str() {
+        assert_eq!("game".parse::<NavPage>(), Ok(NavPage::Game));
+        assert_eq!("mod".parse::<NavPage>(), Ok(NavPage::Mod));
+        assert_eq!("modpack".parse::<NavPage>(), Ok(NavPage::Modpack));
+        assert_eq!(
+            "resource-pack".parse::<NavPage>(),
+            Ok(NavPage::ResourcePack)
+        );
+        assert_eq!("shader".parse::<NavPage>(), Ok(NavPage::Shader));
+
+        assert_eq!("".parse::<NavPage>(), Err(()));
+        assert_eq!("unknown".parse::<NavPage>(), Err(()));
     }
 }

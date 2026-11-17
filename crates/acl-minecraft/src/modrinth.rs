@@ -861,4 +861,93 @@ mod tests {
         .expect("should load ProjectVersion list from local cache");
         assert_eq!(loaded, versions);
     }
+
+    #[test]
+    fn test_asset_item_data_from_search_hit() {
+        let make_hit = |categories: Vec<&str>, display_categories: Vec<&str>| SearchHit {
+            project_id: "AANobbMI".to_string(),
+            project_type: ProjectType::Mod,
+            slug: "sodium".to_string(),
+            author: "jellysquid3".to_string(),
+            title: "Sodium".to_string(),
+            description: "Fastest rendering optimization mod".to_string(),
+            categories: categories.into_iter().map(str::to_string).collect(),
+            display_categories: display_categories.into_iter().map(str::to_string).collect(),
+            versions: vec!["1.21.1".to_string()],
+            downloads: 45_000_000,
+            follows: 120_000,
+            icon_url: Some("https://cdn.modrinth.com/data/AANobbMI/icon.png".to_string()),
+            date_created: "2020-07-09T03:02:55Z".to_string(),
+            date_modified: "2024-08-15T12:00:00Z".to_string(),
+            latest_version: Some("mc1.21.1-0.6.0".to_string()),
+            license: "LGPL-3.0-only".to_string(),
+            client_side: SideSupport::Required,
+            server_side: SideSupport::Unsupported,
+            gallery: Vec::new(),
+            featured_gallery: None,
+            color: None,
+        };
+
+        let with_display = AssetItemData::from(make_hit(
+            vec!["fabric", "optimization"],
+            vec!["optimization"],
+        ));
+        assert_eq!(with_display.host, ProjectHost::Modrinth);
+        assert_eq!(with_display.project_id, "AANobbMI");
+        assert_eq!(with_display.title, "Sodium");
+        assert_eq!(with_display.author, "jellysquid3");
+        assert_eq!(
+            with_display.description,
+            "Fastest rendering optimization mod"
+        );
+        assert_eq!(
+            with_display.icon_url.as_deref(),
+            Some("https://cdn.modrinth.com/data/AANobbMI/icon.png")
+        );
+        assert_eq!(with_display.downloads, 45_000_000);
+        assert_eq!(with_display.display_categories, vec!["optimization"]);
+        assert_eq!(
+            with_display.latest_version.as_deref(),
+            Some("mc1.21.1-0.6.0")
+        );
+
+        let fallback = AssetItemData::from(make_hit(vec!["fabric", "optimization"], Vec::new()));
+        assert_eq!(fallback.display_categories, vec!["fabric", "optimization"]);
+    }
+
+    #[test]
+    fn test_search_params_from_asset_filter_state() {
+        let with_category = AssetFilterState {
+            host: ProjectHost::Modrinth,
+            project_type: ProjectType::Modpack,
+            query: "create".to_string(),
+            game_version: Some("1.21.1".to_string()),
+            loader: Some("fabric".to_string()),
+            category: Some("adventure".to_string()),
+            sort_by: SearchIndex::Downloads,
+            offset: 20,
+            limit: 20,
+        };
+        let params_with_category = SearchParams::from(&with_category);
+        assert_eq!(
+            params_with_category,
+            SearchParams {
+                query: "create".to_string(),
+                project_type: ProjectType::Modpack,
+                game_version: Some("1.21.1".to_string()),
+                loader: Some("fabric".to_string()),
+                categories: vec!["adventure".to_string()],
+                index: SearchIndex::Downloads,
+                offset: 20,
+                limit: 20,
+            }
+        );
+
+        let without_category = AssetFilterState {
+            category: None,
+            ..with_category
+        };
+        let params_without_category = SearchParams::from(&without_category);
+        assert!(params_without_category.categories.is_empty());
+    }
 }
