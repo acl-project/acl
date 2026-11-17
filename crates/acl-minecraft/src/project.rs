@@ -87,3 +87,17 @@ pub struct AssetFilterState {
     pub offset: u32,
     pub limit: u32,
 }
+
+/// Unified list item display data (converted from Modrinth or CurseForge)
+#[derive(Debug, Clone)]
+pub struct AssetItemData {
+    pub host: ProjectHost,
+    pub project_id: String,
+    pub title: String,
+    pub author: String,
+    pub description: String,
+    pub icon_url: Option<String>,
+    pub downloads: u64,
+    pub display_categories: Vec<String>,
+    pub latest_version: Option<String>,
+}

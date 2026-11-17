@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     DownloadSource, Result,
     cache::fetch_cached_json,
-    project::{ProjectType, SearchIndex},
+    project::{AssetFilterState, AssetItemData, ProjectHost, ProjectType, SearchIndex},
 };
 
 pub const MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
@@ -305,6 +305,45 @@ impl ProjectVersion {
             force_refresh,
         )
         .await
+    }
+}
+
+impl From<SearchHit> for AssetItemData {
+    fn from(hit: SearchHit) -> Self {
+        // If display_categories is empty, fallback to categories
+        let display_categories = if hit.display_categories.is_empty() {
+            hit.categories
+        } else {
+            hit.display_categories
+        };
+
+        Self {
+            host: ProjectHost::Modrinth,
+            project_id: hit.project_id,
+            title: hit.title,
+            author: hit.author,
+            description: hit.description,
+            icon_url: hit.icon_url,
+            downloads: hit.downloads,
+            display_categories,
+            latest_version: hit.latest_version,
+        }
+    }
+}
+
+/// Convert the UI's unified filtering status reference to Modrinth's SearchParams
+impl From<&AssetFilterState> for SearchParams {
+    fn from(state: &AssetFilterState) -> Self {
+        Self {
+            query: state.query.clone(),
+            project_type: state.project_type,
+            game_version: state.game_version.clone(),
+            loader: state.loader.clone(),
+            categories: state.category.iter().cloned().collect(),
+            index: state.sort_by,
+            offset: state.offset,
+            limit: state.limit,
+        }
     }
 }
 
