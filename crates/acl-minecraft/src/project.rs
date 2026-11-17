@@ -23,7 +23,7 @@ impl ProjectType {
         }
     }
 
-    // Are you out of your mind, CurseForge? Why the fuck are you using these random magic numbers? Fuck you, CurseForge.
+    // Truly inspired architecture by CurseForge—who needs named constants when you have mysterious, undocumented magic numbers?
     pub const fn curseforge_class_id(self) -> u32 {
         match self {
             Self::Mod => 6,
