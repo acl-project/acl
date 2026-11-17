@@ -2,35 +2,66 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::pages::download::browser::{BrowserInit, BrowserOutput, BrowserPage};
 use crate::pages::download::game::{GameInit, GameOutput, GamePage};
 use crate::t;
 use acl_core::LauncherConfig;
-use acl_minecraft::VersionEntry;
+use acl_minecraft::{AssetItemData, ProjectType, VersionEntry};
 use adw::prelude::*;
 use libadwaita::NavigationPage;
 use relm4::prelude::*;
 use relm4::{SharedState, SimpleComponent};
+use tracing::info;
 
+pub mod browser;
 pub mod game;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NavPage {
     #[default]
     Game,
+    Mod,
+    Modpack,
+    ResourcePack,
+    Shader,
 }
 
 impl NavPage {
     fn as_str(self) -> &'static str {
         match self {
             Self::Game => "game",
+            Self::Mod => "mod",
+            Self::ResourcePack => "resource-pack",
+            Self::Shader => "shader",
+            Self::Modpack => "modpack",
         }
     }
 
     fn title(self) -> String {
         match self {
             Self::Game => t!("download-navigation-page-game", "Game"),
+            Self::Mod => t!("download-navigation-page-mod", "Mods"),
+            Self::ResourcePack => t!("download-navigation-page-resource-pack", "Resource Packs"),
+            Self::Shader => t!("download-navigation-page-shader", "Shaders"),
+            Self::Modpack => t!("download-navigation-page-modpack", "Modpacks"),
+        }
+    }
+}
+
+impl FromStr for NavPage {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "game" => Ok(Self::Game),
+            "mod" => Ok(Self::Mod),
+            "resource-pack" => Ok(Self::ResourcePack),
+            "shader" => Ok(Self::Shader),
+            "modpack" => Ok(Self::Modpack),
+            _ => Err(()),
         }
     }
 }
@@ -39,6 +70,10 @@ pub struct DownloadPage {
     current_page: NavPage,
     stack: adw::ViewStack,
     game_page: Controller<GamePage>,
+    mod_page: Controller<BrowserPage>,
+    modpack_page: Controller<BrowserPage>,
+    resource_pack_page: Controller<BrowserPage>,
+    shader_page: Controller<BrowserPage>,
 }
 
 pub struct DownloadInit {
@@ -49,9 +84,11 @@ pub struct DownloadInit {
 
 #[derive(Debug)]
 pub enum DownloadInput {
+    Navigate(NavPage),
     Refresh,
     SelectGameVersion(VersionEntry),
     ShowToast(String),
+    SelectAsset(AssetItemData),
 }
 
 #[derive(Debug)]
@@ -112,6 +149,10 @@ impl SimpleComponent for DownloadPage {
                     set_content = stack ->adw::ViewStack {
 
                         add_titled_with_icon: (model.game_page.widget(), Some(NavPage::Game.as_str()), &NavPage::Game.title(), "input-gaming-symbolic"),
+                        add_titled_with_icon: (model.modpack_page.widget(), Some(NavPage::Modpack.as_str()), &NavPage::Modpack.title(), "package-x-generic-symbolic"),
+                        add_titled_with_icon: (model.mod_page.widget(), Some(NavPage::Mod.as_str()), &NavPage::Mod.title(), "application-x-addon-symbolic"),
+                        add_titled_with_icon: (model.resource_pack_page.widget(), Some(NavPage::ResourcePack.as_str()), &NavPage::ResourcePack.title(), "applications-graphics-symbolic"),
+                        add_titled_with_icon: (model.shader_page.widget(), Some(NavPage::Shader.as_str()), &NavPage::Shader.title(), "weather-clear-symbolic"),
 
                         #[watch]
                         set_visible_child_name: model.current_page.as_str(),
@@ -132,19 +173,42 @@ impl SimpleComponent for DownloadPage {
 
         let game_page = GamePage::builder()
             .launch(GameInit {
-                config: init.config,
-                client: init.client,
-                cache_dir: init.cache_dir,
+                config: Arc::clone(&init.config),
+                client: init.client.clone(),
+                cache_dir: init.cache_dir.clone(),
             })
             .forward(sender.input_sender(), |msg| match msg {
                 GameOutput::Selected(version) => DownloadInput::SelectGameVersion(version),
                 GameOutput::ShowToast(message) => DownloadInput::ShowToast(message),
             });
 
+        let launch_browser = |project_type: ProjectType| {
+            BrowserPage::builder()
+                .launch(BrowserInit {
+                    project_type,
+                    config: Arc::clone(&init.config),
+                    client: init.client.clone(),
+                    cache_dir: init.cache_dir.clone(),
+                })
+                .forward(sender.input_sender(), |msg| match msg {
+                    BrowserOutput::Selected(item) => DownloadInput::SelectAsset(item),
+                    BrowserOutput::ShowToast(m) => DownloadInput::ShowToast(m),
+                })
+        };
+
+        let mod_page = launch_browser(ProjectType::Mod);
+        let resource_pack_page = launch_browser(ProjectType::ResourcePack);
+        let shader_page = launch_browser(ProjectType::Shader);
+        let modpack_page = launch_browser(ProjectType::Modpack);
+
         let model = DownloadPage {
             current_page: NavPage::Game,
             stack: adw::ViewStack::new(),
             game_page,
+            mod_page,
+            modpack_page,
+            resource_pack_page,
+            shader_page,
         };
 
         let stack = &model.stack;
@@ -152,8 +216,14 @@ impl SimpleComponent for DownloadPage {
         let widgets = view_output!();
 
         model.stack.connect_visible_child_name_notify({
+            let sender = sender.clone();
             let split_view = root.clone();
-            move |_stack| {
+            move |stack| {
+                if let Some(name) = stack.visible_child_name()
+                    && let Ok(page) = name.parse::<NavPage>()
+                {
+                    sender.input(DownloadInput::Navigate(page));
+                }
                 split_view.set_show_content(true);
             }
         });
@@ -163,15 +233,34 @@ impl SimpleComponent for DownloadPage {
 
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
         match msg {
-            DownloadInput::Refresh => self
-                .stack
-                .page(self.game_page.widget())
-                .set_title(Some(&NavPage::Game.title())),
+            DownloadInput::Refresh => {
+                self.stack
+                    .page(self.game_page.widget())
+                    .set_title(Some(&NavPage::Game.title()));
+                self.stack
+                    .page(self.modpack_page.widget())
+                    .set_title(Some(&NavPage::Modpack.title()));
+                self.stack
+                    .page(self.mod_page.widget())
+                    .set_title(Some(&NavPage::Mod.title()));
+                self.stack
+                    .page(self.resource_pack_page.widget())
+                    .set_title(Some(&NavPage::ResourcePack.title()));
+                self.stack
+                    .page(self.shader_page.widget())
+                    .set_title(Some(&NavPage::Shader.title()));
+            }
             DownloadInput::SelectGameVersion(version) => {
                 let _ = sender.output(DownloadOutput::SelectGameVersion(version));
             }
             DownloadInput::ShowToast(message) => {
                 let _ = sender.output(DownloadOutput::ShowToast(message));
+            }
+            DownloadInput::SelectAsset(_) => {
+                info!("Asset download coming soon");
+            }
+            DownloadInput::Navigate(nav) => {
+                self.current_page = nav;
             }
         }
     }
