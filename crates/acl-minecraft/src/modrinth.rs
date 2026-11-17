@@ -5,54 +5,14 @@ use std::{path::Path, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DownloadSource, Result, cache::fetch_cached_json};
+use crate::{
+    DownloadSource, Result,
+    cache::fetch_cached_json,
+    project::{ProjectType, SearchIndex},
+};
 
 pub const MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
 pub const DEFAULT_SEARCH_TTL: Duration = Duration::from_secs(300);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ProjectType {
-    #[default]
-    Mod,
-    Modpack,
-    ResourcePack,
-    Shader,
-}
-
-impl ProjectType {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Mod => "mod",
-            Self::Modpack => "modpack",
-            Self::ResourcePack => "resourcepack",
-            Self::Shader => "shader",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SearchIndex {
-    #[default]
-    Relevance,
-    Downloads,
-    Follows,
-    Newest,
-    Updated,
-}
-
-impl SearchIndex {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Relevance => "relevance",
-            Self::Downloads => "downloads",
-            Self::Follows => "follows",
-            Self::Newest => "newest",
-            Self::Updated => "updated",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchParams {
@@ -70,7 +30,10 @@ impl SearchParams {
     /// Construct a two-dimensional facets array of Modrinth, for example:
     /// [["project_type:mod"], ["versions:1.20.1"], ["categories:fabric"]]
     pub fn build_facets(&self) -> Vec<Vec<String>> {
-        let mut facets = vec![vec![format!("project_type:{}", self.project_type.as_str())]];
+        let mut facets = vec![vec![format!(
+            "project_type:{}",
+            self.project_type.as_modrinth_str()
+        )]];
         if let Some(version) = &self.game_version
             && !version.is_empty()
         {
@@ -104,7 +67,7 @@ impl SearchParams {
             serializer.append_pair("facets", &facets_json);
         }
 
-        serializer.append_pair("index", self.index.as_str());
+        serializer.append_pair("index", self.index.as_modrinth_str());
         serializer.append_pair("offset", &self.offset.to_string());
         serializer.append_pair("limit", &self.limit.to_string());
 
@@ -396,7 +359,7 @@ mod tests {
             (ProjectType::Shader, "shader", "\"shader\""),
         ];
         for (variant, expected_str, expected_json) in project_cases {
-            assert_eq!(variant.as_str(), expected_str);
+            assert_eq!(variant.as_modrinth_str(), expected_str);
             let serialized = serde_json::to_string(&variant).expect("serialize ProjectType");
             assert_eq!(serialized, expected_json);
             let deserialized: ProjectType =
@@ -413,7 +376,7 @@ mod tests {
             (SearchIndex::Updated, "updated", "\"updated\""),
         ];
         for (variant, expected_str, expected_json) in index_cases {
-            assert_eq!(variant.as_str(), expected_str);
+            assert_eq!(variant.as_modrinth_str(), expected_str);
             let serialized = serde_json::to_string(&variant).expect("serialize SearchIndex");
             assert_eq!(serialized, expected_json);
             let deserialized: SearchIndex =

@@ -11,6 +11,7 @@ pub mod manifest;
 pub mod mirror;
 pub mod modrinth;
 pub mod native;
+pub mod project;
 pub mod rule;
 pub mod version;
 
