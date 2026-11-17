@@ -344,3 +344,519 @@ impl ProjectVersion {
         .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "acl_test_modrinth_{}_{}_{}",
+                name,
+                std::process::id(),
+                id
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("failed to create temp test dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_project_type_and_search_index_properties_and_serde() {
+        assert_eq!(ProjectType::default(), ProjectType::Mod);
+        let project_cases = [
+            (ProjectType::Mod, "mod", "\"mod\""),
+            (ProjectType::Modpack, "modpack", "\"modpack\""),
+            (
+                ProjectType::ResourcePack,
+                "resourcepack",
+                "\"resourcepack\"",
+            ),
+            (ProjectType::Shader, "shader", "\"shader\""),
+        ];
+        for (variant, expected_str, expected_json) in project_cases {
+            assert_eq!(variant.as_str(), expected_str);
+            let serialized = serde_json::to_string(&variant).expect("serialize ProjectType");
+            assert_eq!(serialized, expected_json);
+            let deserialized: ProjectType =
+                serde_json::from_str(&serialized).expect("deserialize ProjectType");
+            assert_eq!(deserialized, variant);
+        }
+
+        assert_eq!(SearchIndex::default(), SearchIndex::Relevance);
+        let index_cases = [
+            (SearchIndex::Relevance, "relevance", "\"relevance\""),
+            (SearchIndex::Downloads, "downloads", "\"downloads\""),
+            (SearchIndex::Follows, "follows", "\"follows\""),
+            (SearchIndex::Newest, "newest", "\"newest\""),
+            (SearchIndex::Updated, "updated", "\"updated\""),
+        ];
+        for (variant, expected_str, expected_json) in index_cases {
+            assert_eq!(variant.as_str(), expected_str);
+            let serialized = serde_json::to_string(&variant).expect("serialize SearchIndex");
+            assert_eq!(serialized, expected_json);
+            let deserialized: SearchIndex =
+                serde_json::from_str(&serialized).expect("deserialize SearchIndex");
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn test_enums_serde_and_defaults() {
+        assert_eq!(SideSupport::default(), SideSupport::Unknown);
+        for (variant, expected_json) in [
+            (SideSupport::Required, "\"required\""),
+            (SideSupport::Optional, "\"optional\""),
+            (SideSupport::Unsupported, "\"unsupported\""),
+            (SideSupport::Unknown, "\"unknown\""),
+        ] {
+            let serialized = serde_json::to_string(&variant).expect("serialize SideSupport");
+            assert_eq!(serialized, expected_json);
+            let deserialized: SideSupport =
+                serde_json::from_str(&serialized).expect("deserialize SideSupport");
+            assert_eq!(deserialized, variant);
+        }
+
+        assert_eq!(ReleaseType::default(), ReleaseType::Release);
+        for (variant, expected_json) in [
+            (ReleaseType::Release, "\"release\""),
+            (ReleaseType::Beta, "\"beta\""),
+            (ReleaseType::Alpha, "\"alpha\""),
+        ] {
+            let serialized = serde_json::to_string(&variant).expect("serialize ReleaseType");
+            assert_eq!(serialized, expected_json);
+            let deserialized: ReleaseType =
+                serde_json::from_str(&serialized).expect("deserialize ReleaseType");
+            assert_eq!(deserialized, variant);
+        }
+
+        for (variant, expected_json) in [
+            (DependencyType::Required, "\"required\""),
+            (DependencyType::Optional, "\"optional\""),
+            (DependencyType::Incompatible, "\"incompatible\""),
+            (DependencyType::Embedded, "\"embedded\""),
+        ] {
+            let serialized = serde_json::to_string(&variant).expect("serialize DependencyType");
+            assert_eq!(serialized, expected_json);
+            let deserialized: DependencyType =
+                serde_json::from_str(&serialized).expect("deserialize DependencyType");
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn test_search_params_build_facets_and_url() {
+        let minimal = SearchParams {
+            query: String::new(),
+            project_type: ProjectType::Mod,
+            game_version: Some(String::new()),
+            loader: None,
+            categories: vec![String::new()],
+            index: SearchIndex::Downloads,
+            offset: 0,
+            limit: 20,
+        };
+        assert_eq!(
+            minimal.build_facets(),
+            vec![vec!["project_type:mod".to_string()]]
+        );
+
+        let minimal_url = minimal.build_url("https://api.modrinth.com/v2/");
+        assert!(minimal_url.starts_with("https://api.modrinth.com/v2/search?"));
+        let parsed_minimal = url::Url::parse(&minimal_url).expect("parse minimal url");
+        let minimal_pairs: std::collections::HashMap<String, String> =
+            parsed_minimal.query_pairs().into_owned().collect();
+        assert!(!minimal_pairs.contains_key("query"));
+        assert_eq!(
+            minimal_pairs.get("facets").map(String::as_str),
+            Some(r#"[["project_type:mod"]]"#)
+        );
+        assert_eq!(
+            minimal_pairs.get("index").map(String::as_str),
+            Some("downloads")
+        );
+        assert_eq!(minimal_pairs.get("offset").map(String::as_str), Some("0"));
+        assert_eq!(minimal_pairs.get("limit").map(String::as_str), Some("20"));
+
+        let full = SearchParams {
+            query: "sodium extra & more".to_string(),
+            project_type: ProjectType::Shader,
+            game_version: Some("1.21.1".to_string()),
+            loader: Some("iris".to_string()),
+            categories: vec![
+                "optimization".to_string(),
+                String::new(),
+                "realistic".to_string(),
+            ],
+            index: SearchIndex::Updated,
+            offset: 40,
+            limit: 10,
+        };
+        assert_eq!(
+            full.build_facets(),
+            vec![
+                vec!["project_type:shader".to_string()],
+                vec!["versions:1.21.1".to_string()],
+                vec!["categories:iris".to_string()],
+                vec!["categories:optimization".to_string()],
+                vec!["categories:realistic".to_string()],
+            ]
+        );
+
+        let full_url = full.url();
+        assert!(full_url.starts_with("https://api.modrinth.com/v2/search?"));
+        assert!(full_url.contains("query=sodium+extra+%26+more"));
+        let parsed_full = url::Url::parse(&full_url).expect("parse full url");
+        let full_pairs: std::collections::HashMap<String, String> =
+            parsed_full.query_pairs().into_owned().collect();
+        assert_eq!(
+            full_pairs.get("query").map(String::as_str),
+            Some("sodium extra & more")
+        );
+        assert_eq!(
+            full_pairs.get("facets").map(String::as_str),
+            Some(
+                r#"[["project_type:shader"],["versions:1.21.1"],["categories:iris"],["categories:optimization"],["categories:realistic"]]"#
+            )
+        );
+        assert_eq!(full_pairs.get("index").map(String::as_str), Some("updated"));
+        assert_eq!(full_pairs.get("offset").map(String::as_str), Some("40"));
+        assert_eq!(full_pairs.get("limit").map(String::as_str), Some("10"));
+    }
+
+    #[tokio::test]
+    async fn test_search_response_deserialization_and_fetch_with_cache() {
+        let sample_json = r#"{
+            "hits": [
+                {
+                    "project_id": "AANobbMI",
+                    "project_type": "mod",
+                    "slug": "sodium",
+                    "author": "jellysquid3",
+                    "title": "Sodium",
+                    "description": "Fastest rendering optimization mod",
+                    "categories": ["fabric", "optimization"],
+                    "display_categories": ["optimization"],
+                    "versions": ["1.20.1", "1.21.1"],
+                    "downloads": 45000000,
+                    "follows": 120000,
+                    "icon_url": "https://cdn.modrinth.com/data/AANobbMI/icon.png",
+                    "date_created": "2020-07-09T03:02:55Z",
+                    "date_modified": "2024-08-15T12:00:00Z",
+                    "latest_version": "mc1.21.1-0.6.0",
+                    "license": "LGPL-3.0-only",
+                    "client_side": "required",
+                    "server_side": "unsupported",
+                    "gallery": ["https://cdn.modrinth.com/data/AANobbMI/gallery.png"],
+                    "featured_gallery": null,
+                    "color": 3845695
+                },
+                {
+                    "project_id": "MINIMAL1",
+                    "project_type": "resourcepack",
+                    "slug": "minimal-pack",
+                    "author": "tester",
+                    "title": "Minimal Pack",
+                    "description": "Minimal fields to verify serde defaults",
+                    "downloads": 12,
+                    "follows": 3,
+                    "date_created": "2025-01-01T00:00:00Z",
+                    "date_modified": "2025-01-02T00:00:00Z"
+                }
+            ],
+            "offset": 0,
+            "limit": 20,
+            "total_hits": 2
+        }"#;
+
+        let response: SearchResponse =
+            serde_json::from_str(sample_json).expect("deserialize SearchResponse");
+        assert_eq!(response.offset, 0);
+        assert_eq!(response.limit, 20);
+        assert_eq!(response.total_hits, 2);
+        assert_eq!(response.hits.len(), 2);
+
+        let first = &response.hits[0];
+        assert_eq!(first.project_id, "AANobbMI");
+        assert_eq!(first.project_type, ProjectType::Mod);
+        assert_eq!(first.slug, "sodium");
+        assert_eq!(first.downloads, 45_000_000);
+        assert_eq!(first.client_side, SideSupport::Required);
+        assert_eq!(first.server_side, SideSupport::Unsupported);
+        assert_eq!(first.color, Some(3_845_695));
+        assert_eq!(first.featured_gallery, None);
+
+        let minimal = &response.hits[1];
+        assert_eq!(minimal.project_id, "MINIMAL1");
+        assert_eq!(minimal.project_type, ProjectType::ResourcePack);
+        assert!(minimal.categories.is_empty());
+        assert!(minimal.versions.is_empty());
+        assert_eq!(minimal.icon_url, None);
+        assert_eq!(minimal.latest_version, None);
+        assert_eq!(minimal.license, "");
+        assert_eq!(minimal.client_side, SideSupport::Unknown);
+        assert_eq!(minimal.server_side, SideSupport::Unknown);
+        assert!(minimal.gallery.is_empty());
+        assert_eq!(minimal.color, None);
+
+        let temp = TempDirGuard::new("search_cache");
+        let params = SearchParams {
+            query: "sodium".to_string(),
+            project_type: ProjectType::Mod,
+            game_version: Some("1.20.1".to_string()),
+            loader: Some("fabric".to_string()),
+            categories: Vec::new(),
+            index: SearchIndex::Relevance,
+            offset: 0,
+            limit: 20,
+        };
+        let upstream_url = params.build_url(MODRINTH_API_BASE_URL);
+        let cache_file = temp
+            .path()
+            .join(crate::cache::cache_key_for_url(&upstream_url));
+        let cached =
+            crate::cache::Cached::new(response.clone(), DEFAULT_SEARCH_TTL).expect("create cache");
+        cached.save_to_file(&cache_file).expect("save search cache");
+
+        let client = reqwest::Client::new();
+        let loaded = SearchResponse::fetch_with_cache(
+            &client,
+            &params,
+            temp.path(),
+            DownloadSource::Official,
+            false,
+        )
+        .await
+        .expect("should load SearchResponse from local cache");
+        assert_eq!(loaded, response);
+    }
+
+    #[test]
+    fn test_project_version_primary_file() {
+        let base_version = |files: Vec<VersionFile>| ProjectVersion {
+            id: "ver1".to_string(),
+            project_id: "proj1".to_string(),
+            name: "1.0.0".to_string(),
+            version_number: "1.0.0".to_string(),
+            changelog: None,
+            dependencies: Vec::new(),
+            game_versions: vec!["1.20.1".to_string()],
+            version_type: ReleaseType::Release,
+            loaders: vec!["fabric".to_string()],
+            featured: true,
+            date_published: "2024-01-01T00:00:00Z".to_string(),
+            downloads: 100,
+            files,
+        };
+
+        let empty = base_version(Vec::new());
+        assert_eq!(empty.primary_file(), None);
+
+        let sources_file = VersionFile {
+            hashes: FileHashes::default(),
+            url: "https://cdn.modrinth.com/mod-sources.jar".to_string(),
+            filename: "mod-sources.jar".to_string(),
+            primary: false,
+            size: 1024,
+        };
+        let main_file = VersionFile {
+            hashes: FileHashes {
+                sha1: Some("abc".to_string()),
+                sha512: None,
+            },
+            url: "https://cdn.modrinth.com/mod.jar".to_string(),
+            filename: "mod.jar".to_string(),
+            primary: true,
+            size: 2048,
+        };
+        let secondary_marked = base_version(vec![sources_file.clone(), main_file.clone()]);
+        assert_eq!(secondary_marked.primary_file(), Some(&main_file));
+
+        let fallback_file = VersionFile {
+            hashes: FileHashes::default(),
+            url: "https://cdn.modrinth.com/other.jar".to_string(),
+            filename: "other.jar".to_string(),
+            primary: false,
+            size: 512,
+        };
+        let none_primary = base_version(vec![sources_file.clone(), fallback_file]);
+        assert_eq!(none_primary.primary_file(), Some(&sources_file));
+    }
+
+    #[test]
+    fn test_project_version_list_url() {
+        let no_params =
+            ProjectVersion::list_url("https://api.modrinth.com/v2/", "sodium", &[], &[]);
+        assert_eq!(
+            no_params,
+            "https://api.modrinth.com/v2/project/sodium/version"
+        );
+
+        let loaders_only =
+            ProjectVersion::list_url(MODRINTH_API_BASE_URL, "AANobbMI", &["fabric", "quilt"], &[]);
+        let parsed_loaders = url::Url::parse(&loaders_only).expect("parse loaders url");
+        let loaders_pairs: std::collections::HashMap<String, String> =
+            parsed_loaders.query_pairs().into_owned().collect();
+        assert_eq!(
+            loaders_pairs.get("loaders").map(String::as_str),
+            Some(r#"["fabric","quilt"]"#)
+        );
+        assert!(!loaders_pairs.contains_key("game_versions"));
+
+        let versions_only =
+            ProjectVersion::list_url(MODRINTH_API_BASE_URL, "sodium", &[], &["1.20.1"]);
+        let parsed_versions = url::Url::parse(&versions_only).expect("parse versions url");
+        let versions_pairs: std::collections::HashMap<String, String> =
+            parsed_versions.query_pairs().into_owned().collect();
+        assert!(!versions_pairs.contains_key("loaders"));
+        assert_eq!(
+            versions_pairs.get("game_versions").map(String::as_str),
+            Some(r#"["1.20.1"]"#)
+        );
+
+        let both = ProjectVersion::list_url(
+            "https://api.modrinth.com/v2/",
+            "sodium",
+            &["fabric"],
+            &["1.20.1", "1.21.1"],
+        );
+        assert!(both.starts_with("https://api.modrinth.com/v2/project/sodium/version?"));
+        let parsed_both = url::Url::parse(&both).expect("parse both url");
+        let both_pairs: std::collections::HashMap<String, String> =
+            parsed_both.query_pairs().into_owned().collect();
+        assert_eq!(
+            both_pairs.get("loaders").map(String::as_str),
+            Some(r#"["fabric"]"#)
+        );
+        assert_eq!(
+            both_pairs.get("game_versions").map(String::as_str),
+            Some(r#"["1.20.1","1.21.1"]"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_project_version_deserialization_and_fetch_list_with_cache() {
+        let sample_json = r#"[
+            {
+                "id": "b4h3K9xL",
+                "project_id": "AANobbMI",
+                "name": "Sodium 0.5.11 for Fabric 1.20.1",
+                "version_number": "mc1.20.1-0.5.11",
+                "changelog": "Fixed rendering bug",
+                "dependencies": [
+                    {
+                        "version_id": null,
+                        "project_id": "P7dR8mSH",
+                        "file_name": null,
+                        "dependency_type": "required"
+                    },
+                    {
+                        "version_id": "depVer1",
+                        "project_id": "optProj",
+                        "file_name": "optional.jar",
+                        "dependency_type": "optional"
+                    }
+                ],
+                "game_versions": ["1.20.1"],
+                "version_type": "beta",
+                "loaders": ["fabric", "quilt"],
+                "featured": true,
+                "date_published": "2024-07-02T18:10:00Z",
+                "downloads": 5120300,
+                "files": [
+                    {
+                        "hashes": {
+                            "sha512": "sha512hex",
+                            "sha1": "9f8e7d6c5b4a32109f8e7d6c5b4a32109f8e7d6c"
+                        },
+                        "url": "https://cdn.modrinth.com/data/AANobbMI/versions/b4h3K9xL/sodium.jar",
+                        "filename": "sodium.jar",
+                        "primary": true,
+                        "size": 945120
+                    }
+                ]
+            }
+        ]"#;
+
+        let versions: Vec<ProjectVersion> =
+            serde_json::from_str(sample_json).expect("deserialize ProjectVersion list");
+        assert_eq!(versions.len(), 1);
+        let ver = &versions[0];
+        assert_eq!(ver.id, "b4h3K9xL");
+        assert_eq!(ver.project_id, "AANobbMI");
+        assert_eq!(ver.version_number, "mc1.20.1-0.5.11");
+        assert_eq!(ver.version_type, ReleaseType::Beta);
+        assert_eq!(ver.changelog.as_deref(), Some("Fixed rendering bug"));
+        assert!(ver.featured);
+        assert_eq!(ver.dependencies.len(), 2);
+        assert_eq!(
+            ver.dependencies[0].dependency_type,
+            DependencyType::Required
+        );
+        assert_eq!(ver.dependencies[0].project_id.as_deref(), Some("P7dR8mSH"));
+        assert_eq!(ver.dependencies[0].version_id, None);
+        assert_eq!(
+            ver.dependencies[1].dependency_type,
+            DependencyType::Optional
+        );
+        assert_eq!(
+            ver.dependencies[1].file_name.as_deref(),
+            Some("optional.jar")
+        );
+
+        let primary = ver.primary_file().expect("primary file present");
+        assert_eq!(primary.filename, "sodium.jar");
+        assert_eq!(
+            primary.hashes.sha1.as_deref(),
+            Some("9f8e7d6c5b4a32109f8e7d6c5b4a32109f8e7d6c")
+        );
+        assert_eq!(primary.hashes.sha512.as_deref(), Some("sha512hex"));
+
+        let temp = TempDirGuard::new("version_list_cache");
+        let upstream_url =
+            ProjectVersion::list_url(MODRINTH_API_BASE_URL, "AANobbMI", &["fabric"], &["1.20.1"]);
+        let cache_file = temp
+            .path()
+            .join(crate::cache::cache_key_for_url(&upstream_url));
+        let cached =
+            crate::cache::Cached::new(versions.clone(), DEFAULT_SEARCH_TTL).expect("create cache");
+        cached
+            .save_to_file(&cache_file)
+            .expect("save version list cache");
+
+        let client = reqwest::Client::new();
+        let loaded = ProjectVersion::fetch_list_with_cache(
+            &client,
+            "AANobbMI",
+            &["fabric"],
+            &["1.20.1"],
+            temp.path(),
+            DownloadSource::Official,
+            false,
+        )
+        .await
+        .expect("should load ProjectVersion list from local cache");
+        assert_eq!(loaded, versions);
+    }
+}
