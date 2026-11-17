@@ -188,6 +188,7 @@ pub struct BrowserPage {
     total_hits: u32,
     list_view: TypedListView<AssetRowItem, gtk::SingleSelection>,
     is_loading: bool,
+    request_id: u64,
 }
 
 pub struct BrowserInit {
@@ -218,17 +219,24 @@ pub enum BrowserOutput {
 
 #[derive(Debug)]
 pub enum BrowserCmdOutput {
-    SearchLoaded(Result<(Vec<AssetItemData>, u32), String>),
+    SearchLoaded {
+        request_id: u64,
+        offset: u32,
+        result: Result<(Vec<AssetItemData>, u32), String>,
+    },
 }
 
 impl BrowserPage {
-    fn spawn_search(&mut self, sender: &ComponentSender<Self>, force_refresh: bool) {
+    fn spawn_search(&mut self, sender: &ComponentSender<Self>, offset: u32, force_refresh: bool) {
         if self.filter.host == ProjectHost::CurseForge {
             let _ = sender.output(BrowserOutput::ShowToast(
                 "CurseForge support is coming soon".to_string(),
             ));
             return;
         }
+
+        self.request_id = self.request_id.wrapping_add(1);
+        let request_id = self.request_id;
 
         self.is_loading = true;
         let client = self.client.clone();
@@ -251,7 +259,11 @@ impl BrowserPage {
             })
             .map_err(|e| e.to_i18n());
 
-            BrowserCmdOutput::SearchLoaded(result)
+            BrowserCmdOutput::SearchLoaded {
+                request_id,
+                offset,
+                result,
+            }
         });
     }
 
@@ -523,10 +535,11 @@ impl Component for BrowserPage {
             total_hits: 0,
             list_view,
             is_loading: false,
+            request_id: 0,
         };
 
         //  Trigger initial fetch
-        model.spawn_search(&sender, false);
+        model.spawn_search(&sender, 0, false);
 
         let widgets = view_output!();
 
@@ -542,40 +555,44 @@ impl Component for BrowserPage {
                 if self.filter.host != host {
                     self.filter.host = host;
                     self.filter.offset = 0;
-                    self.spawn_search(&sender, false);
+                    self.spawn_search(&sender, 0, false);
                 }
             }
             BrowserInput::QueryChanged(query) => {
                 if self.filter.query != query {
                     self.filter.query = query;
                     self.filter.offset = 0;
-                    self.spawn_search(&sender, false);
+                    self.spawn_search(&sender, 0, false);
                 }
             }
             BrowserInput::LoaderChanged(loader) => {
                 if self.filter.loader != loader {
                     self.filter.loader = loader;
                     self.filter.offset = 0;
-                    self.spawn_search(&sender, false);
+                    self.spawn_search(&sender, 0, false);
                 }
             }
             BrowserInput::SortChanged(sort) => {
                 if self.filter.sort_by != sort {
                     self.filter.sort_by = sort;
                     self.filter.offset = 0;
-                    self.spawn_search(&sender, false);
+                    self.spawn_search(&sender, 0, false);
                 }
             }
             BrowserInput::PrevPage => {
-                self.filter.offset = self.filter.offset.saturating_sub(PAGE_LIMIT);
-                self.spawn_search(&sender, false);
+                if self.can_go_prev() {
+                    let target_offset = self.filter.offset.saturating_sub(PAGE_LIMIT);
+                    self.spawn_search(&sender, target_offset, false);
+                }
             }
             BrowserInput::NextPage => {
-                self.filter.offset = self.filter.offset.saturating_add(PAGE_LIMIT);
-                self.spawn_search(&sender, false);
+                if self.can_go_next() {
+                    let target_offset = self.filter.offset.saturating_add(PAGE_LIMIT);
+                    self.spawn_search(&sender, target_offset, false);
+                }
             }
             BrowserInput::RefreshForce => {
-                self.spawn_search(&sender, true);
+                self.spawn_search(&sender, self.filter.offset, true);
             }
             BrowserInput::SelectItem(data) => {
                 self.list_view
@@ -594,10 +611,20 @@ impl Component for BrowserPage {
         _root: &Self::Root,
     ) {
         match msg {
-            BrowserCmdOutput::SearchLoaded(result) => {
+            BrowserCmdOutput::SearchLoaded {
+                request_id,
+                offset,
+                result,
+            } => {
+                // Ignore the expired old request results, keep is_loading as true and wait for the latest request to return
+                if request_id != self.request_id {
+                    return;
+                }
+
                 self.is_loading = false;
                 match result {
                     Ok((items, total_hits)) => {
+                        self.filter.offset = offset;
                         self.total_hits = total_hits;
                         self.list_view.clear();
                         self.list_view
