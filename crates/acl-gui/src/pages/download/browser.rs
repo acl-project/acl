@@ -242,7 +242,9 @@ impl BrowserPage {
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let download_source = self.config.read().download_source;
-        let params = acl_minecraft::modrinth::SearchParams::from(&self.filter);
+        let mut params = acl_minecraft::modrinth::SearchParams::from(&self.filter);
+
+        params.offset = offset;
 
         sender.oneshot_command(async move {
             let result = modrinth::SearchResponse::fetch_with_cache(
@@ -551,31 +553,36 @@ impl Component for BrowserPage {
 
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
+            // There is no need to update the offset here.
+            // Update it after the update cmd confirms that the result is received.
             BrowserInput::HostChanged(host) => {
+                if host == ProjectHost::CurseForge {
+                    let _ = sender.output(BrowserOutput::ShowToast(
+                        "CurseForge support is coming soon".to_string(),
+                    ));
+                    return;
+                }
+
                 if self.filter.host != host {
                     self.filter.host = host;
-                    self.filter.offset = 0;
                     self.spawn_search(&sender, 0, false);
                 }
             }
             BrowserInput::QueryChanged(query) => {
                 if self.filter.query != query {
                     self.filter.query = query;
-                    self.filter.offset = 0;
                     self.spawn_search(&sender, 0, false);
                 }
             }
             BrowserInput::LoaderChanged(loader) => {
                 if self.filter.loader != loader {
                     self.filter.loader = loader;
-                    self.filter.offset = 0;
                     self.spawn_search(&sender, 0, false);
                 }
             }
             BrowserInput::SortChanged(sort) => {
                 if self.filter.sort_by != sort {
                     self.filter.sort_by = sort;
-                    self.filter.offset = 0;
                     self.spawn_search(&sender, 0, false);
                 }
             }
