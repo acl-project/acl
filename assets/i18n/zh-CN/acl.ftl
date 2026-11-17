@@ -129,6 +129,24 @@ delete-dialog-cancel = 取消
 delete-dialog-delete = 删除
 # Source: Delete Instance
 delete-dialog-heading = 删除实例
+# Source: Failed to search projects: { $err }
+download-browser-error-search-projects = 搜索项目失败：{ $err }
+# Source: All Loaders
+download-browser-loader-all = 全部加载器
+# Source: Refresh list
+download-browser-refresh-list = 刷新列表
+# Source: Search projects...
+download-browser-search-projects = 搜索项目...
+# Source: Downloads
+download-browser-sort-downloads = 下载量
+# Source: Follows
+download-browser-sort-follows = 关注数
+# Source: Newest
+download-browser-sort-newest = 最新发布
+# Source: Relevance
+download-browser-sort-relevance = 相关度
+# Source: Updated
+download-browser-sort-updated = 最近更新
 # Source: Failed to load version manifest: { $err }
 download-game-error-load-version-manifest = 加载版本清单失败：{ $err }
 # Source: Refresh version list
@@ -137,6 +155,14 @@ download-game-refresh-version = 刷新版本列表
 download-game-search-versions = 搜索版本...
 # Source: Game
 download-navigation-page-game = 游戏
+# Source: Mods
+download-navigation-page-mod = 模组
+# Source: Modpacks
+download-navigation-page-modpack = 整合包
+# Source: Resource Packs
+download-navigation-page-resource-pack = 资源包
+# Source: Shaders
+download-navigation-page-shader = 光影
 # Source: Download Center
 download-page-title = 下载中心
 # Source: Start Game

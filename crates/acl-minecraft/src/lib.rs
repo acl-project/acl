@@ -11,6 +11,7 @@ pub mod manifest;
 pub mod mirror;
 pub mod modrinth;
 pub mod native;
+pub mod project;
 pub mod rule;
 pub mod version;
 
@@ -28,6 +29,7 @@ pub use mirror::DownloadSource;
 pub use native::{
     DEFAULT_NATIVE_EXCLUDE, NativeArchive, extract_all_natives, extract_native_archive,
 };
+pub use project::{AssetFilterState, AssetItemData, ProjectHost, ProjectType, SearchIndex};
 pub use rule::{OsRule, Rule, RuleAction};
 pub use version::{
     ArgumentEntry, Arguments, AssetIndexInfo, DownloadFile, ExtractRules, JavaVersionInfo, Library,

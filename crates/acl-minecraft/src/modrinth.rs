@@ -5,54 +5,14 @@ use std::{path::Path, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DownloadSource, Result, cache::fetch_cached_json};
+use crate::{
+    DownloadSource, Result,
+    cache::fetch_cached_json,
+    project::{AssetFilterState, AssetItemData, ProjectHost, ProjectType, SearchIndex},
+};
 
 pub const MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
 pub const DEFAULT_SEARCH_TTL: Duration = Duration::from_secs(300);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ProjectType {
-    #[default]
-    Mod,
-    Modpack,
-    ResourcePack,
-    Shader,
-}
-
-impl ProjectType {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Mod => "mod",
-            Self::Modpack => "modpack",
-            Self::ResourcePack => "resourcepack",
-            Self::Shader => "shader",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SearchIndex {
-    #[default]
-    Relevance,
-    Downloads,
-    Follows,
-    Newest,
-    Updated,
-}
-
-impl SearchIndex {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Relevance => "relevance",
-            Self::Downloads => "downloads",
-            Self::Follows => "follows",
-            Self::Newest => "newest",
-            Self::Updated => "updated",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchParams {
@@ -70,7 +30,10 @@ impl SearchParams {
     /// Construct a two-dimensional facets array of Modrinth, for example:
     /// [["project_type:mod"], ["versions:1.20.1"], ["categories:fabric"]]
     pub fn build_facets(&self) -> Vec<Vec<String>> {
-        let mut facets = vec![vec![format!("project_type:{}", self.project_type.as_str())]];
+        let mut facets = vec![vec![format!(
+            "project_type:{}",
+            self.project_type.as_modrinth_str()
+        )]];
         if let Some(version) = &self.game_version
             && !version.is_empty()
         {
@@ -104,7 +67,7 @@ impl SearchParams {
             serializer.append_pair("facets", &facets_json);
         }
 
-        serializer.append_pair("index", self.index.as_str());
+        serializer.append_pair("index", self.index.as_modrinth_str());
         serializer.append_pair("offset", &self.offset.to_string());
         serializer.append_pair("limit", &self.limit.to_string());
 
@@ -345,6 +308,45 @@ impl ProjectVersion {
     }
 }
 
+impl From<SearchHit> for AssetItemData {
+    fn from(hit: SearchHit) -> Self {
+        // If display_categories is empty, fallback to categories
+        let display_categories = if hit.display_categories.is_empty() {
+            hit.categories
+        } else {
+            hit.display_categories
+        };
+
+        Self {
+            host: ProjectHost::Modrinth,
+            project_id: hit.project_id,
+            title: hit.title,
+            author: hit.author,
+            description: hit.description,
+            icon_url: hit.icon_url,
+            downloads: hit.downloads,
+            display_categories,
+            latest_version: hit.latest_version,
+        }
+    }
+}
+
+/// Convert the UI's unified filtering status reference to Modrinth's SearchParams
+impl From<&AssetFilterState> for SearchParams {
+    fn from(state: &AssetFilterState) -> Self {
+        Self {
+            query: state.query.clone(),
+            project_type: state.project_type,
+            game_version: state.game_version.clone(),
+            loader: state.loader.clone(),
+            categories: state.category.iter().cloned().collect(),
+            index: state.sort_by,
+            offset: state.offset,
+            limit: state.limit,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,7 +398,7 @@ mod tests {
             (ProjectType::Shader, "shader", "\"shader\""),
         ];
         for (variant, expected_str, expected_json) in project_cases {
-            assert_eq!(variant.as_str(), expected_str);
+            assert_eq!(variant.as_modrinth_str(), expected_str);
             let serialized = serde_json::to_string(&variant).expect("serialize ProjectType");
             assert_eq!(serialized, expected_json);
             let deserialized: ProjectType =
@@ -413,7 +415,7 @@ mod tests {
             (SearchIndex::Updated, "updated", "\"updated\""),
         ];
         for (variant, expected_str, expected_json) in index_cases {
-            assert_eq!(variant.as_str(), expected_str);
+            assert_eq!(variant.as_modrinth_str(), expected_str);
             let serialized = serde_json::to_string(&variant).expect("serialize SearchIndex");
             assert_eq!(serialized, expected_json);
             let deserialized: SearchIndex =
@@ -858,5 +860,94 @@ mod tests {
         .await
         .expect("should load ProjectVersion list from local cache");
         assert_eq!(loaded, versions);
+    }
+
+    #[test]
+    fn test_asset_item_data_from_search_hit() {
+        let make_hit = |categories: Vec<&str>, display_categories: Vec<&str>| SearchHit {
+            project_id: "AANobbMI".to_string(),
+            project_type: ProjectType::Mod,
+            slug: "sodium".to_string(),
+            author: "jellysquid3".to_string(),
+            title: "Sodium".to_string(),
+            description: "Fastest rendering optimization mod".to_string(),
+            categories: categories.into_iter().map(str::to_string).collect(),
+            display_categories: display_categories.into_iter().map(str::to_string).collect(),
+            versions: vec!["1.21.1".to_string()],
+            downloads: 45_000_000,
+            follows: 120_000,
+            icon_url: Some("https://cdn.modrinth.com/data/AANobbMI/icon.png".to_string()),
+            date_created: "2020-07-09T03:02:55Z".to_string(),
+            date_modified: "2024-08-15T12:00:00Z".to_string(),
+            latest_version: Some("mc1.21.1-0.6.0".to_string()),
+            license: "LGPL-3.0-only".to_string(),
+            client_side: SideSupport::Required,
+            server_side: SideSupport::Unsupported,
+            gallery: Vec::new(),
+            featured_gallery: None,
+            color: None,
+        };
+
+        let with_display = AssetItemData::from(make_hit(
+            vec!["fabric", "optimization"],
+            vec!["optimization"],
+        ));
+        assert_eq!(with_display.host, ProjectHost::Modrinth);
+        assert_eq!(with_display.project_id, "AANobbMI");
+        assert_eq!(with_display.title, "Sodium");
+        assert_eq!(with_display.author, "jellysquid3");
+        assert_eq!(
+            with_display.description,
+            "Fastest rendering optimization mod"
+        );
+        assert_eq!(
+            with_display.icon_url.as_deref(),
+            Some("https://cdn.modrinth.com/data/AANobbMI/icon.png")
+        );
+        assert_eq!(with_display.downloads, 45_000_000);
+        assert_eq!(with_display.display_categories, vec!["optimization"]);
+        assert_eq!(
+            with_display.latest_version.as_deref(),
+            Some("mc1.21.1-0.6.0")
+        );
+
+        let fallback = AssetItemData::from(make_hit(vec!["fabric", "optimization"], Vec::new()));
+        assert_eq!(fallback.display_categories, vec!["fabric", "optimization"]);
+    }
+
+    #[test]
+    fn test_search_params_from_asset_filter_state() {
+        let with_category = AssetFilterState {
+            host: ProjectHost::Modrinth,
+            project_type: ProjectType::Modpack,
+            query: "create".to_string(),
+            game_version: Some("1.21.1".to_string()),
+            loader: Some("fabric".to_string()),
+            category: Some("adventure".to_string()),
+            sort_by: SearchIndex::Downloads,
+            offset: 20,
+            limit: 20,
+        };
+        let params_with_category = SearchParams::from(&with_category);
+        assert_eq!(
+            params_with_category,
+            SearchParams {
+                query: "create".to_string(),
+                project_type: ProjectType::Modpack,
+                game_version: Some("1.21.1".to_string()),
+                loader: Some("fabric".to_string()),
+                categories: vec!["adventure".to_string()],
+                index: SearchIndex::Downloads,
+                offset: 20,
+                limit: 20,
+            }
+        );
+
+        let without_category = AssetFilterState {
+            category: None,
+            ..with_category
+        };
+        let params_without_category = SearchParams::from(&without_category);
+        assert!(params_without_category.categories.is_empty());
     }
 }
