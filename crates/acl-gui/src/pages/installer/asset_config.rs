@@ -254,6 +254,16 @@ impl AssetConfigPage {
         !self.mgr.read().instances.is_empty()
     }
 
+    fn select_active_instance(&mut self) {
+        let mgr = self.mgr.read();
+        self.selected_instance_idx = mgr
+            .config
+            .active_id
+            .as_deref()
+            .and_then(|active_id| mgr.instances.iter().position(|inst| inst.id() == active_id))
+            .unwrap_or(0);
+    }
+
     fn spawn_fetch_version(&mut self, sender: &ComponentSender<Self>) {
         let Some(item) = self.item.clone() else {
             return;
@@ -511,6 +521,15 @@ impl Component for AssetConfigPage {
                         set_model: Some(&model.instance_model),
                         #[watch]
                         set_visible: model.target_mode == TargetMode::ExistingInstance && model.has_instances(),
+
+                        #[watch]
+                        #[block_signal(instance_handler)]
+                        set_selected: if model.has_instances() {
+                            model.selected_instance_idx as u32
+                        } else {
+                            gtk::INVALID_LIST_POSITION
+                        },
+
                         connect_selected_notify[sender] => move |combo| {
                             let idx = combo.selected();
 
@@ -518,7 +537,7 @@ impl Component for AssetConfigPage {
                                 sender.input(AssetConfigInput::InstanceSelected(idx as usize));
                             }
 
-                        }
+                        } @instance_handler,
                     },
 
                     adw::ActionRow {
@@ -622,6 +641,7 @@ impl Component for AssetConfigPage {
                 self.selected_version = None;
                 self.is_auto_matched = false;
                 self.sync_instances();
+                self.select_active_instance();
                 if self.has_instances() {
                     self.target_mode = TargetMode::ExistingInstance;
                 }
@@ -631,6 +651,7 @@ impl Component for AssetConfigPage {
 
             AssetConfigInput::InstancesUpdated => {
                 self.sync_instances();
+                self.select_active_instance();
                 if self.is_auto_matched && !self.is_loading {
                     self.recompute_auto_version(&sender);
                 }
