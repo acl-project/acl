@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     DownloadSource, Result,
     cache::fetch_cached_json,
-    project::{AssetFilterState, AssetItemData, ProjectHost, ProjectType, SearchIndex},
+    project::{
+        AssetDependency, AssetFile, AssetFilterState, AssetItemData, AssetVersion, DependencyType,
+        ProjectHost, ProjectType, ReleaseType, SearchIndex,
+    },
 };
 
 pub const MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
@@ -157,27 +160,6 @@ impl SearchResponse {
 }
 
 /// Version release type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ReleaseType {
-    #[default]
-    Release,
-    Beta,
-    Alpha,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DependencyType {
-    /// Dependency must be installed (such as Fabric API)
-    Required,
-    /// Optional dependency
-    Optional,
-    /// Conflict and incompatibility
-    Incompatible,
-    /// Already built into the current Jar
-    Embedded,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionDependency {
@@ -319,6 +301,7 @@ impl From<SearchHit> for AssetItemData {
 
         Self {
             host: ProjectHost::Modrinth,
+            project_type: hit.project_type,
             project_id: hit.project_id,
             title: hit.title,
             author: hit.author,
@@ -343,6 +326,46 @@ impl From<&AssetFilterState> for SearchParams {
             index: state.sort_by,
             offset: state.offset,
             limit: state.limit,
+        }
+    }
+}
+
+impl From<ProjectVersion> for AssetVersion {
+    fn from(v: ProjectVersion) -> Self {
+        let primary_file = v.primary_file().map(|f| AssetFile {
+            url: f.url.clone(),
+            filename: f.filename.clone(),
+            size: f.size,
+            sha1: f.hashes.sha1.clone(),
+            sha512: f.hashes.sha512.clone(),
+        });
+
+        let dependencies = v
+            .dependencies
+            .into_iter()
+            .filter_map(|d| {
+                Some(AssetDependency {
+                    host: ProjectHost::Modrinth,
+                    project_id: d.project_id?,
+                    version_id: d.version_id,
+                    dependency_type: d.dependency_type,
+                })
+            })
+            .collect();
+
+        Self {
+            host: ProjectHost::Modrinth,
+            id: v.id,
+            project_id: v.project_id,
+            name: v.name,
+            version_number: v.version_number,
+            release_type: v.version_type,
+            game_versions: v.game_versions,
+            loaders: v.loaders,
+            date_published: v.date_published,
+            downloads: v.downloads,
+            primary_file,
+            dependencies,
         }
     }
 }

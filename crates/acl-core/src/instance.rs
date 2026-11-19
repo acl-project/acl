@@ -10,7 +10,7 @@ use std::{
 
 use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
 use acl_minecraft::{
-    AssetIndex, DownloadSource, VersionEntry, VersionMetadata, download::DownloadTask,
+    AssetIndex, DownloadSource, ProjectType, VersionEntry, VersionMetadata, download::DownloadTask,
     version::VersionPatch,
 };
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,15 @@ impl ModLoader {
             ModLoader::Quilt => "Quilt",
             ModLoader::Forge => "Forge",
             ModLoader::NeoForge => "NeoForge",
+        }
+    }
+    pub const fn as_modrinth_loader(self) -> Option<&'static str> {
+        match self {
+            Self::Vanilla => None,
+            Self::Fabric => Some("fabric"),
+            Self::Quilt => Some("quilt"),
+            Self::Forge => Some("forge"),
+            Self::NeoForge => Some("neoforge"),
         }
     }
 }
@@ -505,6 +514,15 @@ impl Instance {
                 Err(_) => true,
             })
             .collect()
+    }
+
+    pub fn asset_dir(&self, project_type: acl_minecraft::ProjectType) -> Option<PathBuf> {
+        match project_type {
+            ProjectType::Mod => Some(self.mods_dir()),
+            ProjectType::ResourcePack => Some(self.resourcepacks_dir()),
+            ProjectType::Shader => Some(self.shaderpacks_dir()),
+            ProjectType::Modpack => None, // Modpack is to create a new instance
+        }
     }
 }
 

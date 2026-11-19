@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::{cmp::Ordering, collections::HashMap};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -92,6 +94,7 @@ pub struct AssetFilterState {
 #[derive(Debug, Clone)]
 pub struct AssetItemData {
     pub host: ProjectHost,
+    pub project_type: ProjectType,
     pub project_id: String,
     pub title: String,
     pub author: String,
@@ -100,6 +103,117 @@ pub struct AssetItemData {
     pub downloads: u64,
     pub display_categories: Vec<String>,
     pub latest_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReleaseType {
+    #[default]
+    Release,
+    Beta,
+    Alpha,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DependencyType {
+    /// Dependency must be installed (such as Fabric API)
+    Required,
+    /// Optional dependency
+    Optional,
+    /// Conflict and incompatibility
+    Incompatible,
+    /// Already built into the current Jar
+    Embedded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetDependency {
+    pub host: ProjectHost,
+    pub project_id: String,
+    pub version_id: Option<String>,
+    pub dependency_type: DependencyType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetFile {
+    pub url: String,
+    pub filename: String,
+    pub size: u64,
+    pub sha1: Option<String>,
+    pub sha512: Option<String>,
+}
+
+/// Platform-independent unified resource version
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetVersion {
+    pub host: ProjectHost,
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub version_number: String,
+    pub release_type: ReleaseType,
+    pub game_versions: Vec<String>,
+    pub loaders: Vec<String>, // Convert to lowercase uniformly, such as "fabric", "forge", "neoforge", "quilt"
+    pub date_published: String,
+    pub downloads: u64,
+    pub primary_file: Option<AssetFile>,
+    pub dependencies: Vec<AssetDependency>,
+}
+
+pub fn match_best_version(
+    versions: &[AssetVersion],
+    project_type: ProjectType,
+    mc_version: Option<&str>,
+    loader: Option<&str>,
+) -> Option<AssetVersion> {
+    let mut fallback = None;
+
+    for v in versions {
+        let mc_ok = mc_version.is_none_or(|mc| v.game_versions.iter().any(|gv| gv == mc));
+        let loader_ok = match project_type {
+            ProjectType::Mod => {
+                loader.is_some_and(|l| v.loaders.iter().any(|vl| vl.eq_ignore_ascii_case(l)))
+            }
+            _ => true,
+        };
+
+        if mc_ok && loader_ok {
+            if v.release_type == ReleaseType::Release {
+                return Some(v.clone());
+            }
+            if fallback.is_none() {
+                fallback = Some(v);
+            }
+        }
+    }
+
+    fallback.cloned()
+}
+
+pub fn group_versions_by_game_version(
+    versions: &[AssetVersion],
+) -> Vec<(String, Vec<AssetVersion>)> {
+    let mut map: HashMap<String, Vec<AssetVersion>> = std::collections::HashMap::new();
+
+    for ver in versions {
+        for gv in &ver.game_versions {
+            map.entry(gv.clone()).or_default().push(ver.clone());
+        }
+    }
+
+    let mut groups: Vec<(String, Vec<AssetVersion>)> = map.into_iter().collect();
+    groups.sort_by(|(a, _), (b, _)| {
+        if a == b {
+            Ordering::Equal
+        } else if acl_common::version::is_newer_version(a, b) {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
+    });
+
+    groups
 }
 
 #[cfg(test)]
