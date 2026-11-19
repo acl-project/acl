@@ -203,6 +203,53 @@ pub async fn download_all(
     Ok(())
 }
 
+pub async fn download_file_with_prograss<F>(
+    client: &reqwest::Client,
+    task: &DownloadTask,
+    download_source: DownloadSource,
+    mut on_progress: F,
+) -> Result<()>
+where
+    F: FnMut(u64, u64), // (downloaded_bytes, total_bytes)
+{
+    let url = download_source.rewrite_url(&task.url);
+    let mut response = client.get(&url).send().await?.error_for_status()?;
+
+    let total = response.content_length().unwrap_or(task.size);
+    let mut downloaded: u64 = 0;
+    let mut buf = Vec::with_capacity(usize::try_from(total).unwrap_or(0));
+
+    on_progress(0, total);
+
+    while let Some(chunk) = response.chunk().await? {
+        buf.extend_from_slice(&chunk);
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
+        on_progress(downloaded, total.max(downloaded));
+    }
+
+    if !task.sha1.is_empty() {
+        verify_sha1(&buf, &task.sha1, &task.name)?;
+    }
+
+    if let Some(parent) = task.destination.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| MinecraftError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+
+    tokio::fs::write(&task.destination, &buf)
+        .await
+        .map_err(|source| MinecraftError::Io {
+            path: task.destination.clone(),
+            source,
+        })?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -114,6 +114,15 @@ pub enum ReleaseType {
     Alpha,
 }
 
+impl ReleaseType {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Release => "Release",
+            Self::Alpha => "Alpha",
+            Self::Beta => "Beta",
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DependencyType {

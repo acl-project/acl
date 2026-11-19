@@ -17,6 +17,13 @@ use tokio::{
 
 pub type TaskId = u64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProgressUnit {
+    #[default]
+    Count,
+    Bytes,
+}
+
 /// Point-in-time snapshot of a background task sent to the UI for rendering.
 #[derive(Debug, Clone)]
 pub struct TaskSnapshot {
@@ -45,6 +52,8 @@ pub struct StageSnapshot {
     pub total: u64,
     /// Current download throughput in bytes/sec during download stages; `None` for non-download steps.
     pub bytes_per_sec: Option<u64>,
+    /// Display type of progress
+    pub unit: ProgressUnit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +201,7 @@ impl TaskManager {
                 done: 0,
                 total: 0,
                 bytes_per_sec: None,
+                unit: ProgressUnit::Count,
             })
             .collect();
 
@@ -396,6 +406,22 @@ impl TaskManager {
             stage.bytes_per_sec = bytes_per_sec;
             record.dirty = true;
             self.flush_notify.notify_one();
+        }
+    }
+
+    pub fn set_stage_unit(&self, id: TaskId, stage_idx: usize, unit: ProgressUnit) {
+        let mut tasks = self.lock_tasks();
+
+        let Some(record) = tasks.get_mut(&id) else {
+            return;
+        };
+
+        if record.snapshot.state != TaskState::Running {
+            return;
+        }
+
+        if let Some(stage) = record.snapshot.stages.get_mut(stage_idx) {
+            stage.unit = unit;
         }
     }
 }
