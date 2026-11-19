@@ -290,6 +290,57 @@ impl ProjectVersion {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectDetail {
+    pub id: String,
+    pub project_type: ProjectType,
+    pub slug: String,
+    pub title: String,
+    pub description: String,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub icon_url: Option<String>,
+    pub downloads: u64,
+}
+
+impl ProjectDetail {
+    pub fn batch_url(base_url: &str, ids: &[String]) -> String {
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        if let Ok(json) = serde_json::to_string(ids) {
+            serializer.append_pair("ids", &json);
+        }
+        format!(
+            "{}/projects?{}",
+            base_url.trim_end_matches('/'),
+            serializer.finish()
+        )
+    }
+
+    pub async fn fetch_batch_with_cache(
+        client: &reqwest::Client,
+        ids: &[String],
+        cache_dir: &Path,
+        download_source: DownloadSource,
+        force_refresh: bool,
+    ) -> Result<Vec<Self>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let upstream_url = Self::batch_url(MODRINTH_API_BASE_URL, ids);
+        fetch_cached_json(
+            client,
+            &upstream_url,
+            cache_dir,
+            DEFAULT_SEARCH_TTL,
+            download_source,
+            force_refresh,
+        )
+        .await
+    }
+}
+
 impl From<SearchHit> for AssetItemData {
     fn from(hit: SearchHit) -> Self {
         // If display_categories is empty, fallback to categories
@@ -366,6 +417,23 @@ impl From<ProjectVersion> for AssetVersion {
             downloads: v.downloads,
             primary_file,
             dependencies,
+        }
+    }
+}
+
+impl From<ProjectDetail> for AssetItemData {
+    fn from(p: ProjectDetail) -> Self {
+        Self {
+            host: ProjectHost::Modrinth,
+            project_type: p.project_type,
+            project_id: p.id,
+            title: p.title,
+            author: String::new(),
+            description: p.description,
+            icon_url: p.icon_url,
+            downloads: p.downloads,
+            display_categories: p.categories,
+            latest_version: None,
         }
     }
 }

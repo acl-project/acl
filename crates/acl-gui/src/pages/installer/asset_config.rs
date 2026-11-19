@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::collections::HashMap;
 use std::{path::PathBuf, sync::Arc};
 
 use acl_core::ModLoader;
@@ -109,6 +110,7 @@ pub struct AssetConfigPage {
     is_auto_matched: bool,
     is_loading: bool,
     request_id: u64,
+    dep_request_id: u64,
 
     selected_version: Option<AssetVersion>,
     selected_instance_idx: usize,
@@ -314,11 +316,50 @@ impl AssetConfigPage {
         self.rebuild_dependencies(sender);
     }
 
-    fn rebuild_dependencies(&mut self, sender: &ComponentSender<Self>) {
+    fn render_dependencies(&mut self, deps: &Vec<ResolvedDep>, sender: &ComponentSender<Self>) {
         for row in self.dep_rows.drain(..) {
             self.dep_group.remove(&row);
         }
 
+        self.dep_group.set_visible(!deps.is_empty());
+
+        for dep in deps {
+            let is_loaded = dep.item.is_some();
+
+            let title = dep.item.as_ref().map_or_else(
+                || t!("installer-asset-dep-loading", "Loading..."),
+                |i| i.title.clone(),
+            );
+
+            let subtitle = match dep.dependency_type {
+                DependencyType::Required => t!("installer-asset-dep-required", "Required"),
+                DependencyType::Optional => t!("installer-asset-dep-optional", "Optional"),
+                _ => String::new(),
+            };
+
+            let row = adw::ActionRow::builder()
+                .title(title)
+                .subtitle(subtitle)
+                .activatable(is_loaded)
+                .build();
+
+            if is_loaded {
+                row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+                let sender_clone = sender.clone();
+                let dep_clone = dep.clone();
+                row.connect_activated(move |_| {
+                    sender_clone.input(AssetConfigInput::OpenDependency(dep_clone.clone()));
+                });
+            } else {
+                row.add_suffix(&adw::Spinner::new());
+            }
+
+            self.dep_group.add(&row);
+            self.dep_rows.push(row);
+        }
+    }
+
+    fn rebuild_dependencies(&mut self, sender: &ComponentSender<Self>) {
         let deps: Vec<ResolvedDep> = self
             .selected_version
             .as_ref()
@@ -340,36 +381,52 @@ impl AssetConfigPage {
             })
             .unwrap_or_default();
 
-        self.dep_group.set_visible(!deps.is_empty());
+        self.render_dependencies(&deps, sender);
 
-        for dep in deps {
-            let title = dep
-                .item
-                .as_ref()
-                .map_or_else(|| dep.project_id.clone(), |i| i.title.clone());
+        self.dep_request_id = self.dep_request_id.wrapping_add(1);
+        let request_id = self.dep_request_id;
 
-            let subtitle = match dep.dependency_type {
-                DependencyType::Required => t!("installer-asset-dep-required", "Required"),
-                DependencyType::Optional => t!("installer-asset-dep-optional", "Optional"),
-                _ => String::new(),
-            };
-
-            let row = adw::ActionRow::builder()
-                .title(title)
-                .subtitle(subtitle)
-                .activatable(true)
-                .build();
-            row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-
-            let sender_clone = sender.clone();
-            let dep_clone = dep.clone();
-            row.connect_activated(move |_| {
-                sender_clone.input(AssetConfigInput::OpenDependency(dep_clone.clone()));
-            });
-
-            self.dep_group.add(&row);
-            self.dep_rows.push(row);
+        if deps.is_empty() {
+            return;
         }
+
+        let ids: Vec<String> = deps.iter().map(|d| d.project_id.clone()).collect();
+
+        let client = self.client.clone();
+        let cache_dir = self.cache_dir.clone();
+        let download_source = self.config.read().download_source;
+
+        sender.oneshot_command(async move {
+            let map: HashMap<String, AssetItemData> =
+                modrinth::ProjectDetail::fetch_batch_with_cache(
+                    &client,
+                    &ids,
+                    &cache_dir,
+                    download_source,
+                    false,
+                )
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|detail| {
+                    let id = detail.id.clone();
+                    (id, AssetItemData::from(detail))
+                })
+                .collect();
+
+            let resolved = deps
+                .into_iter()
+                .map(|mut d| {
+                    d.item = map.get(&d.project_id).cloned();
+                    d
+                })
+                .collect();
+
+            AssetConfigCmdOutput::DepsLoaded {
+                request_id,
+                deps: resolved,
+            }
+        });
     }
 }
 
@@ -540,6 +597,7 @@ impl Component for AssetConfigPage {
             is_auto_matched: false,
             is_loading: false,
             request_id: 0,
+            dep_request_id: 0,
             selected_version: None,
             selected_instance_idx: 0,
             target_mode: TargetMode::ExistingInstance,
@@ -703,7 +761,12 @@ impl Component for AssetConfigPage {
                     }
                 }
             }
-            AssetConfigCmdOutput::DepsLoaded { .. } => {}
+            AssetConfigCmdOutput::DepsLoaded { request_id, deps } => {
+                if request_id != self.dep_request_id {
+                    return;
+                }
+                self.render_dependencies(&deps, &sender);
+            }
         }
     }
 }
