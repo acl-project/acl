@@ -99,6 +99,33 @@ impl ForgeManifest {
         )
         .await
     }
+
+    /// Resolve a Forge version (e.g. "47.2.0" or "10.13.4.1614") to the exact Maven
+    /// version string (e.g. "1.20.1-47.2.0" or "1.7.10-10.13.4.1614-1.7.10") for modpack install.
+    pub fn resolve_version(&self, game_version: &str, raw_version: &str) -> Option<String> {
+        let versions = self.mc_to_forge.get(game_version)?;
+
+        if let Some(exact) = versions.iter().find(|v| v.as_str() == raw_version) {
+            return Some(exact.clone());
+        }
+
+        let prefixed = if raw_version.starts_with(&format!("{game_version}-")) {
+            raw_version.to_string()
+        } else {
+            format!("{game_version}-{raw_version}")
+        };
+
+        if let Some(found) = versions.iter().find(|v| v.as_str() == prefixed) {
+            return Some(found.clone());
+        }
+
+        let prefixed_with_dash = format!("{prefixed}-");
+
+        versions
+            .iter()
+            .find(|v| v.starts_with(&prefixed_with_dash))
+            .cloned()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1407,5 +1434,63 @@ mod tests {
         // Non-existent version returns empty
         assert!(manifest.versions_for_mc("1.19").is_empty());
         assert!(manifest.versions_for_mc("25.1").is_empty());
+    }
+
+    #[test]
+    fn test_forge_manifest_resolve_version() {
+        let mut mc_to_forge = HashMap::new();
+        mc_to_forge.insert(
+            "1.20.1".to_string(),
+            vec!["1.20.1-47.2.0".to_string(), "1.20.1-47.3.0".to_string()],
+        );
+        mc_to_forge.insert(
+            "1.7.10".to_string(),
+            vec![
+                "1.7.10-10.13.4.1614-1.7.10".to_string(),
+                "1.7.10-10.13.2.1291".to_string(),
+            ],
+        );
+        mc_to_forge.insert("1.20".to_string(), vec!["1.20-46.0.14".to_string()]);
+
+        let manifest = ForgeManifest { mc_to_forge };
+
+        // Exact full Maven version matches
+        assert_eq!(
+            manifest.resolve_version("1.20.1", "1.20.1-47.2.0"),
+            Some("1.20.1-47.2.0".to_string())
+        );
+        assert_eq!(
+            manifest.resolve_version("1.7.10", "1.7.10-10.13.4.1614-1.7.10"),
+            Some("1.7.10-10.13.4.1614-1.7.10".to_string())
+        );
+
+        // Short raw version matches "{mc}-{raw}"
+        assert_eq!(
+            manifest.resolve_version("1.20.1", "47.3.0"),
+            Some("1.20.1-47.3.0".to_string())
+        );
+        assert_eq!(
+            manifest.resolve_version("1.7.10", "10.13.2.1291"),
+            Some("1.7.10-10.13.2.1291".to_string())
+        );
+
+        // Legacy suffix match "{mc}-{raw}-*"
+        assert_eq!(
+            manifest.resolve_version("1.7.10", "10.13.4.1614"),
+            Some("1.7.10-10.13.4.1614-1.7.10".to_string())
+        );
+
+        // Already-prefixed legacy suffix match without doubling prefix
+        assert_eq!(
+            manifest.resolve_version("1.7.10", "1.7.10-10.13.4.1614"),
+            Some("1.7.10-10.13.4.1614-1.7.10".to_string())
+        );
+
+        // Prefix boundary check ("1.20" must not match "1.20.1-...")
+        assert_eq!(manifest.resolve_version("1.20", "1.20.1-47.2.0"), None);
+
+        // Unknown game version or unknown Forge version returns None
+        assert_eq!(manifest.resolve_version("1.19.2", "43.3.0"), None);
+        assert_eq!(manifest.resolve_version("1.20.1", "47.99.0"), None);
     }
 }

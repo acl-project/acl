@@ -385,6 +385,30 @@ minecraft-error-io = 路径 '{ $path }' 处发生 I/O 错误：{ $source }
 minecraft-error-json = 解析 JSON 失败：{ $arg0 }
 # Source: Main-Class attribute not found in manifest of jar '{ $jar_path }'
 minecraft-error-missing-main-class = 在 jar '{ $jar_path }' 的清单中未找到 Main-Class 属性
+# Source: Modpack dependency '{ $dependency }' has an empty version
+minecraft-error-modpack-empty-dependency-version = 整合包依赖 '{ $dependency }' 的版本号为空
+# Source: Modpack contains an empty file path
+minecraft-error-modpack-empty-path = 整合包包含空的文件路径
+# Source: Modpack index JSON not found in '{ $path }'
+minecraft-error-modpack-index-not-found = 在 '{ $path }' 中未找到整合包索引 JSON
+# Source: Modpack index file exceeds maximum allowed size ({ $max_bytes } bytes)
+minecraft-error-modpack-index-too-large = 整合包索引文件超出最大允许大小（{ $max_bytes } 字节）
+# Source: Modpack file '{ $path }' has no download URLs
+minecraft-error-modpack-missing-downloads = 整合包文件 '{ $path }' 缺少下载链接
+# Source: Modpack is missing the required Minecraft version
+minecraft-error-modpack-missing-minecraft-version = 整合包缺少必需的 Minecraft 版本信息
+# Source: Modpack specifies multiple mod loaders
+minecraft-error-modpack-multiple-mod-loaders = 整合包指定了多个模组加载器
+# Source: Archive is not a recognized modpack format
+minecraft-error-modpack-unknown-format = 归档文件不是可识别的整合包格式
+# Source: Unsafe file path in modpack: '{ $path }'
+minecraft-error-modpack-unsafe-path = 整合包中包含不安全的文件路径：'{ $path }'
+# Source: Unsupported modpack dependency: '{ $dependency }'
+minecraft-error-modpack-unsupported-dependency = 不支持的整合包依赖：'{ $dependency }'
+# Source: Unsupported modpack format version: { $version }
+minecraft-error-modpack-unsupported-format-version = 不支持的整合包格式版本：{ $version }
+# Source: Unsupported modpack game: '{ $game }'
+minecraft-error-modpack-unsupported-game = 不支持的整合包游戏类型：'{ $game }'
 # Source: Forge processor '{ $jar }' failed with exit code { $exit_code }
 minecraft-error-processor-failed = Forge 处理器 '{ $jar }' 执行失败，退出码：{ $exit_code }
 # Source: System clock error: { $arg0 }

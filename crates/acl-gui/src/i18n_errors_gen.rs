@@ -251,6 +251,62 @@ impl LocalizeError for acl_minecraft::MinecraftError {
                 "Failed to construct classpath: {arg0}",
                 arg0 = arg0
             ),
+            Self::ModpackIndexNotFound { path } => crate::t!(
+                "minecraft-error-modpack-index-not-found",
+                "Modpack index JSON not found in '{path}'",
+                path = path
+            ),
+            Self::ModpackUnknownFormat => crate::t!(
+                "minecraft-error-modpack-unknown-format",
+                "Archive is not a recognized modpack format"
+            ),
+            Self::ModpackIndexTooLarge { max_bytes } => crate::t!(
+                "minecraft-error-modpack-index-too-large",
+                "Modpack index file exceeds maximum allowed size ({max_bytes} bytes)",
+                max_bytes = max_bytes
+            ),
+            Self::ModpackUnsupportedFormatVersion { version } => crate::t!(
+                "minecraft-error-modpack-unsupported-format-version",
+                "Unsupported modpack format version: {version}",
+                version = version
+            ),
+            Self::ModpackUnsupportedGame { game } => crate::t!(
+                "minecraft-error-modpack-unsupported-game",
+                "Unsupported modpack game: '{game}'",
+                game = game
+            ),
+            Self::ModpackMissingMinecraftVersion => crate::t!(
+                "minecraft-error-modpack-missing-minecraft-version",
+                "Modpack is missing the required Minecraft version"
+            ),
+            Self::ModpackEmptyDependencyVersion { dependency } => crate::t!(
+                "minecraft-error-modpack-empty-dependency-version",
+                "Modpack dependency '{dependency}' has an empty version",
+                dependency = dependency
+            ),
+            Self::ModpackUnsupportedDependency { dependency } => crate::t!(
+                "minecraft-error-modpack-unsupported-dependency",
+                "Unsupported modpack dependency: '{dependency}'",
+                dependency = dependency
+            ),
+            Self::ModpackUnsafePath { path } => crate::t!(
+                "minecraft-error-modpack-unsafe-path",
+                "Unsafe file path in modpack: '{path}'",
+                path = path
+            ),
+            Self::ModpackEmptyPath => crate::t!(
+                "minecraft-error-modpack-empty-path",
+                "Modpack contains an empty file path"
+            ),
+            Self::ModpackMissingDownloads { path } => crate::t!(
+                "minecraft-error-modpack-missing-downloads",
+                "Modpack file '{path}' has no download URLs",
+                path = path
+            ),
+            Self::ModpackMultipleModLoaders => crate::t!(
+                "minecraft-error-modpack-multiple-mod-loaders",
+                "Modpack specifies multiple mod loaders"
+            ),
         }
     }
 }
