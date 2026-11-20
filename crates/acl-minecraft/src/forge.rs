@@ -109,7 +109,11 @@ impl ForgeManifest {
             return Some(exact.clone());
         }
 
-        let prefixed = format!("{game_version}-{raw_version}");
+        let prefixed = if raw_version.starts_with(game_version) {
+            raw_version.to_string()
+        } else {
+            format!("{game_version}-{raw_version}")
+        };
 
         if let Some(found) = versions.iter().find(|v| v.as_str() == prefixed) {
             return Some(found.clone());

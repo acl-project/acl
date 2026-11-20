@@ -251,9 +251,9 @@ impl LocalizeError for acl_minecraft::MinecraftError {
                 "Failed to construct classpath: {arg0}",
                 arg0 = arg0
             ),
-            Self::IndexJsonNotFound { path } => crate::t!(
-                "minecraft-error-index-json-not-found",
-                "Modpack index json not found in {path}",
+            Self::ModpackIndexNotFound { path } => crate::t!(
+                "minecraft-error-modpack-index-not-found",
+                "Modpack index JSON not found in '{path}'",
                 path = path
             ),
             Self::ModpackUnknownFormat => crate::t!(

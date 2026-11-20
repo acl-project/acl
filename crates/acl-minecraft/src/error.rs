@@ -55,8 +55,8 @@ pub enum MinecraftError {
     #[error("Failed to construct classpath: {0}")]
     Classpath(#[from] std::env::JoinPathsError),
 
-    #[error("Modpack index json not found in {path}")]
-    IndexJsonNotFound { path: PathBuf },
+    #[error("Modpack index JSON not found in '{path}'")]
+    ModpackIndexNotFound { path: PathBuf },
 
     #[error("Archive is not a recognized modpack format")]
     ModpackUnknownFormat,

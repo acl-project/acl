@@ -137,7 +137,7 @@ impl TryFrom<MrpackIndex> for ModpackManifest {
             };
 
             let normalized_path = normalize_relative_path(&file.path)?;
-            if file.downloads.is_empty() {
+            if file.downloads.is_empty() || file.downloads.iter().any(|url| url.is_empty()) {
                 return Err(MinecraftError::ModpackMissingDownloads {
                     path: normalized_path,
                 });

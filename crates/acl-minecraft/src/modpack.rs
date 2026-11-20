@@ -48,7 +48,7 @@ pub enum ModpackFileSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModpackFile {
     pub source: ModpackFileSource,
-    /// false indicates optional files (Modrinth env.client == optional or CurseForge required == false)
+    /// False indicates optional files (Modrinth env.client == optional or CurseForge required == false)
     pub required: bool,
 }
 
@@ -61,9 +61,9 @@ pub struct ModpackManifest {
     pub summary: Option<String>,
     /// CurseForge has author; Modrinth is usually None
     pub author: Option<String>,
-    ///Minecraft version, such as "1.20.1"
+    /// Minecraft version, such as "1.20.1"
     pub game_version: String,
-    /// None means  Vanilla package
+    /// None means Vanilla package
     pub loader: Option<ModpackLoader>,
     /// CurseForge optional recommended memory (MB); Modrinth is None
     pub recommended_ram_mb: Option<u32>,
@@ -76,7 +76,7 @@ pub struct ModpackManifest {
 }
 
 impl ModpackManifest {
-    pub fn parse_modpack_from_zip(path: &Path) -> Result<Self> {
+    pub fn parse_from_zip(path: &Path) -> Result<Self> {
         let file = File::open(path).map_err(|source| MinecraftError::Io {
             path: path.to_path_buf(),
             source,
@@ -110,7 +110,7 @@ impl ModpackManifest {
 
                 ModpackManifest::try_from(mrpack)
             }
-            Err(ZipError::FileNotFound) => Err(MinecraftError::IndexJsonNotFound {
+            Err(ZipError::FileNotFound) => Err(MinecraftError::ModpackIndexNotFound {
                 path: path.to_path_buf(),
             }),
             Err(source) => Err(MinecraftError::Zip {
@@ -144,11 +144,16 @@ impl ModpackManifest {
                     source,
                 })?;
 
-                if entry.is_dir() {
+                if entry.is_dir() || entry.is_symlink() {
                     continue;
                 }
 
                 let normalized_name = entry.name().replace('\\', "/");
+
+                if normalized_name.ends_with('/') {
+                    continue;
+                }
+
                 let Some(rel_raw) = normalized_name.strip_prefix(&prefix) else {
                     continue;
                 };
@@ -159,10 +164,13 @@ impl ModpackManifest {
                 let Some(parent) = dest.parent() else {
                     continue;
                 };
-                fs::create_dir_all(parent).map_err(|source| MinecraftError::Io {
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
+
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent).map_err(|source| MinecraftError::Io {
+                        path: parent.to_path_buf(),
+                        source,
+                    })?;
+                }
 
                 let out_file = File::create(&dest).map_err(|source| MinecraftError::Io {
                     path: dest.to_path_buf(),
