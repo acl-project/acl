@@ -99,6 +99,29 @@ impl ForgeManifest {
         )
         .await
     }
+
+    /// Resolve a Forge version (e.g. "47.2.0" or "10.13.4.1614") to the exact Maven
+    /// version string (e.g. "1.20.1-47.2.0" or "1.7.10-10.13.4.1614-1.7.10") for modpack install.
+    pub fn resolve_version(&self, game_version: &str, raw_version: &str) -> Option<String> {
+        let versions = self.mc_to_forge.get(game_version)?;
+
+        if let Some(exact) = versions.iter().find(|v| v.as_str() == raw_version) {
+            return Some(exact.clone());
+        }
+
+        let prefixed = format!("{game_version}-{raw_version}");
+
+        if let Some(found) = versions.iter().find(|v| v.as_str() == prefixed) {
+            return Some(found.clone());
+        }
+
+        let prefixed_with_dash = format!("{prefixed}-");
+
+        versions
+            .iter()
+            .find(|v| v.starts_with(&prefixed_with_dash))
+            .cloned()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

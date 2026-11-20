@@ -9,7 +9,9 @@ pub mod fabric;
 pub mod forge;
 pub mod manifest;
 pub mod mirror;
+pub mod modpack;
 pub mod modrinth;
+pub mod mrpack;
 pub mod native;
 pub mod project;
 pub mod rule;
@@ -26,6 +28,9 @@ pub use manifest::{
     LatestVersions, VERSION_MANIFEST_URL, VersionEntry, VersionManifest, VersionType,
 };
 pub use mirror::DownloadSource;
+pub use modpack::{
+    ModpackFile, ModpackFileSource, ModpackLoader, ModpackManifest, ResolvedModpackFile,
+};
 pub use native::{
     DEFAULT_NATIVE_EXCLUDE, NativeArchive, extract_all_natives, extract_native_archive,
 };

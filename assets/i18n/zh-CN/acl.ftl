@@ -377,6 +377,10 @@ minecraft-error-forge-missing-version-json = 现代 Forge 安装配置文件缺�
 minecraft-error-hash-mismatch = '{ $target }' 的 SHA-1 不匹配：期望 { $expected }，实际 { $actual }
 # Source: HTTP request failed: { $arg0 }
 minecraft-error-http = HTTP 请求失败：{ $arg0 }
+
+# Source: Modpack index json not found in { $path }
+# minecraft-error-index-json-not-found = Modpack index json not found in { $path }
+
 # Source: Invalid Maven coordinate: '{ $coordinate }'
 minecraft-error-invalid-maven-coordinate = 无效的 Maven 坐标：'{ $coordinate }'
 # Source: I/O error at path '{ $path }': { $source }
@@ -385,6 +389,50 @@ minecraft-error-io = 路径 '{ $path }' 处发生 I/O 错误：{ $source }
 minecraft-error-json = 解析 JSON 失败：{ $arg0 }
 # Source: Main-Class attribute not found in manifest of jar '{ $jar_path }'
 minecraft-error-missing-main-class = 在 jar '{ $jar_path }' 的清单中未找到 Main-Class 属性
+
+# Source: Modpack dependency '{ $dependency }' has an empty version
+# minecraft-error-modpack-empty-dependency-version = Modpack dependency '{ $dependency }' has an empty version
+
+
+# Source: Modpack contains an empty file path
+# minecraft-error-modpack-empty-path = Modpack contains an empty file path
+
+
+# Source: Modpack index file exceeds maximum allowed size ({ $max_bytes } bytes)
+# minecraft-error-modpack-index-too-large = Modpack index file exceeds maximum allowed size ({ $max_bytes } bytes)
+
+
+# Source: Modpack file '{ $path }' has no download URLs
+# minecraft-error-modpack-missing-downloads = Modpack file '{ $path }' has no download URLs
+
+
+# Source: Modpack is missing the required Minecraft version
+# minecraft-error-modpack-missing-minecraft-version = Modpack is missing the required Minecraft version
+
+
+# Source: Modpack specifies multiple mod loaders
+# minecraft-error-modpack-multiple-mod-loaders = Modpack specifies multiple mod loaders
+
+
+# Source: Archive is not a recognized modpack format
+# minecraft-error-modpack-unknown-format = Archive is not a recognized modpack format
+
+
+# Source: Unsafe file path in modpack: '{ $path }'
+# minecraft-error-modpack-unsafe-path = Unsafe file path in modpack: '{ $path }'
+
+
+# Source: Unsupported modpack dependency: '{ $dependency }'
+# minecraft-error-modpack-unsupported-dependency = Unsupported modpack dependency: '{ $dependency }'
+
+
+# Source: Unsupported modpack format version: { $version }
+# minecraft-error-modpack-unsupported-format-version = Unsupported modpack format version: { $version }
+
+
+# Source: Unsupported modpack game: '{ $game }'
+# minecraft-error-modpack-unsupported-game = Unsupported modpack game: '{ $game }'
+
 # Source: Forge processor '{ $jar }' failed with exit code { $exit_code }
 minecraft-error-processor-failed = Forge 处理器 '{ $jar }' 执行失败，退出码：{ $exit_code }
 # Source: System clock error: { $arg0 }
