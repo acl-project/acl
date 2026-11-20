@@ -95,7 +95,7 @@ pub enum AssetConfigCmdOutput {
     /// Callback after batch pulling of pre-project information is completed
     DepsLoaded {
         request_id: u64,
-        deps: Vec<ResolvedDep>,
+        deps: Result<Vec<ResolvedDep>, String>,
     },
 }
 
@@ -264,7 +264,7 @@ impl AssetConfigPage {
             .unwrap_or(0);
     }
 
-    fn spawn_fetch_version(&mut self, sender: &ComponentSender<Self>) {
+    fn spawn_fetch_versions(&mut self, sender: &ComponentSender<Self>) {
         let Some(item) = self.item.clone() else {
             return;
         };
@@ -326,7 +326,7 @@ impl AssetConfigPage {
         self.rebuild_dependencies(sender);
     }
 
-    fn render_dependencies(&mut self, deps: &Vec<ResolvedDep>, sender: &ComponentSender<Self>) {
+    fn render_dependencies(&mut self, deps: &[ResolvedDep], sender: &ComponentSender<Self>) {
         for row in self.dep_rows.drain(..) {
             self.dep_group.remove(&row);
         }
@@ -369,6 +369,25 @@ impl AssetConfigPage {
         }
     }
 
+    fn render_dependencies_error(&mut self, err: &str) {
+        for row in self.dep_rows.drain(..) {
+            self.dep_group.remove(&row);
+        }
+
+        let row = adw::ActionRow::builder()
+            .title(t!(
+                "installer-asset-dep-load-failed",
+                "Failed to load dependencies"
+            ))
+            .subtitle(err)
+            .build();
+        row.add_prefix(&gtk::Image::from_icon_name("dialog-error-symbolic"));
+
+        self.dep_group.set_visible(true);
+        self.dep_group.add(&row);
+        self.dep_rows.push(row);
+    }
+
     fn rebuild_dependencies(&mut self, sender: &ComponentSender<Self>) {
         let deps: Vec<ResolvedDep> = self
             .selected_version
@@ -407,7 +426,7 @@ impl AssetConfigPage {
         let download_source = self.config.read().download_source;
 
         sender.oneshot_command(async move {
-            let map: HashMap<String, AssetItemData> =
+            let map: Result<HashMap<String, AssetItemData>, String> =
                 modrinth::ProjectDetail::fetch_batch_with_cache(
                     &client,
                     &ids,
@@ -416,13 +435,25 @@ impl AssetConfigPage {
                     false,
                 )
                 .await
-                .unwrap_or_default()
-                .into_iter()
-                .map(|detail| {
-                    let id = detail.id.clone();
-                    (id, AssetItemData::from(detail))
+                .map(|m| {
+                    m.into_iter()
+                        .map(|detail| {
+                            let id = detail.id.clone();
+                            (id, AssetItemData::from(detail))
+                        })
+                        .collect()
                 })
-                .collect();
+                .map_err(|e| e.to_i18n());
+
+            let map = match map {
+                Ok(m) => m,
+                Err(e) => {
+                    return AssetConfigCmdOutput::DepsLoaded {
+                        request_id,
+                        deps: Err(e),
+                    };
+                }
+            };
 
             let resolved = deps
                 .into_iter()
@@ -434,7 +465,7 @@ impl AssetConfigPage {
 
             AssetConfigCmdOutput::DepsLoaded {
                 request_id,
-                deps: resolved,
+                deps: Ok(resolved),
             }
         });
     }
@@ -581,7 +612,7 @@ impl Component for AssetConfigPage {
 
                 },
 
-                // Dependency remind (automatically hidden when no prefix)
+                // Dependency remind (automatically hidden when no dependencies)
                 #[local_ref]
                 dep_group -> adw::PreferencesGroup {
                     #[watch]
@@ -627,6 +658,7 @@ impl Component for AssetConfigPage {
         };
 
         model.sync_instances();
+        model.select_active_instance();
 
         let dep_group = &model.dep_group;
         let widgets = view_output!();
@@ -646,7 +678,7 @@ impl Component for AssetConfigPage {
                     self.target_mode = TargetMode::ExistingInstance;
                 }
                 self.rebuild_dependencies(&sender);
-                self.spawn_fetch_version(&sender);
+                self.spawn_fetch_versions(&sender);
             }
 
             AssetConfigInput::InstancesUpdated => {
@@ -786,7 +818,15 @@ impl Component for AssetConfigPage {
                 if request_id != self.dep_request_id {
                     return;
                 }
-                self.render_dependencies(&deps, &sender);
+
+                match deps {
+                    Ok(resolved) => self.render_dependencies(&resolved, &sender),
+                    Err(err) => {
+                        error!("Failed to fetch asset dependencies: {err}");
+                        let _ = sender.output(AssetConfigOutput::ShowToast(err.clone()));
+                        self.render_dependencies_error(&err);
+                    }
+                }
             }
         }
     }

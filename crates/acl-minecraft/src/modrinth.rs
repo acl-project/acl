@@ -159,8 +159,6 @@ impl SearchResponse {
     }
 }
 
-/// Version release type
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionDependency {
     #[serde(default)]

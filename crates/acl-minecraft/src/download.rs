@@ -203,7 +203,7 @@ pub async fn download_all(
     Ok(())
 }
 
-pub async fn download_file_with_prograss<F>(
+pub async fn download_file_with_progress<F>(
     client: &reqwest::Client,
     task: &DownloadTask,
     download_source: DownloadSource,

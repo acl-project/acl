@@ -197,6 +197,8 @@ installer-asset-choose-folder = 选择保存文件夹
 installer-asset-choose-manually = 点击手动选择版本
 # Source: Destination Folder
 installer-asset-custom-folder = 保存文件夹
+# Source: Failed to load dependencies
+installer-asset-dep-load-failed = 加载前置依赖失败
 # Source: Loading...
 installer-asset-dep-loading = 加载中...
 # Source: Optional

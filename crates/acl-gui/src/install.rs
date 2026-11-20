@@ -14,7 +14,7 @@ use acl_core::{
 use acl_minecraft::{
     AssetIndex, AssetItemData, AssetVersion, DownloadSource, MetaLoader, MetaLoaderEntry,
     VersionEntry, VersionMetadata,
-    download::{DownloadProgress, DownloadTask, download_file_with_prograss},
+    download::{DownloadProgress, DownloadTask, download_file_with_progress},
     forge::{self, ForgeManifest, ModernInstallProfile, NeoForgeManifest},
 };
 
@@ -391,7 +391,7 @@ pub fn spawn_install(
     );
 }
 
-pub fn spawn_assets_download(
+pub fn spawn_asset_download(
     tasks: &Arc<TaskManager>,
     item: AssetItemData,
     version: AssetVersion,
@@ -437,7 +437,7 @@ pub fn spawn_assets_download(
 
                 task_mgr.start_stage(task_id, STAGE_DOWNLOAD);
 
-                download_file_with_prograss(
+                download_file_with_progress(
                     &client,
                     &download_task,
                     download_source,

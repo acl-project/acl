@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     i18n::apply_language,
-    install::{InstallContext, spawn_assets_download, spawn_install},
+    install::{InstallContext, spawn_asset_download, spawn_install},
     pages::{
         accounts::{AccountsInit, AccountsOutput, AccountsPage},
         download::{DownloadInit, DownloadOutput, DownloadPage},
@@ -592,7 +592,7 @@ impl SimpleComponent for AppModel {
                 version,
                 target,
             } => {
-                spawn_assets_download(
+                spawn_asset_download(
                     &self.tasks,
                     *item,
                     *version,

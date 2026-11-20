@@ -422,6 +422,8 @@ impl TaskManager {
 
         if let Some(stage) = record.snapshot.stages.get_mut(stage_idx) {
             stage.unit = unit;
+            record.dirty = true;
+            self.flush_notify.notify_one();
         }
     }
 }

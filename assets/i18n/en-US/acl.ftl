@@ -99,6 +99,7 @@ installer-asset-beta = Beta
 installer-asset-choose-folder = Choose Destination Folder
 installer-asset-choose-manually = Click to choose a version manually
 installer-asset-custom-folder = Destination Folder
+installer-asset-dep-load-failed = Failed to load dependencies
 installer-asset-dep-loading = Loading...
 installer-asset-dep-optional = Optional
 installer-asset-dep-required = Required
