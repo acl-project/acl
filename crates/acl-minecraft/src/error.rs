@@ -167,4 +167,89 @@ mod tests {
             "Forge processor 'net.minecraftforge:installertools:1.4.1' failed with exit code 1"
         );
     }
+
+    #[test]
+    fn test_modpack_error_display() {
+        let index_not_found = MinecraftError::ModpackIndexNotFound {
+            path: PathBuf::from("/test/pack.mrpack"),
+        };
+        assert_eq!(
+            index_not_found.to_string(),
+            "Modpack index JSON not found in '/test/pack.mrpack'"
+        );
+
+        assert_eq!(
+            MinecraftError::ModpackUnknownFormat.to_string(),
+            "Archive is not a recognized modpack format"
+        );
+
+        let too_large = MinecraftError::ModpackIndexTooLarge {
+            max_bytes: 16_777_216,
+        };
+        assert_eq!(
+            too_large.to_string(),
+            "Modpack index file exceeds maximum allowed size (16777216 bytes)"
+        );
+
+        let unsupported_ver = MinecraftError::ModpackUnsupportedFormatVersion { version: 2 };
+        assert_eq!(
+            unsupported_ver.to_string(),
+            "Unsupported modpack format version: 2"
+        );
+
+        let unsupported_game = MinecraftError::ModpackUnsupportedGame {
+            game: "terraria".to_string(),
+        };
+        assert_eq!(
+            unsupported_game.to_string(),
+            "Unsupported modpack game: 'terraria'"
+        );
+
+        assert_eq!(
+            MinecraftError::ModpackMissingMinecraftVersion.to_string(),
+            "Modpack is missing the required Minecraft version"
+        );
+
+        let empty_dep = MinecraftError::ModpackEmptyDependencyVersion {
+            dependency: "fabric-loader".to_string(),
+        };
+        assert_eq!(
+            empty_dep.to_string(),
+            "Modpack dependency 'fabric-loader' has an empty version"
+        );
+
+        let unsupported_dep = MinecraftError::ModpackUnsupportedDependency {
+            dependency: "liteloader".to_string(),
+        };
+        assert_eq!(
+            unsupported_dep.to_string(),
+            "Unsupported modpack dependency: 'liteloader'"
+        );
+
+        let unsafe_path = MinecraftError::ModpackUnsafePath {
+            path: "../evil.jar".to_string(),
+        };
+        assert_eq!(
+            unsafe_path.to_string(),
+            "Unsafe file path in modpack: '../evil.jar'"
+        );
+
+        assert_eq!(
+            MinecraftError::ModpackEmptyPath.to_string(),
+            "Modpack contains an empty file path"
+        );
+
+        let missing_downloads = MinecraftError::ModpackMissingDownloads {
+            path: "mods/a.jar".to_string(),
+        };
+        assert_eq!(
+            missing_downloads.to_string(),
+            "Modpack file 'mods/a.jar' has no download URLs"
+        );
+
+        assert_eq!(
+            MinecraftError::ModpackMultipleModLoaders.to_string(),
+            "Modpack specifies multiple mod loaders"
+        );
+    }
 }

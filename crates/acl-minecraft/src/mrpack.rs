@@ -169,3 +169,286 @@ impl TryFrom<MrpackIndex> for ModpackManifest {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_file(path: &str, env: Option<MrpackFileEnv>, downloads: Vec<String>) -> MrpackFile {
+        MrpackFile {
+            path: path.to_string(),
+            hashes: FileHashes {
+                sha1: Some("deadbeef".to_string()),
+                sha512: Some("cafebabe".to_string()),
+            },
+            env,
+            downloads,
+            file_size: 1024,
+        }
+    }
+
+    fn base_index(dependencies: BTreeMap<String, String>, files: Vec<MrpackFile>) -> MrpackIndex {
+        MrpackIndex {
+            format_version: 1,
+            game: "minecraft".to_string(),
+            version_id: "1.0.0".to_string(),
+            name: "Sample Pack".to_string(),
+            summary: Some("A sample modpack".to_string()),
+            files,
+            dependencies,
+        }
+    }
+
+    #[test]
+    fn test_mrpack_file_client_requirement() {
+        let no_env = sample_file(
+            "mods/a.jar",
+            None,
+            vec!["https://example.com/a.jar".to_string()],
+        );
+        assert_eq!(no_env.client_requirement(), Some(true));
+
+        let required = sample_file(
+            "mods/b.jar",
+            Some(MrpackFileEnv {
+                client: SideSupport::Required,
+                server: SideSupport::Unsupported,
+            }),
+            vec!["https://example.com/b.jar".to_string()],
+        );
+        assert_eq!(required.client_requirement(), Some(true));
+
+        let unknown = sample_file(
+            "mods/c.jar",
+            Some(MrpackFileEnv {
+                client: SideSupport::Unknown,
+                server: SideSupport::Required,
+            }),
+            vec!["https://example.com/c.jar".to_string()],
+        );
+        assert_eq!(unknown.client_requirement(), Some(true));
+
+        let optional = sample_file(
+            "mods/d.jar",
+            Some(MrpackFileEnv {
+                client: SideSupport::Optional,
+                server: SideSupport::Required,
+            }),
+            vec!["https://example.com/d.jar".to_string()],
+        );
+        assert_eq!(optional.client_requirement(), Some(false));
+
+        let unsupported = sample_file(
+            "mods/e.jar",
+            Some(MrpackFileEnv {
+                client: SideSupport::Unsupported,
+                server: SideSupport::Required,
+            }),
+            vec!["https://example.com/e.jar".to_string()],
+        );
+        assert_eq!(unsupported.client_requirement(), None);
+
+        // Omitting `client` in JSON defaults `client` to `Required`
+        let json = r#"{
+            "path": "mods/f.jar",
+            "hashes": {},
+            "env": { "server": "unsupported" },
+            "downloads": ["https://example.com/f.jar"],
+            "fileSize": 512
+        }"#;
+        let parsed: MrpackFile =
+            serde_json::from_str(json).expect("failed to deserialize MrpackFile");
+        assert_eq!(
+            parsed.env.expect("env should be present").client,
+            SideSupport::Required
+        );
+        assert_eq!(parsed.client_requirement(), Some(true));
+    }
+
+    #[test]
+    fn test_mrpack_index_try_from_loaders_and_files() {
+        let loader_cases = [
+            (None, None),
+            (
+                Some(("fabric-loader", "0.15.11")),
+                Some(ModpackLoader::Fabric("0.15.11".to_string())),
+            ),
+            (
+                Some(("quilt-loader", "0.26.0")),
+                Some(ModpackLoader::Quilt("0.26.0".to_string())),
+            ),
+            (
+                Some(("forge", "47.2.0")),
+                Some(ModpackLoader::Forge("47.2.0".to_string())),
+            ),
+            (
+                Some(("neoforge", "21.1.72")),
+                Some(ModpackLoader::NeoForge("21.1.72".to_string())),
+            ),
+        ];
+
+        for (loader_entry, expected_loader) in loader_cases {
+            let mut deps = BTreeMap::new();
+            deps.insert("minecraft".to_string(), "1.20.1".to_string());
+            if let Some((key, ver)) = loader_entry {
+                deps.insert(key.to_string(), ver.to_string());
+            }
+
+            let files = vec![
+                sample_file(
+                    "mods\\sodium.jar",
+                    None,
+                    vec!["https://cdn.modrinth.com/sodium.jar".to_string()],
+                ),
+                sample_file(
+                    "mods/iris.jar",
+                    Some(MrpackFileEnv {
+                        client: SideSupport::Optional,
+                        server: SideSupport::Unsupported,
+                    }),
+                    vec![
+                        "https://cdn.modrinth.com/iris.jar".to_string(),
+                        "https://mirror.example.com/iris.jar".to_string(),
+                    ],
+                ),
+                sample_file(
+                    "mods/server-only.jar",
+                    Some(MrpackFileEnv {
+                        client: SideSupport::Unsupported,
+                        server: SideSupport::Required,
+                    }),
+                    vec!["https://cdn.modrinth.com/server-only.jar".to_string()],
+                ),
+            ];
+
+            let index = base_index(deps, files);
+            let manifest = ModpackManifest::try_from(index)
+                .expect("valid mrpack index should convert to ModpackManifest");
+
+            assert_eq!(manifest.host, ProjectHost::Modrinth);
+            assert_eq!(manifest.name, "Sample Pack");
+            assert_eq!(manifest.version, "1.0.0");
+            assert_eq!(manifest.summary.as_deref(), Some("A sample modpack"));
+            assert_eq!(manifest.author, None);
+            assert_eq!(manifest.game_version, "1.20.1");
+            assert_eq!(manifest.loader, expected_loader);
+            assert_eq!(manifest.recommended_ram_mb, None);
+            assert_eq!(
+                manifest.override_dirs,
+                vec!["overrides".to_string(), "client-overrides".to_string()]
+            );
+
+            assert_eq!(
+                manifest.files,
+                vec![
+                    ModpackFile {
+                        source: ModpackFileSource::Direct {
+                            path: "mods/sodium.jar".to_string(),
+                            downloads: vec!["https://cdn.modrinth.com/sodium.jar".to_string()],
+                            size: 1024,
+                            sha1: Some("deadbeef".to_string()),
+                            sha512: Some("cafebabe".to_string()),
+                        },
+                        required: true,
+                    },
+                    ModpackFile {
+                        source: ModpackFileSource::Direct {
+                            path: "mods/iris.jar".to_string(),
+                            downloads: vec![
+                                "https://cdn.modrinth.com/iris.jar".to_string(),
+                                "https://mirror.example.com/iris.jar".to_string(),
+                            ],
+                            size: 1024,
+                            sha1: Some("deadbeef".to_string()),
+                            sha512: Some("cafebabe".to_string()),
+                        },
+                        required: false,
+                    },
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn test_mrpack_index_validation_errors() {
+        let mut valid_deps = BTreeMap::new();
+        valid_deps.insert("minecraft".to_string(), "1.20.1".to_string());
+
+        // Unsupported format version
+        let mut bad_format = base_index(valid_deps.clone(), Vec::new());
+        bad_format.format_version = 2;
+        assert!(matches!(
+            ModpackManifest::try_from(bad_format),
+            Err(MinecraftError::ModpackUnsupportedFormatVersion { version: 2 })
+        ));
+
+        // Unsupported game
+        let mut bad_game = base_index(valid_deps.clone(), Vec::new());
+        bad_game.game = "other".to_string();
+        assert!(matches!(
+            ModpackManifest::try_from(bad_game),
+            Err(MinecraftError::ModpackUnsupportedGame { ref game }) if game == "other"
+        ));
+
+        // Missing minecraft dependency
+        let mut no_mc = BTreeMap::new();
+        no_mc.insert("fabric-loader".to_string(), "0.15.11".to_string());
+        assert!(matches!(
+            ModpackManifest::try_from(base_index(no_mc, Vec::new())),
+            Err(MinecraftError::ModpackMissingMinecraftVersion)
+        ));
+
+        // Empty or whitespace-only dependency version
+        let mut empty_dep = valid_deps.clone();
+        empty_dep.insert("fabric-loader".to_string(), "   ".to_string());
+        assert!(matches!(
+            ModpackManifest::try_from(base_index(empty_dep, Vec::new())),
+            Err(MinecraftError::ModpackEmptyDependencyVersion { ref dependency })
+                if dependency == "fabric-loader"
+        ));
+
+        // Unsupported dependency key
+        let mut unsupported_dep = valid_deps.clone();
+        unsupported_dep.insert("liteloader".to_string(), "1.12.2".to_string());
+        assert!(matches!(
+            ModpackManifest::try_from(base_index(unsupported_dep, Vec::new())),
+            Err(MinecraftError::ModpackUnsupportedDependency { ref dependency })
+                if dependency == "liteloader"
+        ));
+
+        // Multiple mod loaders
+        let mut multi_loader = valid_deps.clone();
+        multi_loader.insert("fabric-loader".to_string(), "0.15.11".to_string());
+        multi_loader.insert("forge".to_string(), "47.2.0".to_string());
+        assert!(matches!(
+            ModpackManifest::try_from(base_index(multi_loader, Vec::new())),
+            Err(MinecraftError::ModpackMultipleModLoaders)
+        ));
+
+        // Empty downloads list
+        let empty_downloads_file = sample_file("mods/no-url.jar", None, Vec::new());
+        assert!(matches!(
+            ModpackManifest::try_from(base_index(valid_deps.clone(), vec![empty_downloads_file])),
+            Err(MinecraftError::ModpackMissingDownloads { ref path }) if path == "mods/no-url.jar"
+        ));
+
+        // Blank URL inside downloads list
+        let blank_url_file = sample_file("mods/blank-url.jar", None, vec!["  ".to_string()]);
+        assert!(matches!(
+            ModpackManifest::try_from(base_index(valid_deps.clone(), vec![blank_url_file])),
+            Err(MinecraftError::ModpackMissingDownloads { ref path })
+                if path == "mods/blank-url.jar"
+        ));
+
+        // Unsafe path traversal in file path
+        let unsafe_file = sample_file(
+            "../mods/a.jar",
+            None,
+            vec!["https://example.com/a.jar".to_string()],
+        );
+        assert!(matches!(
+            ModpackManifest::try_from(base_index(valid_deps, vec![unsafe_file])),
+            Err(MinecraftError::ModpackUnsafePath { ref path }) if path == "../mods/a.jar"
+        ));
+    }
+}

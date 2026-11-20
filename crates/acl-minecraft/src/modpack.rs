@@ -243,3 +243,252 @@ pub fn normalize_relative_path(raw: &str) -> Result<String> {
 
     Ok(parts.join("/"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "acl_test_modpack_{}_{}_{}",
+                name,
+                std::process::id(),
+                id
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("failed to create temp test dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn create_test_zip(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = File::create(path).expect("failed to create zip file");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+
+        for (name, content) in entries {
+            if name.ends_with('/') {
+                zip.add_directory(*name, options)
+                    .expect("failed to add directory to zip");
+            } else {
+                zip.start_file(*name, options)
+                    .expect("failed to start zip file");
+                zip.write_all(content)
+                    .expect("failed to write zip file content");
+            }
+        }
+
+        zip.finish().expect("failed to finish zip");
+    }
+
+    fn sample_index_json() -> &'static [u8] {
+        br#"{
+            "formatVersion": 1,
+            "game": "minecraft",
+            "versionId": "2.1.0",
+            "name": "Test Pack",
+            "summary": "Integration test pack",
+            "files": [
+                {
+                    "path": "mods/sodium.jar",
+                    "hashes": { "sha1": "abc123", "sha512": "def456" },
+                    "downloads": ["https://cdn.modrinth.com/sodium.jar"],
+                    "fileSize": 2048
+                }
+            ],
+            "dependencies": {
+                "minecraft": "1.20.1",
+                "fabric-loader": "0.15.11"
+            }
+        }"#
+    }
+
+    #[test]
+    fn test_normalize_relative_path() {
+        assert_eq!(
+            normalize_relative_path("mods/sodium.jar").expect("valid path"),
+            "mods/sodium.jar"
+        );
+        assert_eq!(
+            normalize_relative_path("mods\\sub\\a.jar").expect("valid backslash path"),
+            "mods/sub/a.jar"
+        );
+        assert_eq!(
+            normalize_relative_path("./config/a.toml").expect("valid ./ path"),
+            "config/a.toml"
+        );
+
+        let unsafe_cases = [
+            "../escape.jar",
+            "mods/../../escape.jar",
+            "/etc/passwd",
+            "\\Windows\\System32",
+            "C:/mods/a.jar",
+            "C:\\mods\\a.jar",
+        ];
+        for raw in unsafe_cases {
+            assert!(
+                matches!(
+                    normalize_relative_path(raw),
+                    Err(MinecraftError::ModpackUnsafePath { ref path }) if path == raw
+                ),
+                "expected ModpackUnsafePath for '{raw}'"
+            );
+        }
+
+        for raw in ["", ".", "./"] {
+            assert!(
+                matches!(
+                    normalize_relative_path(raw),
+                    Err(MinecraftError::ModpackEmptyPath)
+                ),
+                "expected ModpackEmptyPath for '{raw}'"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_from_zip_success_and_errors() {
+        let temp = TempDirGuard::new("parse_zip");
+
+        let valid_zip = temp.path().join("valid.mrpack");
+        create_test_zip(&valid_zip, &[(MRPACK_INDEX_FILE, sample_index_json())]);
+
+        let manifest = ModpackManifest::parse_from_zip(&valid_zip)
+            .expect("valid mrpack zip should parse successfully");
+        assert_eq!(manifest.host, ProjectHost::Modrinth);
+        assert_eq!(manifest.name, "Test Pack");
+        assert_eq!(manifest.version, "2.1.0");
+        assert_eq!(manifest.summary.as_deref(), Some("Integration test pack"));
+        assert_eq!(manifest.game_version, "1.20.1");
+        assert_eq!(
+            manifest.loader,
+            Some(ModpackLoader::Fabric("0.15.11".to_string()))
+        );
+        assert_eq!(manifest.files.len(), 1);
+
+        // Non-existent archive
+        let missing_zip = temp.path().join("missing.mrpack");
+        assert!(matches!(
+            ModpackManifest::parse_from_zip(&missing_zip),
+            Err(MinecraftError::Io { ref path, .. }) if path == &missing_zip
+        ));
+
+        // Corrupt non-zip bytes
+        let corrupt_zip = temp.path().join("corrupt.mrpack");
+        fs::write(&corrupt_zip, b"not a zip archive").expect("failed to write corrupt zip");
+        assert!(matches!(
+            ModpackManifest::parse_from_zip(&corrupt_zip),
+            Err(MinecraftError::Zip { ref path, .. }) if path == &corrupt_zip
+        ));
+
+        // Missing modrinth.index.json
+        let no_index_zip = temp.path().join("no_index.mrpack");
+        create_test_zip(&no_index_zip, &[("overrides/options.txt", b"fov:90")]);
+        assert!(matches!(
+            ModpackManifest::parse_from_zip(&no_index_zip),
+            Err(MinecraftError::ModpackIndexNotFound { ref path }) if path == &no_index_zip
+        ));
+
+        // Invalid JSON inside modrinth.index.json
+        let bad_json_zip = temp.path().join("bad_json.mrpack");
+        create_test_zip(&bad_json_zip, &[(MRPACK_INDEX_FILE, b"{ invalid json")]);
+        assert!(matches!(
+            ModpackManifest::parse_from_zip(&bad_json_zip),
+            Err(MinecraftError::Json(_))
+        ));
+    }
+
+    #[test]
+    fn test_extract_overrides_priority_and_filtering() {
+        let temp = TempDirGuard::new("extract_overrides");
+        let zip_path = temp.path().join("pack.mrpack");
+        let target_dir = temp.path().join("instance");
+        fs::create_dir_all(&target_dir).expect("failed to create target dir");
+
+        // Place client-overrides before overrides in the archive to ensure
+        // extraction order strictly follows `override_dirs`.
+        create_test_zip(
+            &zip_path,
+            &[
+                (MRPACK_INDEX_FILE, sample_index_json()),
+                ("client-overrides/config/common.toml", b"client"),
+                ("client-overrides/options.txt", b"fov:90"),
+                ("overrides/", b""),
+                ("overrides/config/common.toml", b"base"),
+                ("overrides/config/base_only.toml", b"only_base"),
+                ("server-overrides/server.properties", b"server"),
+            ],
+        );
+
+        let manifest =
+            ModpackManifest::parse_from_zip(&zip_path).expect("failed to parse test modpack");
+        manifest
+            .extract_overrides(&zip_path, &target_dir)
+            .expect("failed to extract overrides");
+
+        assert_eq!(
+            fs::read(target_dir.join("config/common.toml")).expect("common.toml should exist"),
+            b"client"
+        );
+        assert_eq!(
+            fs::read(target_dir.join("config/base_only.toml"))
+                .expect("base_only.toml should exist"),
+            b"only_base"
+        );
+        assert_eq!(
+            fs::read(target_dir.join("options.txt")).expect("options.txt should exist"),
+            b"fov:90"
+        );
+        assert!(!target_dir.join("server.properties").exists());
+        assert!(!target_dir.join(MRPACK_INDEX_FILE).exists());
+    }
+
+    #[test]
+    fn test_extract_overrides_rejects_unsafe_path() {
+        let temp = TempDirGuard::new("extract_unsafe");
+        let zip_path = temp.path().join("unsafe.mrpack");
+        let target_dir = temp.path().join("instance");
+        fs::create_dir_all(&target_dir).expect("failed to create target dir");
+
+        create_test_zip(
+            &zip_path,
+            &[
+                (MRPACK_INDEX_FILE, sample_index_json()),
+                ("overrides/../escape.txt", b"evil"),
+            ],
+        );
+
+        let manifest =
+            ModpackManifest::parse_from_zip(&zip_path).expect("failed to parse test modpack");
+        let err = manifest
+            .extract_overrides(&zip_path, &target_dir)
+            .expect_err("unsafe override path should be rejected");
+        assert!(matches!(
+            err,
+            MinecraftError::ModpackUnsafePath { ref path } if path == "../escape.txt"
+        ));
+        assert!(!temp.path().join("escape.txt").exists());
+    }
+}
