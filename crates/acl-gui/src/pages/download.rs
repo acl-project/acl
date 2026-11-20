@@ -14,7 +14,6 @@ use adw::prelude::*;
 use libadwaita::NavigationPage;
 use relm4::prelude::*;
 use relm4::{SharedState, SimpleComponent};
-use tracing::info;
 
 pub mod browser;
 pub mod game;
@@ -96,6 +95,7 @@ pub enum DownloadOutput {
     ShowToast(String),
     Back,
     SelectGameVersion(VersionEntry),
+    SelectAsset(Box<AssetItemData>),
 }
 
 #[relm4::component(pub)]
@@ -256,8 +256,8 @@ impl SimpleComponent for DownloadPage {
             DownloadInput::ShowToast(message) => {
                 let _ = sender.output(DownloadOutput::ShowToast(message));
             }
-            DownloadInput::SelectAsset(_) => {
-                info!("Asset download coming soon");
+            DownloadInput::SelectAsset(item) => {
+                let _ = sender.output(DownloadOutput::SelectAsset(Box::new(item)));
             }
             DownloadInput::Navigate(nav) => {
                 self.current_page = nav;

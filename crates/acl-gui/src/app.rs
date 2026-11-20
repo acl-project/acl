@@ -9,12 +9,15 @@ use std::{
 
 use crate::{
     i18n::apply_language,
-    install::{InstallContext, spawn_install},
+    install::{InstallContext, spawn_asset_download, spawn_install},
     pages::{
         accounts::{AccountsInit, AccountsOutput, AccountsPage},
         download::{DownloadInit, DownloadOutput, DownloadPage},
         home::{HomeInit, HomeOutput, HomePage},
-        installer::{InstallerInit, InstallerInput, InstallerOutput, InstallerPage},
+        installer::{
+            InstallerInit, InstallerInput, InstallerOutput, InstallerPage,
+            asset_config::InstallTarget,
+        },
         instance_detail::{
             InstanceDetail, InstanceDetailInit, InstanceDetailInput, InstanceDetailOutput,
         },
@@ -25,7 +28,7 @@ use crate::{
     t,
     widgets::ms_login::{MsLoginDialog, MsLoginInit, MsLoginInput, MsLoginOutput},
 };
-use acl_minecraft::VersionEntry;
+use acl_minecraft::{AssetItemData, AssetVersion, VersionEntry};
 use adw::prelude::*;
 use gtk::prelude::GtkWindowExt;
 use libadwaita::NavigationPage;
@@ -156,6 +159,12 @@ pub enum AppMsg {
     OpenVanillaInstaller(VersionEntry),
     CloseInstaller,
     InstanceCreated(Box<Instance>, VersionEntry),
+    OpenAssetInstaller(Box<AssetItemData>),
+    AssetInstall {
+        item: Box<AssetItemData>,
+        version: Box<AssetVersion>,
+        target: InstallTarget,
+    },
     Refresh,
     Quit,
 }
@@ -434,6 +443,7 @@ impl SimpleComponent for AppModel {
                 DownloadOutput::Back => AppMsg::CloseDownload,
                 DownloadOutput::SelectGameVersion(entry) => AppMsg::OpenVanillaInstaller(entry),
                 DownloadOutput::ShowToast(m) => AppMsg::ShowToast(m),
+                DownloadOutput::SelectAsset(item) => AppMsg::OpenAssetInstaller(item),
             });
 
         let installer_page = InstallerPage::builder()
@@ -448,6 +458,15 @@ impl SimpleComponent for AppModel {
                 InstallerOutput::Cancel => AppMsg::CloseInstaller,
                 InstallerOutput::ShowToast(m) => AppMsg::ShowToast(m),
                 InstallerOutput::Created(ins, entry) => AppMsg::InstanceCreated(ins, entry),
+                InstallerOutput::InstallAsset {
+                    item,
+                    version,
+                    target,
+                } => AppMsg::AssetInstall {
+                    item,
+                    version,
+                    target,
+                },
             });
 
         config_state.subscribe(sender.input_sender(), |_| AppMsg::Refresh);
@@ -562,6 +581,27 @@ impl SimpleComponent for AppModel {
                 self.installer_return_to = self.current_view;
                 self.installer_page.emit(InstallerInput::OpenVanilla(entry));
                 self.current_view = AppView::Installer
+            }
+            AppMsg::OpenAssetInstaller(item) => {
+                self.installer_return_to = self.current_view;
+                self.installer_page.emit(InstallerInput::OpenAsset(item));
+                self.current_view = AppView::Installer;
+            }
+            AppMsg::AssetInstall {
+                item,
+                version,
+                target,
+            } => {
+                spawn_asset_download(
+                    &self.tasks,
+                    *item,
+                    *version,
+                    target,
+                    self.client.clone(),
+                    Arc::clone(&self.config),
+                );
+                self.current_page = NavPage::Tasks;
+                self.current_view = AppView::Main;
             }
         }
     }

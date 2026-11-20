@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+pub mod asset_config;
 pub mod configure;
 pub mod loader_select;
+pub mod version_select;
 
 use std::{
     path::PathBuf,
@@ -10,7 +12,7 @@ use std::{
 };
 
 use acl_core::{CoreError, Instance, LauncherConfig, ModLoader, manager::InstanceManager};
-use acl_minecraft::VersionEntry;
+use acl_minecraft::{AssetItemData, AssetVersion, ProjectType, VersionEntry};
 
 use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, SharedState,
@@ -20,9 +22,16 @@ use tracing::{error, info};
 use crate::{
     i18n::LocalizeError,
     pages::installer::{
+        asset_config::{
+            AssetConfigInit, AssetConfigInput, AssetConfigOutput, AssetConfigPage, InstallTarget,
+            ResolvedDep,
+        },
         configure::{ConfigureInit, ConfigureInput, ConfigureOutput, ConfigurePage},
         loader_select::{
             LoaderSelectInit, LoaderSelectInput, LoaderSelectOutput, LoaderSelectPage,
+        },
+        version_select::{
+            VersionSelectInit, VersionSelectInput, VersionSelectOutput, VersionSelectPage,
         },
     },
     t,
@@ -33,6 +42,8 @@ pub enum InstallerStep {
     #[default]
     Configure,
     SelectLoader,
+    AssetConfig,
+    SelectVersion,
 }
 
 impl InstallerStep {
@@ -40,6 +51,8 @@ impl InstallerStep {
         match self {
             Self::Configure => "configure",
             Self::SelectLoader => "select_loader",
+            Self::AssetConfig => "asset_config",
+            Self::SelectVersion => "select_version",
         }
     }
 }
@@ -66,6 +79,21 @@ pub enum InstallerInput {
     Refresh,
     SetLoader(ModLoader, Option<String>),
     OpenVanilla(VersionEntry),
+
+    OpenAsset(Box<AssetItemData>),
+    OpenVersionSelect {
+        title: String,
+        target_mc_version: Option<String>,
+        versions: Vec<AssetVersion>,
+    },
+
+    SetAssetVersion(Box<AssetVersion>),
+    OpenDependency(Box<ResolvedDep>),
+    InstallAsset {
+        item: Box<AssetItemData>,
+        version: Box<AssetVersion>,
+        target: InstallTarget,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +101,11 @@ pub enum InstallerOutput {
     Cancel,
     Created(Box<Instance>, VersionEntry),
     ShowToast(String),
+    InstallAsset {
+        item: Box<AssetItemData>,
+        version: Box<AssetVersion>,
+        target: InstallTarget,
+    },
 }
 
 pub struct InstallerPage {
@@ -82,6 +115,8 @@ pub struct InstallerPage {
 
     configure: Controller<ConfigurePage>,
     loader_select: Controller<LoaderSelectPage>,
+    asset_config: Controller<AssetConfigPage>,
+    version_select: Controller<VersionSelectPage>,
     active_install: Arc<Mutex<Option<String>>>,
 }
 
@@ -100,6 +135,8 @@ impl Component for InstallerPage {
 
             add_named[Some(InstallerStep::Configure.as_str())] = model.configure.widget(),
             add_named[Some(InstallerStep::SelectLoader.as_str())] = model.loader_select.widget(),
+            add_named[Some(InstallerStep::AssetConfig.as_str())] = model.asset_config.widget(),
+            add_named[Some(InstallerStep::SelectVersion.as_str())] = model.version_select.widget(),
 
             #[watch]
             set_visible_child_name: model.step.as_str(),
@@ -144,6 +181,46 @@ impl Component for InstallerPage {
                 LoaderSelectOutput::ShowToast(message) => InstallerInput::ShowToast(message),
             });
 
+        let asset_config = AssetConfigPage::builder()
+            .launch(AssetConfigInit {
+                mgr: Arc::clone(&init.mgr),
+                config: Arc::clone(&init.config),
+                client: init.client.clone(),
+                cache_dir: init.cache_dir.clone(),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                AssetConfigOutput::Back => InstallerInput::CancelClicked,
+                AssetConfigOutput::Install {
+                    item,
+                    version,
+                    target,
+                } => InstallerInput::InstallAsset {
+                    item,
+                    version,
+                    target,
+                },
+                AssetConfigOutput::OpenDependency(dep) => InstallerInput::OpenDependency(dep),
+                AssetConfigOutput::OpenVersionSelect {
+                    title,
+                    target_mc_version,
+                    versions,
+                } => InstallerInput::OpenVersionSelect {
+                    title,
+                    target_mc_version,
+                    versions,
+                },
+                AssetConfigOutput::ShowToast(m) => InstallerInput::ShowToast(m),
+            });
+
+        let version_select = VersionSelectPage::builder()
+            .launch(VersionSelectInit {
+                config: Arc::clone(&init.config),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                VersionSelectOutput::Back => InstallerInput::BackTo(InstallerStep::AssetConfig),
+                VersionSelectOutput::Selected(ver) => InstallerInput::SetAssetVersion(ver),
+            });
+
         init.config
             .subscribe(sender.input_sender(), |_| InstallerInput::Refresh);
 
@@ -154,6 +231,8 @@ impl Component for InstallerPage {
 
             configure,
             loader_select,
+            asset_config,
+            version_select,
             active_install: init.active_install,
         };
 
@@ -263,6 +342,57 @@ impl Component for InstallerPage {
                     .emit(ConfigureInput::SetGameVersion(version.id));
                 self.step = InstallerStep::Configure;
             }
+            InstallerInput::InstallAsset {
+                item,
+                version,
+                target,
+            } => {
+                let _ = sender.output(InstallerOutput::InstallAsset {
+                    item,
+                    version,
+                    target,
+                });
+            }
+            InstallerInput::OpenAsset(item) => {
+                if item.project_type == ProjectType::Modpack {
+                    let _ = sender.output(InstallerOutput::ShowToast(
+                        "Modpack installer is coming soon".to_string(),
+                    ));
+                    let _ = sender.output(InstallerOutput::Cancel);
+                    return;
+                }
+
+                self.asset_config.emit(AssetConfigInput::Open(item));
+                self.step = InstallerStep::AssetConfig;
+            }
+            InstallerInput::OpenDependency(dep) => {
+                if let Some(item) = dep.item {
+                    self.asset_config
+                        .emit(AssetConfigInput::Open(Box::new(item)));
+                } else {
+                    let _ = sender.output(InstallerOutput::ShowToast(format!(
+                        "Dependency project: {}",
+                        dep.project_id
+                    )));
+                }
+            }
+            InstallerInput::OpenVersionSelect {
+                title,
+                target_mc_version,
+                versions,
+            } => {
+                self.version_select.emit(VersionSelectInput::Load {
+                    title,
+                    target_mc_version,
+                    versions,
+                });
+                self.step = InstallerStep::SelectVersion;
+            }
+            InstallerInput::SetAssetVersion(ver) => {
+                self.asset_config
+                    .emit(AssetConfigInput::SetManualVersion(ver));
+                self.step = InstallerStep::AssetConfig;
+            }
         }
     }
 }
@@ -276,5 +406,7 @@ mod tests {
         assert_eq!(InstallerStep::default(), InstallerStep::Configure);
         assert_eq!(InstallerStep::Configure.as_str(), "configure");
         assert_eq!(InstallerStep::SelectLoader.as_str(), "select_loader");
+        assert_eq!(InstallerStep::AssetConfig.as_str(), "asset_config");
+        assert_eq!(InstallerStep::SelectVersion.as_str(), "select_version");
     }
 }

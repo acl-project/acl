@@ -1,11 +1,26 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use acl_core::task::ProgressUnit;
 use acl_core::task::StageSnapshot;
 use acl_core::task::StageStatus;
 use libadwaita::prelude::*;
 use relm4::SimpleComponent;
 use relm4::prelude::*;
+
+fn format_bytes(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = 1024.0 * 1024.0;
+
+    let b = bytes as f64;
+    if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct StageRow {
@@ -35,6 +50,16 @@ impl StageRow {
             0.0
         } else {
             (self.stage.done as f64 / self.stage.total as f64).clamp(0.0, 1.0)
+        }
+    }
+    fn progress_label(&self) -> String {
+        match self.stage.unit {
+            ProgressUnit::Count => format!("{} / {}", self.stage.done, self.stage.total),
+            ProgressUnit::Bytes => format!(
+                "{} / {}",
+                format_bytes(self.stage.done),
+                format_bytes(self.stage.total)
+            ),
         }
     }
 }
@@ -78,7 +103,7 @@ impl SimpleComponent for StageRow {
                 #[watch]
                 set_visible: model.stage.total > 1,
                 #[watch]
-                set_label: &format!("{} / {}", model.stage.done, model.stage.total),
+                set_label: &model.progress_label(),
             },
 
 
@@ -120,6 +145,7 @@ mod tests {
                 done,
                 total,
                 bytes_per_sec: None,
+                unit: acl_core::task::ProgressUnit::Count,
             },
         }
     }
@@ -169,5 +195,32 @@ mod tests {
         assert_eq!(row_with(StageStatus::Pending, 5, 0).fraction(), 0.0);
         assert!((row_with(StageStatus::Running, 3, 10).fraction() - 0.3).abs() < f64::EPSILON);
         assert_eq!(row_with(StageStatus::Running, 15, 10).fraction(), 1.0);
+    }
+
+    #[test]
+    fn test_format_bytes_and_progress_label() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(1_572_864), "1.5 MB");
+
+        assert_eq!(
+            row_with(StageStatus::Running, 3, 10).progress_label(),
+            "3 / 10"
+        );
+
+        let bytes_row = StageRow {
+            stage: StageSnapshot {
+                label: "Downloading".to_string(),
+                status: StageStatus::Running,
+                done: 1024,
+                total: 1024 * 1024,
+                bytes_per_sec: None,
+                unit: ProgressUnit::Bytes,
+            },
+        };
+        assert_eq!(bytes_row.progress_label(), "1.0 KB / 1.0 MB");
     }
 }

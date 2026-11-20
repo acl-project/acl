@@ -17,6 +17,13 @@ use tokio::{
 
 pub type TaskId = u64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProgressUnit {
+    #[default]
+    Count,
+    Bytes,
+}
+
 /// Point-in-time snapshot of a background task sent to the UI for rendering.
 #[derive(Debug, Clone)]
 pub struct TaskSnapshot {
@@ -45,6 +52,8 @@ pub struct StageSnapshot {
     pub total: u64,
     /// Current download throughput in bytes/sec during download stages; `None` for non-download steps.
     pub bytes_per_sec: Option<u64>,
+    /// Display type of progress
+    pub unit: ProgressUnit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +201,7 @@ impl TaskManager {
                 done: 0,
                 total: 0,
                 bytes_per_sec: None,
+                unit: ProgressUnit::Count,
             })
             .collect();
 
@@ -394,6 +404,24 @@ impl TaskManager {
             stage.done = done;
             stage.total = total;
             stage.bytes_per_sec = bytes_per_sec;
+            record.dirty = true;
+            self.flush_notify.notify_one();
+        }
+    }
+
+    pub fn set_stage_unit(&self, id: TaskId, stage_idx: usize, unit: ProgressUnit) {
+        let mut tasks = self.lock_tasks();
+
+        let Some(record) = tasks.get_mut(&id) else {
+            return;
+        };
+
+        if record.snapshot.state != TaskState::Running {
+            return;
+        }
+
+        if let Some(stage) = record.snapshot.stages.get_mut(stage_idx) {
+            stage.unit = unit;
             record.dirty = true;
             self.flush_notify.notify_one();
         }
@@ -789,5 +817,48 @@ mod tests {
             }
             other => panic!("expected Upsert replay, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_set_stage_unit_marks_dirty_and_flushes() {
+        assert_eq!(ProgressUnit::default(), ProgressUnit::Count);
+
+        let tm = TaskManager::new();
+        let mut sub = tm.subscribe();
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+
+        let task_id = tm.submit("Asset Download", vec!["Downloading".to_string()], {
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            move |id, mgr| {
+                let started = Arc::clone(&started);
+                let release = Arc::clone(&release);
+                async move {
+                    mgr.set_stage_unit(id, 0, ProgressUnit::Bytes);
+                    // Out-of-bounds stage index should be ignored safely.
+                    mgr.set_stage_unit(id, 99, ProgressUnit::Bytes);
+                    started.notify_one();
+                    release.notified().await;
+                    Ok(())
+                }
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), started.notified())
+            .await
+            .expect("task should start");
+
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == task_id
+                && snap.stages[0].unit == ProgressUnit::Bytes
+            {
+                assert_eq!(snap.stages[0].unit, ProgressUnit::Bytes);
+                break;
+            }
+        }
+
+        release.notify_one();
     }
 }

@@ -7,19 +7,21 @@ use std::{
 };
 
 use acl_core::{
-    CoreError, Instance, LauncherConfig, LauncherDirs, ModLoader, launch, manager::InstanceManager,
-    task::TaskManager,
+    CoreError, Instance, LauncherConfig, LauncherDirs, ModLoader, launch,
+    manager::InstanceManager,
+    task::{ProgressUnit, TaskManager},
 };
 use acl_minecraft::{
-    AssetIndex, DownloadSource, MetaLoader, MetaLoaderEntry, VersionEntry, VersionMetadata,
-    download::DownloadProgress,
+    AssetIndex, AssetItemData, AssetVersion, DownloadSource, MetaLoader, MetaLoaderEntry,
+    VersionEntry, VersionMetadata,
+    download::{DownloadProgress, DownloadTask, download_file_with_progress},
     forge::{self, ForgeManifest, ModernInstallProfile, NeoForgeManifest},
 };
 
 use relm4::{SharedState, tokio};
 use tracing::warn;
 
-use crate::{i18n::LocalizeError, t};
+use crate::{i18n::LocalizeError, pages::installer::asset_config::InstallTarget, t};
 
 pub struct InstallContext {
     pub mgr: Arc<SharedState<InstanceManager>>,
@@ -383,6 +385,68 @@ pub fn spawn_install(
                     .write()
                     .refresh(false)
                     .map_err(|e| e.to_i18n())?;
+                Ok(())
+            }
+        },
+    );
+}
+
+pub fn spawn_asset_download(
+    tasks: &Arc<TaskManager>,
+    item: AssetItemData,
+    version: AssetVersion,
+    target: InstallTarget,
+    client: reqwest::Client,
+    config: Arc<SharedState<LauncherConfig>>,
+) {
+    let Some(file) = version.primary_file.clone() else {
+        return;
+    };
+
+    let dest_dir = match target {
+        InstallTarget::CustomDir(dir) => dir,
+        InstallTarget::Instance(inst) => match inst.asset_dir(item.project_type) {
+            Some(dir) => dir,
+            None => {
+                return;
+            }
+        },
+    };
+
+    let download_task = DownloadTask {
+        name: file.filename.clone(),
+        url: file.url,
+        destination: dest_dir.join(&file.filename),
+        sha1: file.sha1.unwrap_or_default(),
+        size: file.size,
+    };
+
+    let stage_labels = vec![t!("install-stage-downloading-files", "Downloading files")];
+    const STAGE_DOWNLOAD: usize = 0;
+
+    tasks.submit(
+        t!("tasks-download-asset", "Download {name}", name = item.title),
+        stage_labels,
+        move |task_id, task_mgr| {
+            let client = client.clone();
+            let download_task = download_task.clone();
+            let download_source = config.read().download_source;
+
+            async move {
+                task_mgr.set_stage_unit(task_id, STAGE_DOWNLOAD, ProgressUnit::Bytes);
+
+                task_mgr.start_stage(task_id, STAGE_DOWNLOAD);
+
+                download_file_with_progress(
+                    &client,
+                    &download_task,
+                    download_source,
+                    |done, total: u64| {
+                        task_mgr.update_stage(task_id, STAGE_DOWNLOAD, done, total, None);
+                    },
+                )
+                .await
+                .map_err(|e| e.to_i18n())?;
                 Ok(())
             }
         },

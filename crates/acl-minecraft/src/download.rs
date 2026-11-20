@@ -203,6 +203,53 @@ pub async fn download_all(
     Ok(())
 }
 
+pub async fn download_file_with_progress<F>(
+    client: &reqwest::Client,
+    task: &DownloadTask,
+    download_source: DownloadSource,
+    mut on_progress: F,
+) -> Result<()>
+where
+    F: FnMut(u64, u64), // (downloaded_bytes, total_bytes)
+{
+    let url = download_source.rewrite_url(&task.url);
+    let mut response = client.get(&url).send().await?.error_for_status()?;
+
+    let total = response.content_length().unwrap_or(task.size);
+    let mut downloaded: u64 = 0;
+    let mut buf = Vec::with_capacity(usize::try_from(total).unwrap_or(0));
+
+    on_progress(0, total);
+
+    while let Some(chunk) = response.chunk().await? {
+        buf.extend_from_slice(&chunk);
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
+        on_progress(downloaded, total.max(downloaded));
+    }
+
+    if !task.sha1.is_empty() {
+        verify_sha1(&buf, &task.sha1, &task.name)?;
+    }
+
+    if let Some(parent) = task.destination.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| MinecraftError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+
+    tokio::fs::write(&task.destination, &buf)
+        .await
+        .map_err(|source| MinecraftError::Io {
+            path: task.destination.clone(),
+            source,
+        })?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,6 +569,59 @@ mod tests {
         let result = download_and_verify_file(&client, &task, DownloadSource::Official).await;
         assert!(result.is_err());
         assert!(!dest.exists());
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_download_file_with_progress_success_and_sha1_failure() {
+        let temp = TempDirGuard::new("progress_download");
+        let payload = vec![b'a'; 32 * 1024];
+        let sha1 = calculate_sha1(&payload);
+
+        let (server_url, server_handle) = spawn_mock_server(payload.clone()).await;
+        let client = test_client();
+
+        let dest = temp.path().join("nested/dir/mod.jar");
+        let task = DownloadTask {
+            name: "mod.jar".to_string(),
+            url: format!("{server_url}/mod.jar"),
+            destination: dest.clone(),
+            sha1,
+            size: payload.len() as u64,
+        };
+
+        let mut progress_events = Vec::new();
+        let res =
+            download_file_with_progress(&client, &task, DownloadSource::Official, |done, total| {
+                progress_events.push((done, total));
+            })
+            .await;
+        assert!(res.is_ok());
+        assert!(dest.exists());
+        assert_eq!(std::fs::read(&dest).expect("read downloaded mod"), payload);
+        assert_eq!(
+            progress_events.first().copied(),
+            Some((0, payload.len() as u64))
+        );
+        assert_eq!(
+            progress_events.last().copied(),
+            Some((payload.len() as u64, payload.len() as u64))
+        );
+
+        let bad_dest = temp.path().join("bad.jar");
+        let bad_task = DownloadTask {
+            name: "bad.jar".to_string(),
+            url: format!("{server_url}/bad.jar"),
+            destination: bad_dest.clone(),
+            sha1: "0000000000000000000000000000000000000000".to_string(),
+            size: payload.len() as u64,
+        };
+        let bad_res =
+            download_file_with_progress(&client, &bad_task, DownloadSource::Official, |_, _| {})
+                .await;
+        assert!(matches!(bad_res, Err(MinecraftError::HashMismatch { .. })));
+        assert!(!bad_dest.exists());
 
         server_handle.abort();
     }

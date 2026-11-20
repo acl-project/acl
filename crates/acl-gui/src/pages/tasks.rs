@@ -472,6 +472,7 @@ mod tests {
             done,
             total,
             bytes_per_sec: None,
+            unit: acl_core::task::ProgressUnit::Count,
         }
     }
 

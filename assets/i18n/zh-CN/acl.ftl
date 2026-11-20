@@ -185,6 +185,54 @@ install-stage-fetching-asset-index = 获取资源索引...
 install-stage-fetching-metadata = 获取版本元数据...
 # Source: Preparing runtime
 install-stage-preparing-runtime = 准备运行环境...
+# Source: Alpha
+installer-asset-alpha = 内测版
+# Source: Auto-matched
+installer-asset-auto-matched = 自动匹配
+# Source: Beta
+installer-asset-beta = 测试版
+# Source: Choose Destination Folder
+installer-asset-choose-folder = 选择保存文件夹
+# Source: Click to choose a version manually
+installer-asset-choose-manually = 点击手动选择版本
+# Source: Destination Folder
+installer-asset-custom-folder = 保存文件夹
+# Source: Failed to load dependencies
+installer-asset-dep-load-failed = 加载前置依赖失败
+# Source: Loading...
+installer-asset-dep-loading = 加载中...
+# Source: Optional
+installer-asset-dep-optional = 可选
+# Source: Required
+installer-asset-dep-required = 必需
+# Source: Dependencies
+installer-asset-deps-title = 前置依赖
+# Source: Fetching available versions...
+installer-asset-fetching-versions = 正在获取可用版本...
+# Source: Install Mode
+installer-asset-install-mode = 安装方式
+# Source: Loading versions...
+installer-asset-loading-versions = 正在加载版本...
+# Source: Manual
+installer-asset-manual-selected = 手动选择
+# Source: Custom Folder
+installer-asset-mode-custom = 自定义文件夹
+# Source: Install to Instance
+installer-asset-mode-instance = 安装到实例
+# Source: No compatible version found
+installer-asset-no-compatible-version = 未找到兼容版本
+# Source: Not selected
+installer-asset-no-folder = 未选择
+# Source: Release
+installer-asset-release = 正式版
+# Source: Target Instance
+installer-asset-target-instance = 目标实例
+# Source: Install Destination
+installer-asset-target-title = 安装位置
+# Source: Vanilla instance does not support mods
+installer-asset-vanilla-unsupported = 原版实例不支持安装模组
+# Source: Version
+installer-asset-version-title = 版本
 # Source: Installer
 installer-toolbar-title = 安装配置
 # Source: Back
@@ -439,6 +487,8 @@ tasks-action-remove = 移除
 tasks-action-retry = 重试
 # Source: Clear Finished
 tasks-button-clear = 清除已完成
+# Source: Download { $name }
+tasks-download-asset = 下载 { $name }
 # Source: Downloads and instance installations will appear here
 tasks-empty-description = 下载和实例安装任务将显示在这里
 # Source: No Tasks

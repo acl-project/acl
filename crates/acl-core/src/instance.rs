@@ -10,7 +10,7 @@ use std::{
 
 use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
 use acl_minecraft::{
-    AssetIndex, DownloadSource, VersionEntry, VersionMetadata, download::DownloadTask,
+    AssetIndex, DownloadSource, ProjectType, VersionEntry, VersionMetadata, download::DownloadTask,
     version::VersionPatch,
 };
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,15 @@ impl ModLoader {
             ModLoader::Quilt => "Quilt",
             ModLoader::Forge => "Forge",
             ModLoader::NeoForge => "NeoForge",
+        }
+    }
+    pub const fn as_modrinth_loader(self) -> Option<&'static str> {
+        match self {
+            Self::Vanilla => None,
+            Self::Fabric => Some("fabric"),
+            Self::Quilt => Some("quilt"),
+            Self::Forge => Some("forge"),
+            Self::NeoForge => Some("neoforge"),
         }
     }
 }
@@ -505,6 +514,15 @@ impl Instance {
                 Err(_) => true,
             })
             .collect()
+    }
+
+    pub fn asset_dir(&self, project_type: acl_minecraft::ProjectType) -> Option<PathBuf> {
+        match project_type {
+            ProjectType::Mod => Some(self.mods_dir()),
+            ProjectType::ResourcePack => Some(self.resourcepacks_dir()),
+            ProjectType::Shader => Some(self.shaderpacks_dir()),
+            ProjectType::Modpack => None, // Modpack is to create a new instance
+        }
     }
 }
 
@@ -1532,5 +1550,36 @@ mod tests {
             .expect("load_metadata should succeed even if loader.json is missing");
         assert_eq!(loaded.main_class, "net.minecraft.client.main.Main");
         assert_eq!(loaded.libraries.len(), 1);
+    }
+
+    #[test]
+    fn test_mod_loader_as_modrinth_loader_and_instance_asset_dir() {
+        assert_eq!(ModLoader::Vanilla.as_modrinth_loader(), None);
+        assert_eq!(ModLoader::Fabric.as_modrinth_loader(), Some("fabric"));
+        assert_eq!(ModLoader::Quilt.as_modrinth_loader(), Some("quilt"));
+        assert_eq!(ModLoader::Forge.as_modrinth_loader(), Some("forge"));
+        assert_eq!(ModLoader::NeoForge.as_modrinth_loader(), Some("neoforge"));
+
+        let instance = Instance::new(
+            "inst-asset",
+            "Asset Inst",
+            "1.21.1",
+            Path::new("/tmp/versions"),
+        )
+        .expect("should construct instance");
+
+        assert_eq!(
+            instance.asset_dir(ProjectType::Mod),
+            Some(instance.mods_dir())
+        );
+        assert_eq!(
+            instance.asset_dir(ProjectType::ResourcePack),
+            Some(instance.resourcepacks_dir())
+        );
+        assert_eq!(
+            instance.asset_dir(ProjectType::Shader),
+            Some(instance.shaderpacks_dir())
+        );
+        assert_eq!(instance.asset_dir(ProjectType::Modpack), None);
     }
 }
