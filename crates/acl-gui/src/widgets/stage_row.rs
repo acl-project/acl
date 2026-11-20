@@ -196,4 +196,31 @@ mod tests {
         assert!((row_with(StageStatus::Running, 3, 10).fraction() - 0.3).abs() < f64::EPSILON);
         assert_eq!(row_with(StageStatus::Running, 15, 10).fraction(), 1.0);
     }
+
+    #[test]
+    fn test_format_bytes_and_progress_label() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(1_572_864), "1.5 MB");
+
+        assert_eq!(
+            row_with(StageStatus::Running, 3, 10).progress_label(),
+            "3 / 10"
+        );
+
+        let bytes_row = StageRow {
+            stage: StageSnapshot {
+                label: "Downloading".to_string(),
+                status: StageStatus::Running,
+                done: 1024,
+                total: 1024 * 1024,
+                bytes_per_sec: None,
+                unit: ProgressUnit::Bytes,
+            },
+        };
+        assert_eq!(bytes_row.progress_label(), "1.0 KB / 1.0 MB");
+    }
 }

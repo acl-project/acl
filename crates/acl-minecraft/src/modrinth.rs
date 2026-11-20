@@ -982,6 +982,7 @@ mod tests {
             vec!["optimization"],
         ));
         assert_eq!(with_display.host, ProjectHost::Modrinth);
+        assert_eq!(with_display.project_type, ProjectType::Mod);
         assert_eq!(with_display.project_id, "AANobbMI");
         assert_eq!(with_display.title, "Sodium");
         assert_eq!(with_display.author, "jellysquid3");
@@ -1038,5 +1039,162 @@ mod tests {
         };
         let params_without_category = SearchParams::from(&without_category);
         assert!(params_without_category.categories.is_empty());
+    }
+
+    #[test]
+    fn test_asset_version_from_project_version() {
+        let secondary = VersionFile {
+            hashes: FileHashes::default(),
+            url: "https://cdn.modrinth.com/mod-sources.jar".to_string(),
+            filename: "mod-sources.jar".to_string(),
+            primary: false,
+            size: 512,
+        };
+        let main = VersionFile {
+            hashes: FileHashes {
+                sha1: Some("deadbeef".to_string()),
+                sha512: Some("cafebabe".to_string()),
+            },
+            url: "https://cdn.modrinth.com/mod.jar".to_string(),
+            filename: "mod.jar".to_string(),
+            primary: true,
+            size: 2048,
+        };
+
+        let pv = ProjectVersion {
+            id: "ver123".to_string(),
+            project_id: "AANobbMI".to_string(),
+            name: "Sodium 0.5.8".to_string(),
+            version_number: "mc1.20.1-0.5.8".to_string(),
+            changelog: Some("Fix bug".to_string()),
+            dependencies: vec![
+                VersionDependency {
+                    version_id: Some("depVer".to_string()),
+                    project_id: Some("P7dR8mSH".to_string()),
+                    file_name: None,
+                    dependency_type: DependencyType::Required,
+                },
+                VersionDependency {
+                    version_id: None,
+                    project_id: None,
+                    file_name: Some("orphan.jar".to_string()),
+                    dependency_type: DependencyType::Optional,
+                },
+            ],
+            game_versions: vec!["1.20.1".to_string()],
+            version_type: ReleaseType::Beta,
+            loaders: vec!["fabric".to_string()],
+            featured: true,
+            date_published: "2024-05-01T00:00:00Z".to_string(),
+            downloads: 999,
+            files: vec![secondary, main],
+        };
+
+        let av = AssetVersion::from(pv);
+        assert_eq!(av.host, ProjectHost::Modrinth);
+        assert_eq!(av.id, "ver123");
+        assert_eq!(av.project_id, "AANobbMI");
+        assert_eq!(av.name, "Sodium 0.5.8");
+        assert_eq!(av.version_number, "mc1.20.1-0.5.8");
+        assert_eq!(av.release_type, ReleaseType::Beta);
+        assert_eq!(av.game_versions, vec!["1.20.1"]);
+        assert_eq!(av.loaders, vec!["fabric"]);
+        assert_eq!(av.date_published, "2024-05-01T00:00:00Z");
+        assert_eq!(av.downloads, 999);
+        assert_eq!(
+            av.primary_file,
+            Some(AssetFile {
+                url: "https://cdn.modrinth.com/mod.jar".to_string(),
+                filename: "mod.jar".to_string(),
+                size: 2048,
+                sha1: Some("deadbeef".to_string()),
+                sha512: Some("cafebabe".to_string()),
+            })
+        );
+        assert_eq!(
+            av.dependencies,
+            vec![AssetDependency {
+                host: ProjectHost::Modrinth,
+                project_id: "P7dR8mSH".to_string(),
+                version_id: Some("depVer".to_string()),
+                dependency_type: DependencyType::Required,
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_project_detail_batch_url_from_and_fetch_cache() {
+        let ids = vec!["AANobbMI".to_string(), "P7dR8mSH".to_string()];
+        let batch_url = ProjectDetail::batch_url("https://api.modrinth.com/v2/", &ids);
+        assert!(batch_url.starts_with("https://api.modrinth.com/v2/projects?"));
+        let parsed = url::Url::parse(&batch_url).expect("parse batch url");
+        let pairs: std::collections::HashMap<String, String> =
+            parsed.query_pairs().into_owned().collect();
+        assert_eq!(
+            pairs.get("ids").map(String::as_str),
+            Some(r#"["AANobbMI","P7dR8mSH"]"#)
+        );
+
+        let details = vec![ProjectDetail {
+            id: "P7dR8mSH".to_string(),
+            project_type: ProjectType::Mod,
+            slug: "fabric-api".to_string(),
+            title: "Fabric API".to_string(),
+            description: "Core hooks".to_string(),
+            categories: vec!["library".to_string()],
+            icon_url: Some("https://cdn.modrinth.com/data/P7dR8mSH/icon.png".to_string()),
+            downloads: 80_000_000,
+        }];
+
+        let item = AssetItemData::from(details[0].clone());
+        assert_eq!(item.host, ProjectHost::Modrinth);
+        assert_eq!(item.project_type, ProjectType::Mod);
+        assert_eq!(item.project_id, "P7dR8mSH");
+        assert_eq!(item.title, "Fabric API");
+        assert_eq!(item.author, "");
+        assert_eq!(item.description, "Core hooks");
+        assert_eq!(
+            item.icon_url.as_deref(),
+            Some("https://cdn.modrinth.com/data/P7dR8mSH/icon.png")
+        );
+        assert_eq!(item.downloads, 80_000_000);
+        assert_eq!(item.display_categories, vec!["library"]);
+        assert_eq!(item.latest_version, None);
+
+        let temp = TempDirGuard::new("project_detail_cache");
+        let client = reqwest::Client::new();
+
+        // Empty slice returns Ok(vec![]) immediately without hitting network or cache.
+        let empty = ProjectDetail::fetch_batch_with_cache(
+            &client,
+            &[],
+            temp.path(),
+            DownloadSource::Official,
+            false,
+        )
+        .await
+        .expect("empty ids should succeed");
+        assert!(empty.is_empty());
+
+        let upstream_url = ProjectDetail::batch_url(MODRINTH_API_BASE_URL, &ids);
+        let cache_file = temp
+            .path()
+            .join(crate::cache::cache_key_for_url(&upstream_url));
+        let cached =
+            crate::cache::Cached::new(details.clone(), DEFAULT_SEARCH_TTL).expect("create cache");
+        cached
+            .save_to_file(&cache_file)
+            .expect("save project detail cache");
+
+        let loaded = ProjectDetail::fetch_batch_with_cache(
+            &client,
+            &ids,
+            temp.path(),
+            DownloadSource::Official,
+            false,
+        )
+        .await
+        .expect("should load ProjectDetail list from local cache");
+        assert_eq!(loaded, details);
     }
 }

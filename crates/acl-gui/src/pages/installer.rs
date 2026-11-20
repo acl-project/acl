@@ -406,5 +406,7 @@ mod tests {
         assert_eq!(InstallerStep::default(), InstallerStep::Configure);
         assert_eq!(InstallerStep::Configure.as_str(), "configure");
         assert_eq!(InstallerStep::SelectLoader.as_str(), "select_loader");
+        assert_eq!(InstallerStep::AssetConfig.as_str(), "asset_config");
+        assert_eq!(InstallerStep::SelectVersion.as_str(), "select_version");
     }
 }

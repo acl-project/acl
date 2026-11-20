@@ -818,4 +818,47 @@ mod tests {
             other => panic!("expected Upsert replay, got {other:?}"),
         }
     }
+
+    #[tokio::test]
+    async fn test_set_stage_unit_marks_dirty_and_flushes() {
+        assert_eq!(ProgressUnit::default(), ProgressUnit::Count);
+
+        let tm = TaskManager::new();
+        let mut sub = tm.subscribe();
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+
+        let task_id = tm.submit("Asset Download", vec!["Downloading".to_string()], {
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            move |id, mgr| {
+                let started = Arc::clone(&started);
+                let release = Arc::clone(&release);
+                async move {
+                    mgr.set_stage_unit(id, 0, ProgressUnit::Bytes);
+                    // Out-of-bounds stage index should be ignored safely.
+                    mgr.set_stage_unit(id, 99, ProgressUnit::Bytes);
+                    started.notify_one();
+                    release.notified().await;
+                    Ok(())
+                }
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), started.notified())
+            .await
+            .expect("task should start");
+
+        loop {
+            if let TaskEvent::Upsert(snap) = next_event(&mut sub).await
+                && snap.id == task_id
+                && snap.stages[0].unit == ProgressUnit::Bytes
+            {
+                assert_eq!(snap.stages[0].unit, ProgressUnit::Bytes);
+                break;
+            }
+        }
+
+        release.notify_one();
+    }
 }

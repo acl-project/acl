@@ -1551,4 +1551,35 @@ mod tests {
         assert_eq!(loaded.main_class, "net.minecraft.client.main.Main");
         assert_eq!(loaded.libraries.len(), 1);
     }
+
+    #[test]
+    fn test_mod_loader_as_modrinth_loader_and_instance_asset_dir() {
+        assert_eq!(ModLoader::Vanilla.as_modrinth_loader(), None);
+        assert_eq!(ModLoader::Fabric.as_modrinth_loader(), Some("fabric"));
+        assert_eq!(ModLoader::Quilt.as_modrinth_loader(), Some("quilt"));
+        assert_eq!(ModLoader::Forge.as_modrinth_loader(), Some("forge"));
+        assert_eq!(ModLoader::NeoForge.as_modrinth_loader(), Some("neoforge"));
+
+        let instance = Instance::new(
+            "inst-asset",
+            "Asset Inst",
+            "1.21.1",
+            Path::new("/tmp/versions"),
+        )
+        .expect("should construct instance");
+
+        assert_eq!(
+            instance.asset_dir(ProjectType::Mod),
+            Some(instance.mods_dir())
+        );
+        assert_eq!(
+            instance.asset_dir(ProjectType::ResourcePack),
+            Some(instance.resourcepacks_dir())
+        );
+        assert_eq!(
+            instance.asset_dir(ProjectType::Shader),
+            Some(instance.shaderpacks_dir())
+        );
+        assert_eq!(instance.asset_dir(ProjectType::Modpack), None);
+    }
 }

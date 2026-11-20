@@ -572,4 +572,57 @@ mod tests {
 
         server_handle.abort();
     }
+
+    #[tokio::test]
+    async fn test_download_file_with_progress_success_and_sha1_failure() {
+        let temp = TempDirGuard::new("progress_download");
+        let payload = vec![b'a'; 32 * 1024];
+        let sha1 = calculate_sha1(&payload);
+
+        let (server_url, server_handle) = spawn_mock_server(payload.clone()).await;
+        let client = test_client();
+
+        let dest = temp.path().join("nested/dir/mod.jar");
+        let task = DownloadTask {
+            name: "mod.jar".to_string(),
+            url: format!("{server_url}/mod.jar"),
+            destination: dest.clone(),
+            sha1,
+            size: payload.len() as u64,
+        };
+
+        let mut progress_events = Vec::new();
+        let res =
+            download_file_with_progress(&client, &task, DownloadSource::Official, |done, total| {
+                progress_events.push((done, total));
+            })
+            .await;
+        assert!(res.is_ok());
+        assert!(dest.exists());
+        assert_eq!(std::fs::read(&dest).expect("read downloaded mod"), payload);
+        assert_eq!(
+            progress_events.first().copied(),
+            Some((0, payload.len() as u64))
+        );
+        assert_eq!(
+            progress_events.last().copied(),
+            Some((payload.len() as u64, payload.len() as u64))
+        );
+
+        let bad_dest = temp.path().join("bad.jar");
+        let bad_task = DownloadTask {
+            name: "bad.jar".to_string(),
+            url: format!("{server_url}/bad.jar"),
+            destination: bad_dest.clone(),
+            sha1: "0000000000000000000000000000000000000000".to_string(),
+            size: payload.len() as u64,
+        };
+        let bad_res =
+            download_file_with_progress(&client, &bad_task, DownloadSource::Official, |_, _| {})
+                .await;
+        assert!(matches!(bad_res, Err(MinecraftError::HashMismatch { .. })));
+        assert!(!bad_dest.exists());
+
+        server_handle.abort();
+    }
 }
