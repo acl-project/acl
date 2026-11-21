@@ -231,7 +231,7 @@ impl ModpackManifest {
 
             tasks.push(DownloadTask {
                 name: rel_path.clone(),
-                url: url.clone(),
+                url: url.trim().to_string(),
                 destination: game_dir.join(&rel_path),
                 sha1: sha1.clone().unwrap_or_default(),
                 size: *size,

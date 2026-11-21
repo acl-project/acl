@@ -686,7 +686,7 @@ impl NeoForgeManifest {
         .await
     }
 
-    /// Resolve 1.20.1 NeoForge version to the exact Maven
+    /// Resolve 1.20.1 NeoForge version to the exact Maven version
     pub fn resolve_version(&self, game_version: &str, raw_version: &str) -> Option<String> {
         if let Some(exact) = self.versions.iter().find(|v| v.as_str() == raw_version) {
             return Some(exact.clone());

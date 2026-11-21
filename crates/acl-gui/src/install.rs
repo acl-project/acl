@@ -574,7 +574,8 @@ async fn resolve_modpack_metadata(
                 .ok_or_else(|| {
                     t!(
                         "install-error-resolve-forge-version",
-                        "Failed to resolve forge version {raw}"
+                        "Failed to resolve forge version {raw}",
+                        raw = raw
                     )
                 })?;
 
