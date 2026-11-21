@@ -12,8 +12,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use acl_core::{CoreError, Instance, LauncherConfig, ModLoader, manager::InstanceManager};
-use acl_minecraft::{AssetItemData, AssetVersion, ProjectType, VersionEntry};
+use acl_core::{
+    CoreError, Instance, InstanceConfig, LauncherConfig, ModLoader, manager::InstanceManager,
+};
+use acl_minecraft::{AssetItemData, AssetVersion, ModpackManifest, ProjectType, VersionEntry};
 
 use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, SharedState,
@@ -22,6 +24,7 @@ use tracing::{error, info};
 
 use crate::{
     i18n::LocalizeError,
+    install::ModpackInstallSource,
     pages::installer::{
         asset_config::{
             AssetConfigInit, AssetConfigInput, AssetConfigOutput, AssetConfigPage, InstallTarget,
@@ -31,6 +34,7 @@ use crate::{
         loader_select::{
             LoaderSelectInit, LoaderSelectInput, LoaderSelectOutput, LoaderSelectPage,
         },
+        modpack_config::{ModpackInit, ModpackInput, ModpackOutput, ModpackPage, ModpackSource},
         version_select::{
             VersionSelectInit, VersionSelectInput, VersionSelectOutput, VersionSelectPage,
         },
@@ -45,6 +49,7 @@ pub enum InstallerStep {
     SelectLoader,
     AssetConfig,
     SelectVersion,
+    ModpackConfig,
 }
 
 impl InstallerStep {
@@ -54,6 +59,7 @@ impl InstallerStep {
             Self::SelectLoader => "select_loader",
             Self::AssetConfig => "asset_config",
             Self::SelectVersion => "select_version",
+            Self::ModpackConfig => "modpack_config",
         }
     }
 }
@@ -86,14 +92,25 @@ pub enum InstallerInput {
         title: String,
         target_mc_version: Option<String>,
         versions: Vec<AssetVersion>,
+        return_to: InstallerStep,
     },
+    OpenLocalModpack {
+        path: PathBuf,
+        manifest: Box<ModpackManifest>,
+    },
+    VersionSelectBack,
+    VersionSelectFinish(Box<AssetVersion>),
 
-    SetAssetVersion(Box<AssetVersion>),
     OpenDependency(Box<ResolvedDep>),
     InstallAsset {
         item: Box<AssetItemData>,
         version: Box<AssetVersion>,
         target: InstallTarget,
+    },
+
+    InstallModpack {
+        name: String,
+        source: ModpackInstallSource,
     },
 }
 
@@ -107,6 +124,11 @@ pub enum InstallerOutput {
         version: Box<AssetVersion>,
         target: InstallTarget,
     },
+
+    InstallModpack {
+        name: String,
+        source: ModpackInstallSource,
+    },
 }
 
 pub struct InstallerPage {
@@ -117,8 +139,47 @@ pub struct InstallerPage {
     configure: Controller<ConfigurePage>,
     loader_select: Controller<LoaderSelectPage>,
     asset_config: Controller<AssetConfigPage>,
+    modpack_config: Controller<ModpackPage>,
     version_select: Controller<VersionSelectPage>,
+    version_select_return_to: InstallerStep,
     active_install: Arc<Mutex<Option<String>>>,
+}
+
+impl InstallerPage {
+    fn validate_new_instance(&self, name: &str) -> Result<(), String> {
+        // You have poisoning and I am poisoned
+        if self
+            .active_install
+            .lock()
+            .map_or(true, |active| active.is_some())
+        {
+            return Err(t!(
+                "instances-create-error-active-install",
+                "Another installation is already in progress"
+            ));
+        }
+
+        if let Err(err) = InstanceConfig::validate_instance_id(name) {
+            error!("Failed to create instance: {err}");
+            return Err(t!(
+                "instances-create-error-create-instance",
+                "Failed to create instance: {err}",
+                err = err
+            ));
+        }
+
+        let mgr = self.mgr.read();
+        let already_exists =
+            mgr.versions_dir.join(name).exists() || mgr.instances.iter().any(|i| i.id() == name);
+        if already_exists {
+            return Err(CoreError::InstanceAlreadyExists {
+                id: name.to_string(),
+            }
+            .to_i18n());
+        }
+
+        Ok(())
+    }
 }
 
 #[relm4::component(pub)]
@@ -209,8 +270,31 @@ impl Component for InstallerPage {
                     title,
                     target_mc_version,
                     versions,
+                    return_to: InstallerStep::AssetConfig,
                 },
                 AssetConfigOutput::ShowToast(m) => InstallerInput::ShowToast(m),
+            });
+
+        let modpack_config = ModpackPage::builder()
+            .launch(ModpackInit {
+                config: Arc::clone(&init.config),
+                client: init.client.clone(),
+                cache_dir: init.cache_dir.clone(),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                ModpackOutput::Back => InstallerInput::CancelClicked,
+                ModpackOutput::Install { name, source } => {
+                    InstallerInput::InstallModpack { name, source }
+                }
+                ModpackOutput::OpenVersionSelect { title, versions } => {
+                    InstallerInput::OpenVersionSelect {
+                        title,
+                        target_mc_version: None,
+                        versions,
+                        return_to: InstallerStep::ModpackConfig,
+                    }
+                }
+                ModpackOutput::ShowToast(m) => InstallerInput::ShowToast(m),
             });
 
         let version_select = VersionSelectPage::builder()
@@ -218,8 +302,8 @@ impl Component for InstallerPage {
                 config: Arc::clone(&init.config),
             })
             .forward(sender.input_sender(), |msg| match msg {
-                VersionSelectOutput::Back => InstallerInput::BackTo(InstallerStep::AssetConfig),
-                VersionSelectOutput::Selected(ver) => InstallerInput::SetAssetVersion(ver),
+                VersionSelectOutput::Back => InstallerInput::VersionSelectBack,
+                VersionSelectOutput::Selected(ver) => InstallerInput::VersionSelectFinish(ver),
             });
 
         init.config
@@ -233,7 +317,9 @@ impl Component for InstallerPage {
             configure,
             loader_select,
             asset_config,
+            modpack_config,
             version_select,
+            version_select_return_to: InstallerStep::AssetConfig,
             active_install: init.active_install,
         };
 
@@ -255,16 +341,8 @@ impl Component for InstallerPage {
                 loader,
                 loader_version,
             } => {
-                // You have poisoning and I am poisoned
-                if self
-                    .active_install
-                    .lock()
-                    .map_or(true, |active| active.is_some())
-                {
-                    let _ = sender.output(InstallerOutput::ShowToast(t!(
-                        "instances-create-error-active-install",
-                        "Another installation is already in progress"
-                    )));
+                if let Err(msg) = self.validate_new_instance(&name) {
+                    let _ = sender.output(InstallerOutput::ShowToast(msg));
                     return;
                 }
 
@@ -292,14 +370,6 @@ impl Component for InstallerPage {
                             return;
                         }
                     };
-
-                let already_exists = instance.dir.exists()
-                    || self.mgr.read().instances.iter().any(|i| i.id() == name);
-                if already_exists {
-                    let msg = CoreError::InstanceAlreadyExists { id: name }.to_i18n();
-                    let _ = sender.output(InstallerOutput::ShowToast(msg));
-                    return;
-                }
 
                 if loader != ModLoader::Vanilla {
                     instance.config.mod_loader = loader;
@@ -356,10 +426,9 @@ impl Component for InstallerPage {
             }
             InstallerInput::OpenAsset(item) => {
                 if item.project_type == ProjectType::Modpack {
-                    let _ = sender.output(InstallerOutput::ShowToast(
-                        "Modpack installer is coming soon".to_string(),
-                    ));
-                    let _ = sender.output(InstallerOutput::Cancel);
+                    self.modpack_config
+                        .emit(ModpackInput::Open(Box::new(ModpackSource::Online(*item))));
+                    self.step = InstallerStep::ModpackConfig;
                     return;
                 }
 
@@ -381,7 +450,9 @@ impl Component for InstallerPage {
                 title,
                 target_mc_version,
                 versions,
+                return_to,
             } => {
+                self.version_select_return_to = return_to;
                 self.version_select.emit(VersionSelectInput::Load {
                     title,
                     target_mc_version,
@@ -389,10 +460,44 @@ impl Component for InstallerPage {
                 });
                 self.step = InstallerStep::SelectVersion;
             }
-            InstallerInput::SetAssetVersion(ver) => {
-                self.asset_config
-                    .emit(AssetConfigInput::SetManualVersion(ver));
-                self.step = InstallerStep::AssetConfig;
+            InstallerInput::VersionSelectFinish(ver) => match self.version_select_return_to {
+                InstallerStep::ModpackConfig => {
+                    self.modpack_config
+                        .emit(ModpackInput::SetManualVersion(ver));
+                    self.step = InstallerStep::ModpackConfig;
+                }
+                _ => {
+                    self.asset_config
+                        .emit(AssetConfigInput::SetManualVersion(ver));
+                    self.step = InstallerStep::AssetConfig;
+                }
+            },
+            InstallerInput::VersionSelectBack => match self.version_select_return_to {
+                InstallerStep::ModpackConfig => {
+                    self.step = InstallerStep::ModpackConfig;
+                }
+                _ => {
+                    self.step = InstallerStep::AssetConfig;
+                }
+            },
+            InstallerInput::InstallModpack { name, source } => {
+                if let Err(msg) = self.validate_new_instance(&name) {
+                    let _ = sender.output(InstallerOutput::ShowToast(msg));
+                    return;
+                }
+
+                info!("Queued modpack installation for instance '{name}'");
+
+                self.step = InstallerStep::Configure;
+                let _ = sender.output(InstallerOutput::InstallModpack { name, source });
+            }
+            InstallerInput::OpenLocalModpack { path, manifest } => {
+                self.modpack_config
+                    .emit(ModpackInput::Open(Box::new(ModpackSource::Local {
+                        path,
+                        manifest: *manifest,
+                    })));
+                self.step = InstallerStep::ModpackConfig;
             }
         }
     }
