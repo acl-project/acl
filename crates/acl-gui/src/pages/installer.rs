@@ -199,6 +199,7 @@ impl Component for InstallerPage {
             add_named[Some(InstallerStep::SelectLoader.as_str())] = model.loader_select.widget(),
             add_named[Some(InstallerStep::AssetConfig.as_str())] = model.asset_config.widget(),
             add_named[Some(InstallerStep::SelectVersion.as_str())] = model.version_select.widget(),
+            add_named[Some(InstallerStep::ModpackConfig.as_str())] = model.modpack_config.widget(),
 
             #[watch]
             set_visible_child_name: model.step.as_str(),

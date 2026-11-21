@@ -208,6 +208,35 @@ impl SimpleComponent for AppModel {
             set_title: Some("Adwaita Craft Launcher"),
             set_default_width: 860,
             set_default_height: 540,
+
+            add_controller = gtk::DropTarget::new(
+                gtk::glib::Type::INVALID,
+                gtk::gdk::DragAction::COPY,
+            ) {
+                set_types: &[
+                    gtk::gdk::FileList::static_type(),
+                    gtk::gio::File::static_type(),
+                ],
+
+                connect_drop[sender] => move |_, value, _, _| {
+                    let path = if let Ok(file_list) =
+                    value.get::<gtk::gdk::FileList>() {
+                        file_list.files().into_iter().find_map(|f| f.path())
+                    } else if let Ok(file) = value.get::<gtk::gio::File>() {
+                        file.path()
+                    } else {
+                        None
+                    };
+
+                    if let Some(path) = path {
+                        sender.input(AppMsg::ModpackDropped(path));
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+
            #[local_ref]
             toast_overlay -> adw::ToastOverlay {
 
@@ -527,34 +556,6 @@ impl SimpleComponent for AppModel {
         let toast_overlay = &model.toast_overlay;
         let stack = &model.stack;
         let widgets = view_output!();
-
-        let drop_target = gtk::DropTarget::builder()
-            .actions(gtk::gdk::DragAction::COPY)
-            .build();
-        drop_target.set_types(&[
-            gtk::gdk::FileList::static_type(),
-            gtk::gio::File::static_type(),
-        ]);
-        drop_target.connect_drop({
-            let sender = sender.clone();
-            move |_, value, _, _| {
-                let path = if let Ok(file_list) = value.get::<gtk::gdk::FileList>() {
-                    file_list.files().into_iter().find_map(|f| f.path())
-                } else if let Ok(file) = value.get::<gtk::gio::File>() {
-                    file.path()
-                } else {
-                    None
-                };
-
-                if let Some(path) = path {
-                    sender.input(AppMsg::ModpackDropped(path));
-                    true
-                } else {
-                    false
-                }
-            }
-        });
-        root.add_controller(drop_target);
 
         model.stack.connect_visible_child_name_notify({
             let sender = sender.clone();
