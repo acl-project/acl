@@ -4,6 +4,7 @@
 pub mod asset_config;
 pub mod configure;
 pub mod loader_select;
+pub mod modpack_config;
 pub mod version_select;
 
 use std::{

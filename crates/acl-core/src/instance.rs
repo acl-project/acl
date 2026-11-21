@@ -19,6 +19,7 @@ use tracing::{error, info, warn};
 const CONFIG_NAME: &str = "aclcfg.toml";
 const ABNORMAL_MARK: &str = ".abnormal";
 pub const INSTALL_MARK: &str = ".installing";
+pub const FORBIDDEN_CHARS: &[char] = &['/', '\\', '<', '>', ':', '"', '|', '?', '*', '\0'];
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -155,7 +156,6 @@ impl InstanceConfig {
             });
         }
 
-        const FORBIDDEN_CHARS: &[char] = &['/', '\\', '<', '>', ':', '"', '|', '?', '*', '\0'];
         if id
             .chars()
             .any(|c| FORBIDDEN_CHARS.contains(&c) || c.is_control())
@@ -173,6 +173,23 @@ impl InstanceConfig {
                 id: id.to_string(),
                 reason: "Instance ID must be a single normal directory name".to_string(),
             }),
+        }
+    }
+
+    /// Removes characters forbidden in an instance ID and trims surrounding whitespace.
+    /// Returns an empty string if the sanitized result is still not a valid instance ID
+    pub fn sanitize_instance_id(raw: &str) -> String {
+        let cleaned: String = raw
+            .chars()
+            .filter(|c| !FORBIDDEN_CHARS.contains(c) && !c.is_control())
+            .collect();
+
+        let trimmed = cleaned.trim();
+
+        if Self::validate_instance_id(trimmed).is_ok() {
+            trimmed.to_string()
+        } else {
+            String::new()
         }
     }
 }

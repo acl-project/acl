@@ -10,12 +10,14 @@ use std::io::Write;
 use std::path::Component;
 use std::path::Path;
 
+use tracing::warn;
 use zip::ZipArchive;
 use zip::result::ZipError;
 
 use crate::MinecraftError;
 use crate::ProjectHost;
 use crate::Result;
+use crate::download::DownloadTask;
 use crate::mrpack::MRPACK_INDEX_FILE;
 use crate::mrpack::MrpackIndex;
 
@@ -192,6 +194,51 @@ impl ModpackManifest {
         }
 
         Ok(())
+    }
+
+    /// Converts direct modpack file entries into download tasks targeting `game_dir`.
+    /// Entries requiring external API resolution (such as CurseForge) are skipped here.
+    pub fn download_tasks(&self, game_dir: &Path, include_optional: bool) -> Vec<DownloadTask> {
+        let mut tasks = Vec::with_capacity(self.files.len());
+
+        for file in &self.files {
+            if !include_optional && !file.required {
+                continue;
+            }
+
+            let ModpackFileSource::Direct {
+                path,
+                downloads,
+                size,
+                sha1,
+                ..
+            } = &file.source
+            else {
+                continue;
+            };
+
+            let rel_path = match normalize_relative_path(path) {
+                Ok(p) => p,
+                Err(err) => {
+                    warn!("Skipping modpack file with unsafe path '{path}': {err}");
+                    continue;
+                }
+            };
+            let Some(url) = downloads.iter().find(|u| !u.trim().is_empty()) else {
+                warn!("Skipping modpack file '{rel_path}' with no valid download URL");
+                continue;
+            };
+
+            tasks.push(DownloadTask {
+                name: rel_path.clone(),
+                url: url.clone(),
+                destination: game_dir.join(&rel_path),
+                sha1: sha1.clone().unwrap_or_default(),
+                size: *size,
+            });
+        }
+
+        tasks
     }
 }
 
