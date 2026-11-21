@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    collections::BTreeMap,
     fs, io,
     path::PathBuf,
     process::{self, Stdio},
@@ -11,10 +12,18 @@ use acl_auth::{Account, AccountType};
 use acl_minecraft::{VersionMetadata, VersionType};
 use tracing::{debug, info, warn};
 
-use crate::{CoreError, Instance, LauncherConfig, LauncherDirs, Result, java::JavaInstallation};
+use crate::{
+    CoreError, Instance, LauncherConfig, LauncherDirs, Result, gpu::DiscreteGpuEnv,
+    java::JavaInstallation,
+};
 
 const LAUNCHER_NAME: &str = "ACL";
 const LAUNCHER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn is_wayland_session() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var("XDG_SESSION_TYPE").is_ok_and(|s| s.eq_ignore_ascii_case("wayland"))
+}
 
 pub struct GameProcess {
     pub id: Option<u32>,
@@ -45,6 +54,7 @@ pub struct LaunchCommand {
     pub jvm_args: Vec<String>,
     pub main_class: String,
     pub game_args: Vec<String>,
+    pub env_vars: BTreeMap<String, String>,
 }
 
 impl std::fmt::Debug for LaunchCommand {
@@ -70,11 +80,72 @@ impl std::fmt::Debug for LaunchCommand {
             .field("jvm_args", &self.jvm_args)
             .field("main_class", &self.main_class)
             .field("game_args", &sanitized_game_args)
+            .field("env_vars", &self.env_vars.keys().collect::<Vec<_>>())
             .finish()
     }
 }
 
 impl LaunchCommand {
+    fn resolve_env_vars(
+        instance: &Instance,
+        global_config: &LauncherConfig,
+        is_wayland_session: bool,
+        gpu_env: Option<&DiscreteGpuEnv>,
+    ) -> BTreeMap<String, String> {
+        let mut env = BTreeMap::new();
+        let custom = instance.config.custom_settings;
+
+        let force_wayland = if custom {
+            instance
+                .config
+                .force_wayland
+                .unwrap_or(global_config.force_wayland)
+        } else {
+            global_config.force_wayland
+        };
+
+        let use_discrete_gpu = if custom {
+            instance
+                .config
+                .use_discrete_gpu
+                .unwrap_or(global_config.use_discrete_gpu)
+        } else {
+            global_config.use_discrete_gpu
+        };
+
+        // Preset switches (lowest priority, can be overridden by user env vars)
+
+        // Only inject environment variables when "force_wayland" is enabled and running
+        // under an actual Wayland session, preventing crashes on X11.
+        if force_wayland && is_wayland_session {
+            env.insert("SDL_VIDEO_DRIVER".to_string(), "wayland".to_string());
+        }
+        if use_discrete_gpu && let Some(gpu) = gpu_env {
+            gpu.apply_vars(&mut env);
+        }
+
+        // Global custom env vars
+        env.extend(
+            global_config
+                .env_vars
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+
+        // Instance custom env vars (highest priority)
+        if custom {
+            env.extend(
+                instance
+                    .config
+                    .env_vars
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
+        }
+
+        env
+    }
+
     fn build_param_vars(
         instance: &Instance,
         dirs: &LauncherDirs,
@@ -205,12 +276,33 @@ impl LaunchCommand {
         // Command-line arguments for the game.
         let game_args = Self::apply_placeholders(metadata.resolve_game_arguments(), &vars);
 
+        let use_discrete_gpu = if custom {
+            instance
+                .config
+                .use_discrete_gpu
+                .unwrap_or(global_config.use_discrete_gpu)
+        } else {
+            global_config.use_discrete_gpu
+        };
+
+        let env_vars = if use_discrete_gpu {
+            Self::resolve_env_vars(
+                instance,
+                global_config,
+                is_wayland_session(),
+                Some(&DiscreteGpuEnv::detect()),
+            )
+        } else {
+            Self::resolve_env_vars(instance, global_config, is_wayland_session(), None)
+        };
+
         Ok(Self {
             java_path,
             game_dir: instance.game_dir().to_path_buf(),
             jvm_args,
             main_class: metadata.main_class.clone(),
             game_args,
+            env_vars,
         })
     }
 
@@ -230,6 +322,7 @@ impl LaunchCommand {
         // don't print sensitive game arguments
         let child = tokio::process::Command::new(&self.java_path)
             .current_dir(&self.game_dir)
+            .envs(&self.env_vars)
             .args(&self.jvm_args)
             .arg(&self.main_class)
             .args(&self.game_args)
@@ -927,6 +1020,10 @@ mod tests {
                 "--version".to_string(),
                 "1.21.1".to_string(),
             ],
+            env_vars: BTreeMap::from([(
+                "SECRET_ENV_KEY".to_string(),
+                "super_secret_env_value".to_string(),
+            )]),
         };
 
         let debug_str = format!("{cmd:?}");
@@ -935,5 +1032,112 @@ mod tests {
         assert!(debug_str.contains("[REDACTED]"));
         assert!(debug_str.contains("--accessToken=[REDACTED]"));
         assert!(debug_str.contains("Player"));
+        assert!(debug_str.contains("SECRET_ENV_KEY"));
+        assert!(!debug_str.contains("super_secret_env_value"));
+    }
+
+    #[test]
+    fn test_resolve_env_vars_precedence_and_custom_settings() {
+        let mesa_gpu = DiscreteGpuEnv {
+            has_nvidia_driver: false,
+            nvidia_egl_vendor_json: None,
+        };
+        let nvidia_gpu = DiscreteGpuEnv {
+            has_nvidia_driver: true,
+            nvidia_egl_vendor_json: Some(
+                "/usr/share/glvnd/egl_vendor.d/10_nvidia.json".to_string(),
+            ),
+        };
+
+        // 1. Both switches disabled -> empty even under a Wayland session
+        let mut global = LauncherConfig {
+            force_wayland: false,
+            use_discrete_gpu: false,
+            ..Default::default()
+        };
+        let mut instance = mock_instance("env_inst");
+        assert!(LaunchCommand::resolve_env_vars(&instance, &global, true, None).is_empty());
+
+        // 2. Global switches enabled: X11 session skips SDL_VIDEO_DRIVER=wayland, Wayland session injects it
+        global.force_wayland = true;
+        global.use_discrete_gpu = true;
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, false, Some(&mesa_gpu)),
+            BTreeMap::from([("DRI_PRIME".to_string(), "1".to_string())])
+        );
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&mesa_gpu)),
+            BTreeMap::from([
+                ("DRI_PRIME".to_string(), "1".to_string()),
+                ("SDL_VIDEO_DRIVER".to_string(), "wayland".to_string()),
+            ])
+        );
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&nvidia_gpu)),
+            BTreeMap::from([
+                ("SDL_VIDEO_DRIVER".to_string(), "wayland".to_string()),
+                (
+                    "__EGL_VENDOR_LIBRARY_FILENAMES".to_string(),
+                    "/usr/share/glvnd/egl_vendor.d/10_nvidia.json".to_string()
+                ),
+                (
+                    "__GLX_VENDOR_LIBRARY_NAME".to_string(),
+                    "nvidia".to_string()
+                ),
+                ("__NV_PRIME_RENDER_OFFLOAD".to_string(), "1".to_string()),
+                (
+                    "__VK_LAYER_NV_optimus".to_string(),
+                    "NVIDIA_only".to_string()
+                ),
+            ])
+        );
+
+        // 3. custom_settings = false ignores instance toggles and instance env_vars, while global env_vars override presets
+        global.env_vars = BTreeMap::from([
+            ("SDL_VIDEO_DRIVER".to_string(), "x11".to_string()),
+            ("SHARED".to_string(), "from_global".to_string()),
+        ]);
+        instance.config.custom_settings = false;
+        instance.config.force_wayland = Some(false);
+        instance.config.use_discrete_gpu = Some(false);
+        instance.config.env_vars = BTreeMap::from([
+            ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
+            ("SHARED".to_string(), "from_instance".to_string()),
+        ]);
+
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&mesa_gpu)),
+            BTreeMap::from([
+                ("DRI_PRIME".to_string(), "1".to_string()),
+                ("SDL_VIDEO_DRIVER".to_string(), "x11".to_string()),
+                ("SHARED".to_string(), "from_global".to_string()),
+            ])
+        );
+
+        // 4. custom_settings = true with None inherits global toggles and applies preset < global < instance precedence
+        instance.config.custom_settings = true;
+        instance.config.force_wayland = None;
+        instance.config.use_discrete_gpu = None;
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&mesa_gpu)),
+            BTreeMap::from([
+                ("DRI_PRIME".to_string(), "1".to_string()),
+                ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
+                ("SDL_VIDEO_DRIVER".to_string(), "x11".to_string()),
+                ("SHARED".to_string(), "from_instance".to_string()),
+            ])
+        );
+
+        // 5. custom_settings = true with Some(false) disables preset switches even when global is true
+        instance.config.force_wayland = Some(false);
+        instance.config.use_discrete_gpu = Some(false);
+        global.env_vars.remove("SDL_VIDEO_DRIVER");
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&mesa_gpu)),
+            BTreeMap::from([
+                ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
+                ("SHARED".to_string(), "from_instance".to_string()),
+            ])
+        );
     }
 }

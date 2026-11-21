@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use acl_common::Language;
+use acl_common::string::{format_env_vars, parse_env_vars};
 use acl_core::LauncherConfig;
 use acl_minecraft::DownloadSource;
 use libadwaita::prelude::*;
@@ -42,6 +43,9 @@ pub enum SettingsInput {
     SaveConfig, // Trigger a save when the mouse is released or focus is lost.
     SelectDownloadSource(DownloadSource),
     SelectLanguage(usize),
+    SetForceWayland(bool),
+    SetUseDiscreteGpu(bool),
+    SetEnvVars(String),
     Refresh,
 }
 
@@ -203,6 +207,71 @@ impl SimpleComponent for SettingsPage {
 
             adw::PreferencesGroup {
                 #[watch]
+                set_title: &t!("settings-graphics-title", "Graphics & Environment"),
+
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-graphics-force-wayland-title", "Force Wayland"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-graphics-force-wayland-subtitle",
+                        "Force native Wayland (Minecraft 26.3+)"
+                    ),
+                    #[watch]
+                    set_active: model.config.read().force_wayland,
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(SettingsInput::SetForceWayland(row.is_active()));
+                    },
+
+                },
+
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-graphics-discrete-gpu-title", "Use Discrete GPU"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-graphics-discrete-gpu-subtitle",
+                        "Prefer running the game on the dedicated graphics card"
+                    ),
+                    #[watch]
+                    set_active: model.config.read().use_discrete_gpu,
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(SettingsInput::SetUseDiscreteGpu(row.is_active()));
+                    },
+                },
+
+                add = &adw::EntryRow {
+                    add_css_class: "monospace",
+                    #[watch]
+                    set_title: &t!("settings-graphics-env-vars-title", "Environment Variables"),
+                    #[watch]
+                    set_text: &format_env_vars(&model.config.read().env_vars),
+
+                    connect_entry_activated[sender] => move |entry| {
+                        let text = entry.text().trim().to_string();
+                        sender.input(SettingsInput::SetEnvVars(text));
+                    },
+
+                    add_controller = gtk::EventControllerFocus {
+                        connect_leave[sender] => move |controller| {
+                            if let Some(entry) = controller
+                                .widget()
+                                .and_then(|w| w.downcast::<adw::EntryRow>().ok())
+                            {
+                                let text = entry.text().trim().to_string();
+                                sender.input(SettingsInput::SetEnvVars(text));
+                            }
+                        }
+                    },
+
+                },
+
+            },
+
+            adw::PreferencesGroup {
+                #[watch]
                 set_title: &t!("settings-downloads-title","Downloads"),
 
                 add = &adw::ComboRow {
@@ -217,7 +286,6 @@ impl SimpleComponent for SettingsPage {
                         let idx = row.selected();
                         if idx != gtk::INVALID_LIST_POSITION {
                             sender.input(SettingsInput::SelectDownloadSource(DownloadSource::from_index(idx)));
-                            sender.input(SettingsInput::SaveConfig);
                         }
                     }
                 },
@@ -240,7 +308,6 @@ impl SimpleComponent for SettingsPage {
 
                     connect_value_notify[sender] => move |row| {
                         sender.input(SettingsInput::SetMaxConcurrentDownloads(row.value() as usize));
-                        sender.input(SettingsInput::SaveConfig);
                     },
 
                 }
@@ -257,7 +324,6 @@ impl SimpleComponent for SettingsPage {
 
                     connect_active_notify[sender] => move |checkbox| {
                         sender.input(SettingsInput::SetCloseOnLaunch(checkbox.is_active()));
-                        sender.input(SettingsInput::SaveConfig);
                     }
                 },
                 add = &adw::ComboRow {
@@ -273,7 +339,6 @@ impl SimpleComponent for SettingsPage {
                         let idx = row.selected();
                         if idx != gtk::INVALID_LIST_POSITION {
                             sender.input(SettingsInput::SelectLanguage(idx as usize));
-                            sender.input(SettingsInput::SaveConfig);
                         }
                     }
                 }
@@ -318,11 +383,32 @@ impl SimpleComponent for SettingsPage {
     fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>) {
         match message {
             SettingsInput::SetMinMemory(val) => {
-                self.config.write().min_memory_mb = val;
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.min_memory_mb == val {
+                        false
+                    } else {
+                        cfg.min_memory_mb = val;
+                        true
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
+                }
             }
             SettingsInput::SetMaxMemory(val) => {
-                self.config.write().max_memory_mb = val;
-                self.max_memory_dirty = true;
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.max_memory_mb == val {
+                        false
+                    } else {
+                        cfg.max_memory_mb = val;
+                        true
+                    }
+                };
+                if changed {
+                    self.max_memory_dirty = true;
+                }
             }
             SettingsInput::CommitMaxMemory => {
                 if self.max_memory_dirty {
@@ -331,10 +417,32 @@ impl SimpleComponent for SettingsPage {
                 }
             }
             SettingsInput::SetMaxConcurrentDownloads(val) => {
-                self.config.write().max_concurrent_downloads = val;
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.max_concurrent_downloads == val {
+                        false
+                    } else {
+                        cfg.max_concurrent_downloads = val;
+                        true
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
+                }
             }
             SettingsInput::SetCloseOnLaunch(val) => {
-                self.config.write().close_launcher_on_launch = val;
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.close_launcher_on_launch == val {
+                        false
+                    } else {
+                        cfg.close_launcher_on_launch = val;
+                        true
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
+                }
             }
             SettingsInput::SelectDefaultJava(index) => {
                 let mut cfg = self.config.write();
@@ -356,17 +464,83 @@ impl SimpleComponent for SettingsPage {
             SettingsInput::SaveConfig => {
                 self.save_config(&sender);
             }
-            SettingsInput::SelectDownloadSource(source) => {
-                self.config.write().download_source = source;
+            SettingsInput::SelectDownloadSource(val) => {
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.download_source == val {
+                        false
+                    } else {
+                        cfg.download_source = val;
+                        true
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
+                }
             }
             SettingsInput::SelectLanguage(idx) => {
                 let lang = Language::from_index(idx as u32);
-                apply_language(lang);
-                self.config.write().language = lang;
+
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.language == lang {
+                        false
+                    } else {
+                        cfg.language = lang;
+                        true
+                    }
+                };
+                if changed {
+                    apply_language(lang);
+                    self.save_config(&sender);
+                }
             }
             SettingsInput::Refresh => {
                 self.refresh_java_model();
                 self.refresh_language_model();
+            }
+            SettingsInput::SetForceWayland(val) => {
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.force_wayland == val {
+                        false
+                    } else {
+                        cfg.force_wayland = val;
+                        true
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
+                }
+            }
+            SettingsInput::SetUseDiscreteGpu(val) => {
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.use_discrete_gpu == val {
+                        false
+                    } else {
+                        cfg.use_discrete_gpu = val;
+                        true
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
+                }
+            }
+            SettingsInput::SetEnvVars(raw) => {
+                let parsed = parse_env_vars(&raw);
+                let changed = {
+                    let mut cfg = self.config.write();
+                    if cfg.env_vars == parsed {
+                        false
+                    } else {
+                        cfg.env_vars = parsed;
+                        true
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
+                }
             }
         }
     }

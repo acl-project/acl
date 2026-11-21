@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use acl_common::string::{format_jvm_args, parse_jvm_args};
+use acl_common::string::{format_env_vars, format_shell_args, parse_env_vars, parse_shell_args};
 use acl_core::LauncherConfig;
 use acl_core::manager::InstanceManager;
 use gtk::gio::prelude::ListModelExt;
@@ -31,6 +31,9 @@ pub enum InstanceSettingsInput {
     SelectDefaultJava(usize),
     CommitMaxMemory,
     SetExtraJvmArgs(String),
+    SetForceWayland(bool),
+    SetUseDiscreteGpu(bool),
+    SetEnvVars(String),
     Refresh,
 }
 
@@ -202,7 +205,48 @@ impl InstanceSettings {
         self.instances
             .read()
             .instance(current)
-            .map(|ins| format_jvm_args(&ins.config.extra_jvm_args))
+            .map(|ins| format_shell_args(&ins.config.extra_jvm_args))
+            .unwrap_or_default()
+    }
+
+    fn current_force_wayland(&self) -> bool {
+        let global = self.config.read().force_wayland;
+        let Some(current) = self.current.as_deref() else {
+            return global;
+        };
+        if !self.is_custom_enabled() {
+            return global;
+        }
+        self.instances
+            .read()
+            .instance(current)
+            .and_then(|ins| ins.config.force_wayland)
+            .unwrap_or(global)
+    }
+
+    fn current_use_discrete_gpu(&self) -> bool {
+        let global = self.config.read().use_discrete_gpu;
+        let Some(current) = self.current.as_deref() else {
+            return global;
+        };
+        if !self.is_custom_enabled() {
+            return global;
+        }
+        self.instances
+            .read()
+            .instance(current)
+            .and_then(|ins| ins.config.use_discrete_gpu)
+            .unwrap_or(global)
+    }
+
+    fn current_env_vars(&self) -> String {
+        let Some(current) = self.current.as_deref() else {
+            return String::new();
+        };
+        self.instances
+            .read()
+            .instance(current)
+            .map(|ins| format_env_vars(&ins.config.env_vars))
             .unwrap_or_default()
     }
 }
@@ -230,7 +274,6 @@ impl SimpleComponent for InstanceSettings {
                         let name = entry.text().trim().to_string();
                         if !name.is_empty() {
                             sender.input(InstanceSettingsInput::SetName(name));
-                            sender.input(InstanceSettingsInput::SaveConfig);
                         }
                     },
 
@@ -241,7 +284,6 @@ impl SimpleComponent for InstanceSettings {
                                 let name = entry.text().trim().to_string();
                                 if !name.is_empty() {
                                     sender.input(InstanceSettingsInput::SetName(name));
-                                    sender.input(InstanceSettingsInput::SaveConfig);
                                 }
                             }
                         }
@@ -263,7 +305,6 @@ impl SimpleComponent for InstanceSettings {
                     set_active: model.is_custom_enabled(),
                     connect_active_notify[sender] => move |row| {
                         sender.input(InstanceSettingsInput::SetCustomSettings(row.is_active()));
-                        sender.input(InstanceSettingsInput::SaveConfig);
                     },
                 }
 
@@ -367,7 +408,70 @@ impl SimpleComponent for InstanceSettings {
                 },
             },
 
+            adw::PreferencesGroup {
+                #[watch]
+                set_title: &t!("settings-graphics-title", "Graphics & Environment"),
 
+                #[watch]
+                set_sensitive: model.is_custom_enabled(),
+
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-graphics-force-wayland-title", "Force Wayland"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-graphics-force-wayland-subtitle",
+                        "Force native Wayland (Minecraft 26.3+)"
+                    ),
+                    #[watch]
+                    set_active: model.current_force_wayland(),
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(InstanceSettingsInput::SetForceWayland(row.is_active()));
+                    },
+                },
+
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-graphics-discrete-gpu-title", "Use Discrete GPU"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-graphics-discrete-gpu-subtitle",
+                        "Prefer running the game on the dedicated graphics card"
+                    ),
+                    #[watch]
+                    set_active: model.current_use_discrete_gpu(),
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(InstanceSettingsInput::SetUseDiscreteGpu(row.is_active()));
+                    },
+                },
+
+                add = &adw::EntryRow {
+                    add_css_class: "monospace",
+                    #[watch]
+                    set_title: &t!("settings-graphics-env-vars-title", "Environment Variables"),
+                    #[watch]
+                      set_text: &model.current_env_vars(),
+
+                    connect_entry_activated[sender] => move |entry| {
+                          let text = entry.text().trim().to_string();
+                          sender.input(InstanceSettingsInput::SetEnvVars(text));
+                    },
+
+                    add_controller = gtk::EventControllerFocus {
+                        connect_leave[sender] => move |controller| {
+                            if let Some(entry) = controller
+                                .widget()
+                                .and_then(|w| w.downcast::<adw::EntryRow>().ok())
+                            {
+                                let text = entry.text().trim().to_string();
+                                sender.input(InstanceSettingsInput::SetEnvVars(text));
+                            }
+                        }
+                    },
+                },
+            },
         }
     }
 
@@ -439,9 +543,21 @@ impl SimpleComponent for InstanceSettings {
                 let Some(current) = self.current.as_deref() else {
                     return;
                 };
-
-                if let Some(ins) = self.instances.write().instance_mut(current) {
-                    ins.config.name = name;
+                let changed = {
+                    let mut mgr = self.instances.write();
+                    if let Some(ins) = mgr.instance_mut(current) {
+                        if ins.config.name == name {
+                            false
+                        } else {
+                            ins.config.name = name;
+                            true
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
                 }
             }
             InstanceSettingsInput::SaveConfig => {
@@ -451,8 +567,21 @@ impl SimpleComponent for InstanceSettings {
                 let Some(current) = self.current.as_deref() else {
                     return;
                 };
-                if let Some(ins) = self.instances.write().instance_mut(current) {
-                    ins.config.custom_settings = enabled;
+                let changed = {
+                    let mut mgr = self.instances.write();
+                    if let Some(ins) = mgr.instance_mut(current) {
+                        if ins.config.custom_settings == enabled {
+                            false
+                        } else {
+                            ins.config.custom_settings = enabled;
+                            true
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
                 }
             }
             InstanceSettingsInput::Refresh => {
@@ -462,9 +591,58 @@ impl SimpleComponent for InstanceSettings {
                 let Some(current) = self.current.as_deref() else {
                     return;
                 };
-                let args = parse_jvm_args(&raw);
+                let args = parse_shell_args(&raw);
                 if let Some(ins) = self.instances.write().instance_mut(current) {
                     ins.config.extra_jvm_args = args;
+                }
+            }
+            InstanceSettingsInput::SetForceWayland(val) => {
+                if !self.is_custom_enabled() || val == self.current_force_wayland() {
+                    return;
+                }
+                let Some(current) = self.current.as_deref() else {
+                    return;
+                };
+                if let Some(ins) = self.instances.write().instance_mut(current) {
+                    ins.config.force_wayland = Some(val);
+                }
+                self.save_config(&sender);
+            }
+            InstanceSettingsInput::SetUseDiscreteGpu(val) => {
+                if !self.is_custom_enabled() || val == self.current_use_discrete_gpu() {
+                    return;
+                }
+                let Some(current) = self.current.as_deref() else {
+                    return;
+                };
+                if let Some(ins) = self.instances.write().instance_mut(current) {
+                    ins.config.use_discrete_gpu = Some(val);
+                }
+                self.save_config(&sender);
+            }
+            InstanceSettingsInput::SetEnvVars(raw) => {
+                if !self.is_custom_enabled() {
+                    return;
+                }
+                let Some(current) = self.current.as_deref() else {
+                    return;
+                };
+                let parsed = parse_env_vars(&raw);
+                let changed = {
+                    let mut instances = self.instances.write();
+                    if let Some(ins) = instances.instance_mut(current) {
+                        if ins.config.env_vars == parsed {
+                            false
+                        } else {
+                            ins.config.env_vars = parsed;
+                            true
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if changed {
+                    self.save_config(&sender);
                 }
             }
         }
