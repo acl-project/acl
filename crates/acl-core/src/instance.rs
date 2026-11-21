@@ -19,6 +19,7 @@ use tracing::{error, info, warn};
 const CONFIG_NAME: &str = "aclcfg.toml";
 const ABNORMAL_MARK: &str = ".abnormal";
 pub const INSTALL_MARK: &str = ".installing";
+pub const FORBIDDEN_CHARS: &[char] = &['/', '\\', '<', '>', ':', '"', '|', '?', '*', '\0'];
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -155,7 +156,6 @@ impl InstanceConfig {
             });
         }
 
-        const FORBIDDEN_CHARS: &[char] = &['/', '\\', '<', '>', ':', '"', '|', '?', '*', '\0'];
         if id
             .chars()
             .any(|c| FORBIDDEN_CHARS.contains(&c) || c.is_control())
@@ -173,6 +173,23 @@ impl InstanceConfig {
                 id: id.to_string(),
                 reason: "Instance ID must be a single normal directory name".to_string(),
             }),
+        }
+    }
+
+    /// Removes characters forbidden in an instance ID and trims surrounding whitespace.
+    /// Returns an empty string if the sanitized result is still not a valid instance ID
+    pub fn sanitize_instance_id(raw: &str) -> String {
+        let cleaned: String = raw
+            .chars()
+            .filter(|c| !FORBIDDEN_CHARS.contains(c) && !c.is_control())
+            .collect();
+
+        let trimmed = cleaned.trim();
+
+        if Self::validate_instance_id(trimmed).is_ok() {
+            trimmed.to_string()
+        } else {
+            String::new()
         }
     }
 }
@@ -589,6 +606,44 @@ mod tests {
         assert!(InstanceConfig::validate_instance_id("foo|bar").is_err());
         assert!(InstanceConfig::validate_instance_id("foo\0bar").is_err());
         assert!(InstanceConfig::validate_instance_id("foo\nbar").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_instance_id() {
+        // Valid names are preserved
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id("Fabulously Optimized"),
+            "Fabulously Optimized"
+        );
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id("1.20.1-fabric_pack"),
+            "1.20.1-fabric_pack"
+        );
+
+        // Surrounding whitespace is trimmed (including whitespace exposed after removing forbidden chars)
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id("  My Pack  "),
+            "My Pack"
+        );
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id(" / : My Pack * ? "),
+            "My Pack"
+        );
+
+        // Forbidden characters and control characters are stripped
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id("Pack/\\<>:\"|?*\0\n\t\x07v1"),
+            "Packv1"
+        );
+
+        // Inputs that remain invalid after sanitization return an empty string
+        assert_eq!(InstanceConfig::sanitize_instance_id(""), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id("   "), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id("/*?<>|\"\\:\0\n"), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id("."), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id(".."), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id(" .? "), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id("*..*"), "");
     }
 
     #[test]

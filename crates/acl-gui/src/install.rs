@@ -9,11 +9,12 @@ use std::{
 use acl_core::{
     CoreError, Instance, LauncherConfig, LauncherDirs, ModLoader, launch,
     manager::InstanceManager,
-    task::{ProgressUnit, TaskManager},
+    task::{ProgressUnit, TaskId, TaskManager},
 };
 use acl_minecraft::{
-    AssetIndex, AssetItemData, AssetVersion, DownloadSource, MetaLoader, MetaLoaderEntry,
-    VersionEntry, VersionMetadata,
+    AssetFile, AssetIndex, AssetItemData, AssetVersion, DownloadSource, MetaLoader,
+    MetaLoaderEntry, MinecraftError, ModpackLoader, ModpackManifest, VERSION_MANIFEST_URL,
+    VersionEntry, VersionManifest, VersionMetadata,
     download::{DownloadProgress, DownloadTask, download_file_with_progress},
     forge::{self, ForgeManifest, ModernInstallProfile, NeoForgeManifest},
 };
@@ -31,6 +32,22 @@ pub struct InstallContext {
     pub active_install: Arc<Mutex<Option<String>>>,
 }
 
+#[derive(Debug, Clone)]
+struct CoreInstallStages {
+    metadata: usize,
+    asset_index: usize,
+    download: usize,
+    runtime: usize,
+}
+
+struct CoreInstallEnv {
+    client: reqwest::Client,
+    dirs: LauncherDirs,
+    global_config: LauncherConfig,
+    task_id: TaskId,
+    task_mgr: Arc<TaskManager>,
+}
+
 /// The context used during the installation phase
 struct InstallerPostContext {
     installer_path: PathBuf,
@@ -43,6 +60,22 @@ impl Drop for InstallerPostContext {
         // Clean up the temporary files generated
         let _ = std::fs::remove_dir_all(&self.temp_dir);
     }
+}
+
+struct TempDirGuard {
+    path: PathBuf,
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ModpackInstallSource {
+    Online(AssetFile),
+    Local(PathBuf),
 }
 
 /// Install Fabric or Quilt
@@ -215,6 +248,166 @@ impl Drop for InstallGuard {
     }
 }
 
+/// Download a batch of tasks concurrently and forward file-count progress to a task stage.
+async fn download_tasks_with_progress(
+    env: &CoreInstallEnv,
+    tasks: Vec<DownloadTask>,
+    stage_idx: usize,
+) -> Result<(), String> {
+    env.task_mgr.start_stage(env.task_id, stage_idx);
+    // Create a channel to obtain and asynchronously send download progress.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DownloadProgress>();
+
+    let mgr_prog = Arc::clone(&env.task_mgr);
+    let task_id = env.task_id;
+
+    let forward_handle = tokio::spawn(async move {
+        while let Some(prog) = rx.recv().await {
+            let done = prog.completed_files as u64;
+            let total = prog.total_files as u64;
+            mgr_prog.update_stage(task_id, stage_idx, done, total, None);
+        }
+    });
+
+    let result = acl_minecraft::download::download_all(
+        &env.client,
+        tasks,
+        env.global_config.download_source,
+        env.global_config.max_concurrent_downloads,
+        Some(tx),
+    )
+    .await
+    .map_err(|e| e.to_i18n());
+    // Ownership of tx has already been moved; tx will be dropped once the download completes.
+    let _ = forward_handle.await;
+
+    result
+}
+
+/// Run the shared core installation pipeline:
+/// metadata + mod loader -> asset index -> game file downloads -> runtime & processors.
+async fn install_game_core(
+    env: &CoreInstallEnv,
+    instance: &Instance,
+    entry: &VersionEntry,
+    stages: CoreInstallStages,
+) -> Result<(), String> {
+    let download_source = env.global_config.download_source;
+
+    // Fetch metadata
+    env.task_mgr.start_stage(env.task_id, stages.metadata);
+
+    let mut metadata = instance
+        .fetch_metadata(&env.client, entry, &env.dirs, download_source)
+        .await
+        .map_err(|e| e.to_i18n())?;
+
+    let mut installer_context = None;
+
+    // Handle mod loader
+    match instance.config.mod_loader {
+        ModLoader::Vanilla => {}
+        ModLoader::Fabric | ModLoader::Quilt => {
+            install_fabric(
+                &env.client,
+                instance,
+                download_source,
+                &mut metadata,
+                entry,
+                instance.id(),
+            )
+            .await?
+        }
+        ModLoader::Forge | ModLoader::NeoForge => {
+            install_forge(
+                &env.client,
+                instance,
+                &env.dirs,
+                download_source,
+                &mut metadata,
+                instance.id(),
+                &mut installer_context,
+            )
+            .await?
+        }
+    }
+
+    // Fetch asset index
+    env.task_mgr.start_stage(env.task_id, stages.asset_index);
+
+    let asset_index = AssetIndex::fetch_and_verify(
+        &env.client,
+        &metadata.asset_index,
+        &env.dirs.assets_dir(),
+        download_source,
+    )
+    .await
+    .map_err(|e| e.to_i18n())?;
+
+    // Collect download tasks
+    let tasks = instance.download_tasks(&metadata, &asset_index, &env.dirs);
+    download_tasks_with_progress(env, tasks, stages.download).await?;
+
+    env.task_mgr.start_stage(env.task_id, stages.runtime);
+
+    let inst_c = instance.clone();
+    let dirs_c = env.dirs.clone();
+
+    let metadata_c = metadata.clone();
+
+    // Prepare runtime
+
+    // Don't put it in spawn_blocking, otherwise InstallGuard::drop and prepare_runtime will race.
+    inst_c
+        .prepare_runtime(&metadata_c, &asset_index, &dirs_c)
+        .map_err(|e| e.to_i18n())?;
+
+    // handle.abort() will only take effect in the next .await
+    // If click Cancel in Prepare runtime, without this line,
+    // the configuration file will be written directly.
+    tokio::task::yield_now().await;
+
+    // Run the forge processors (1.13+)
+    if let Some(ctx) = installer_context
+        && let Some(modern) = &ctx.modern
+    {
+        let java = launch::select_java(instance, &env.global_config, &metadata)
+            .map_err(|e| e.to_i18n())?;
+
+        modern
+            .run_processors(
+                &java.path,
+                &ctx.installer_path,
+                &instance.client_jar(),
+                &env.dirs.libraries_dir(),
+                &ctx.temp_dir,
+            )
+            .await
+            .map_err(|e| e.to_i18n())?;
+    }
+
+    Ok(())
+}
+
+/// Persist config, clear the install mark, release the guard, and refresh the instance list.
+fn finalize_install(
+    mut guard: InstallGuard,
+    instance: &Instance,
+    instance_mgr: &Arc<SharedState<InstanceManager>>,
+) -> Result<(), String> {
+    // Successfully installed, write aclcfg.toml and refresh the list
+    instance.save_config().map_err(|e| e.to_i18n())?;
+    instance.clear_installing().map_err(|e| e.to_i18n())?;
+    guard.completed = true;
+    // Release immediately installing = false (completed, directory will not be deleted)
+    drop(guard);
+    instance_mgr
+        .write()
+        .refresh(false)
+        .map_err(|e| e.to_i18n())?;
+    Ok(())
+}
+
 pub fn spawn_install(
     tasks: &Arc<TaskManager>,
     instance: Instance,
@@ -227,10 +420,12 @@ pub fn spawn_install(
         t!("install-stage-downloading-files", "Downloading files"),
         t!("install-stage-preparing-runtime", "Preparing runtime"),
     ];
-    const STAGE_METADATA: usize = 0;
-    const STAGE_ASSET_INDEX: usize = 1;
-    const STAGE_DOWNLOAD: usize = 2;
-    const STAGE_RUNTIME: usize = 3;
+    const STAGES: CoreInstallStages = CoreInstallStages {
+        metadata: 0,
+        asset_index: 1,
+        download: 2,
+        runtime: 3,
+    };
 
     tasks.submit(
         t!(
@@ -242,150 +437,275 @@ pub fn spawn_install(
         move |task_id, task_mgr| {
             let instance = instance.clone();
             let entry = entry.clone();
-
-            let client = ctx.client.clone();
-            let dirs = ctx.dirs.clone();
-            // Each retry task uses the latest configuration file
-            // If the player switches the download source, it can also ensure that the latest download source is used.
-            let global_config = ctx.config.read().clone();
             let instance_mgr = Arc::clone(&ctx.mgr);
             let active_install = Arc::clone(&ctx.active_install);
-            let max_concurrent = global_config.max_concurrent_downloads;
-            let download_source = global_config.download_source;
+            // Each retry task uses the latest configuration file
+            // If the player switches the download source, it can also ensure that the latest download source is used.
+            let env = CoreInstallEnv {
+                client: ctx.client.clone(),
+                dirs: ctx.dirs.clone(),
+                global_config: ctx.config.read().clone(),
+                task_id,
+                task_mgr,
+            };
 
             async move {
-                let mut guard = InstallGuard::acquire(&active_install, &instance)?;
+                let guard = InstallGuard::acquire(&active_install, &instance)?;
+                install_game_core(&env, &instance, &entry, STAGES).await?;
+                finalize_install(guard, &instance, &instance_mgr)
+            }
+        },
+    );
+}
 
-                // Fetch metadata
-                task_mgr.start_stage(task_id, STAGE_METADATA);
+async fn prepare_modpack_source(
+    env: &CoreInstallEnv,
+    source: &ModpackInstallSource,
+    instance_id: &str,
+) -> Result<(PathBuf, ModpackManifest, Option<TempDirGuard>), String> {
+    match source {
+        ModpackInstallSource::Local(path) => {
+            let manifest = ModpackManifest::parse_from_zip(path).map_err(|e| e.to_i18n())?;
+            Ok((path.clone(), manifest, None))
+        }
+        ModpackInstallSource::Online(file) => {
+            const STAGE_DOWNLOAD_MODPACK: usize = 0;
 
-                let mut metadata = instance
-                    .fetch_metadata(&client, &entry, &dirs, download_source)
-                    .await
+            env.task_mgr
+                .set_stage_unit(env.task_id, STAGE_DOWNLOAD_MODPACK, ProgressUnit::Bytes);
+            env.task_mgr
+                .start_stage(env.task_id, STAGE_DOWNLOAD_MODPACK);
+
+            let temp_dir = std::env::temp_dir().join(format!("acl-modpack-{instance_id}"));
+            tokio::fs::create_dir_all(&temp_dir)
+                .await
+                .map_err(|source| {
+                    acl_minecraft::MinecraftError::Io {
+                        path: temp_dir.clone(),
+                        source,
+                    }
+                    .to_i18n()
+                })?;
+
+            // Wrap immediately so any subsequent download/parse failure or cancellation cleans up temp_dir.
+            let guard = TempDirGuard {
+                path: temp_dir.clone(),
+            };
+
+            let archive_path = temp_dir.join("pack.mrpack");
+            let task = DownloadTask {
+                name: file.filename.clone(),
+                url: file.url.clone(),
+                destination: archive_path.clone(),
+                sha1: file.sha1.clone().unwrap_or_default(),
+                size: file.size,
+            };
+
+            download_file_with_progress(
+                &env.client,
+                &task,
+                env.global_config.download_source,
+                |done, total| {
+                    env.task_mgr.update_stage(
+                        env.task_id,
+                        STAGE_DOWNLOAD_MODPACK,
+                        done,
+                        total,
+                        None,
+                    );
+                },
+            )
+            .await
+            .map_err(|e| e.to_i18n())?;
+
+            let manifest =
+                ModpackManifest::parse_from_zip(&archive_path).map_err(|e| e.to_i18n())?;
+
+            Ok((archive_path, manifest, Some(guard)))
+        }
+    }
+}
+
+async fn resolve_modpack_metadata(
+    env: &CoreInstallEnv,
+    manifest: &ModpackManifest,
+    instance: &mut Instance,
+    metadata_stage: usize,
+) -> Result<VersionEntry, String> {
+    env.task_mgr.start_stage(env.task_id, metadata_stage);
+    let download_source = env.global_config.download_source;
+    let version_manifest = VersionManifest::fetch_with_cache(
+        &env.client,
+        VERSION_MANIFEST_URL,
+        env.dirs.cache_dir(),
+        download_source,
+        false,
+    )
+    .await
+    .map_err(|e| e.to_i18n())?;
+
+    let entry = version_manifest
+        .find_version(&manifest.game_version)
+        .ok_or(
+            MinecraftError::VersionNotFound {
+                version_id: manifest.game_version.clone(),
+            }
+            .to_i18n(),
+        )?;
+
+    instance.config.game_version = manifest.game_version.clone();
+
+    let (loader, loader_ver) = match &manifest.loader {
+        None => (ModLoader::Vanilla, None),
+        Some(ModpackLoader::Fabric(v)) => (ModLoader::Fabric, Some(v.clone())),
+        Some(ModpackLoader::Quilt(v)) => (ModLoader::Quilt, Some(v.clone())),
+        Some(ModpackLoader::Forge(raw)) => {
+            let forge_manifest = ForgeManifest::fetch_with_cache(
+                &env.client,
+                env.dirs.cache_dir(),
+                download_source,
+                false,
+            )
+            .await
+            .map_err(|e| e.to_i18n())?;
+
+            let v = forge_manifest
+                .resolve_version(&manifest.game_version, raw)
+                .ok_or_else(|| {
+                    t!(
+                        "install-error-resolve-forge-version",
+                        "Failed to resolve forge version {raw}",
+                        raw = raw
+                    )
+                })?;
+
+            (ModLoader::Forge, Some(v))
+        }
+        Some(ModpackLoader::NeoForge(raw)) => {
+            let neoforge_manifest = NeoForgeManifest::fetch_with_cache(
+                &env.client,
+                &manifest.game_version,
+                env.dirs.cache_dir(),
+                download_source,
+                false,
+            )
+            .await
+            .map_err(|e| e.to_i18n())?;
+
+            let v = neoforge_manifest
+                .resolve_version(&manifest.game_version, raw)
+                .ok_or_else(|| {
+                    t!(
+                        "install-error-resolve-neoforge-version",
+                        "Failed to resolve neoforge version {raw}",
+                        raw = raw,
+                    )
+                })?;
+
+            (ModLoader::NeoForge, Some(v))
+        }
+    };
+
+    instance.config.mod_loader = loader;
+    instance.config.mod_loader_version = loader_ver;
+
+    Ok(entry.clone())
+}
+
+pub fn spawn_modpack_install(
+    tasks: &Arc<TaskManager>,
+    instance_name: String,
+    source: ModpackInstallSource,
+    ctx: InstallContext,
+) {
+    let mut stage_labels = Vec::with_capacity(7);
+    let (core_stages, stage_modpack_files, stage_overrides) = {
+        let mut add_stage = |label: String| -> usize {
+            let idx = stage_labels.len();
+            stage_labels.push(label);
+            idx
+        };
+
+        if matches!(source, ModpackInstallSource::Online(_)) {
+            add_stage(t!(
+                "install-stage-downloading-modpack",
+                "Downloading modpack"
+            ));
+        }
+
+        let metadata = add_stage(t!("install-stage-fetching-metadata", "Fetching metadata"));
+        let asset_index = add_stage(t!(
+            "install-stage-fetching-asset-index",
+            "Fetching asset index"
+        ));
+        let download = add_stage(t!("install-stage-downloading-files", "Downloading files"));
+        let runtime = add_stage(t!("install-stage-preparing-runtime", "Preparing runtime"));
+        let core_stages = CoreInstallStages {
+            metadata,
+            asset_index,
+            download,
+            runtime,
+        };
+        let stage_modpack_files = add_stage(t!(
+            "install-stage-downloading-modpack-files",
+            "Downloading modpack files"
+        ));
+        let stage_overrides =
+            add_stage(t!("install-stage-applying-overrides", "Applying overrides"));
+
+        (core_stages, stage_modpack_files, stage_overrides)
+    };
+
+    tasks.submit(
+        t!(
+            "tasks-install-instance",
+            "Install {version}",
+            version = instance_name
+        ),
+        stage_labels,
+        move |task_id, task_mgr| {
+            let core_stages = core_stages.clone();
+            let instance_name = instance_name.clone();
+            let source = source.clone();
+            let instance_mgr = Arc::clone(&ctx.mgr);
+            let active_install = Arc::clone(&ctx.active_install);
+            let env = CoreInstallEnv {
+                client: ctx.client.clone(),
+                dirs: ctx.dirs.clone(),
+                global_config: ctx.config.read().clone(),
+                task_id,
+                task_mgr,
+            };
+
+            async move {
+                let mut instance =
+                    Instance::new(&instance_name, &instance_name, "", &env.dirs.versions_dir())
+                        .map_err(|e| e.to_i18n())?;
+
+                let guard = InstallGuard::acquire(&active_install, &instance)?;
+
+                let (mrpack_path, manifest, _temp_guard) =
+                    prepare_modpack_source(&env, &source, instance.id()).await?;
+
+                let entry =
+                    resolve_modpack_metadata(&env, &manifest, &mut instance, core_stages.metadata)
+                        .await?;
+
+                install_game_core(&env, &instance, &entry, core_stages).await?;
+
+                let modpack_tasks = manifest.download_tasks(instance.game_dir(), true);
+                download_tasks_with_progress(&env, modpack_tasks, stage_modpack_files).await?;
+
+                // Apply overrides last so pack customizations take precedence over downloaded files.
+                env.task_mgr.start_stage(env.task_id, stage_overrides);
+                manifest
+                    .extract_overrides(&mrpack_path, instance.game_dir())
                     .map_err(|e| e.to_i18n())?;
 
-                let mut installer_context = None;
-
-                // Handle mod loader
-                match instance.config.mod_loader {
-                    ModLoader::Vanilla => {}
-                    ModLoader::Fabric | ModLoader::Quilt => {
-                        install_fabric(
-                            &client,
-                            &instance,
-                            download_source,
-                            &mut metadata,
-                            &entry,
-                            instance.id(),
-                        )
-                        .await?
-                    }
-                    ModLoader::Forge | ModLoader::NeoForge => {
-                        install_forge(
-                            &client,
-                            &instance,
-                            &dirs,
-                            download_source,
-                            &mut metadata,
-                            instance.id(),
-                            &mut installer_context,
-                        )
-                        .await?
-                    }
-                }
-
-                // Fetch asset index
-
-                task_mgr.start_stage(task_id, STAGE_ASSET_INDEX);
-
-                let asset_index = AssetIndex::fetch_and_verify(
-                    &client,
-                    &metadata.asset_index,
-                    &dirs.assets_dir(),
-                    download_source,
-                )
-                .await
-                .map_err(|e| e.to_i18n())?;
-
-                // Collect download tasks
-                let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
-
-                task_mgr.start_stage(task_id, STAGE_DOWNLOAD);
-
-                // Create a channel to obtain and asynchronously send download progress.
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DownloadProgress>();
-
-                let mgr_prog = Arc::clone(&task_mgr);
-
-                let forward_handle = tokio::spawn(async move {
-                    while let Some(prog) = rx.recv().await {
-                        let done = prog.completed_files as u64;
-                        let total = prog.total_files as u64;
-                        mgr_prog.update_stage(task_id, STAGE_DOWNLOAD, done, total, None);
-                    }
-                });
-
-                acl_minecraft::download::download_all(
-                    &client,
-                    tasks,
-                    download_source,
-                    max_concurrent,
-                    Some(tx),
-                )
-                .await
-                .map_err(|e| e.to_i18n())?;
-                // Ownership of tx has already been moved; tx will be dropped once the download completes.
-                let _ = forward_handle.await;
-
-                task_mgr.start_stage(task_id, STAGE_RUNTIME);
-
-                let inst_c = instance.clone();
-                let dirs_c = dirs.clone();
-
-                let metadata_c = metadata.clone();
-
-                // Prepare runtime
-
-                // Don't put it in spawn_blocking, otherwise InstallGuard::drop and prepare_runtime will race.
-                inst_c
-                    .prepare_runtime(&metadata_c, &asset_index, &dirs_c)
-                    .map_err(|e| e.to_i18n())?;
-
-                // handle.abort() will only take effect in the next .await
-                // If click Cancel in Prepare runtime, without this line,
-                // the configuration file will be written directly.
+                // Ensure cancellation takes effect before persisting config and marking complete.
                 tokio::task::yield_now().await;
 
-                // Run the forge processors (1.13+)
-                if let Some(ctx) = installer_context
-                    && let Some(modern) = &ctx.modern
-                {
-                    let java = launch::select_java(&instance, &global_config, &metadata)
-                        .map_err(|e| e.to_i18n())?;
-
-                    modern
-                        .run_processors(
-                            &java.path,
-                            &ctx.installer_path,
-                            &instance.client_jar(),
-                            &dirs.libraries_dir(),
-                            &ctx.temp_dir,
-                        )
-                        .await
-                        .map_err(|e| e.to_i18n())?;
-                }
-
-                // Successfully installed, write aclcfg.toml and refresh the list
-                instance.save_config().map_err(|e| e.to_i18n())?;
-                instance.clear_installing().map_err(|e| e.to_i18n())?;
-                guard.completed = true;
-                // Release immediately installing = false (completed, directory will not be deleted)
-                drop(guard);
-                instance_mgr
-                    .write()
-                    .refresh(false)
-                    .map_err(|e| e.to_i18n())?;
-                Ok(())
+                finalize_install(guard, &instance, &instance_mgr)
             }
         },
     );

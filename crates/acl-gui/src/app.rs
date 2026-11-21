@@ -2,14 +2,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use crate::{
-    i18n::apply_language,
-    install::{InstallContext, spawn_asset_download, spawn_install},
+    i18n::{LocalizeError, apply_language},
+    install::{
+        InstallContext, ModpackInstallSource, spawn_asset_download, spawn_install,
+        spawn_modpack_install,
+    },
     pages::{
         accounts::{AccountsInit, AccountsOutput, AccountsPage},
         download::{DownloadInit, DownloadOutput, DownloadPage},
@@ -28,9 +32,9 @@ use crate::{
     t,
     widgets::ms_login::{MsLoginDialog, MsLoginInit, MsLoginInput, MsLoginOutput},
 };
-use acl_minecraft::{AssetItemData, AssetVersion, VersionEntry};
+use acl_minecraft::{AssetItemData, AssetVersion, ModpackManifest, VersionEntry};
 use adw::prelude::*;
-use gtk::prelude::GtkWindowExt;
+use gtk::prelude::*;
 use libadwaita::NavigationPage;
 use relm4::{SharedState, prelude::*};
 
@@ -144,6 +148,18 @@ pub struct AppModel {
     active_install: Arc<Mutex<Option<String>>>,
 }
 
+impl AppModel {
+    fn install_context(&self) -> InstallContext {
+        InstallContext {
+            mgr: Arc::clone(&self.instances),
+            client: self.client.clone(),
+            dirs: self.dirs.clone(),
+            config: Arc::clone(&self.config),
+            active_install: Arc::clone(&self.active_install),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum AppMsg {
     Navigate(NavPage),
@@ -165,6 +181,15 @@ pub enum AppMsg {
         version: Box<AssetVersion>,
         target: InstallTarget,
     },
+    InstallModpack {
+        name: String,
+        source: ModpackInstallSource,
+    },
+    ModpackDropped(PathBuf),
+    LocalModpackParsed {
+        path: PathBuf,
+        result: Result<Box<ModpackManifest>, String>,
+    },
     Refresh,
     Quit,
 }
@@ -183,6 +208,35 @@ impl SimpleComponent for AppModel {
             set_title: Some("Adwaita Craft Launcher"),
             set_default_width: 860,
             set_default_height: 540,
+
+            add_controller = gtk::DropTarget::new(
+                gtk::glib::Type::INVALID,
+                gtk::gdk::DragAction::COPY,
+            ) {
+                set_types: &[
+                    gtk::gdk::FileList::static_type(),
+                    gtk::gio::File::static_type(),
+                ],
+
+                connect_drop[sender] => move |_, value, _, _| {
+                    let path = if let Ok(file_list) =
+                    value.get::<gtk::gdk::FileList>() {
+                        file_list.files().into_iter().find_map(|f| f.path())
+                    } else if let Ok(file) = value.get::<gtk::gio::File>() {
+                        file.path()
+                    } else {
+                        None
+                    };
+
+                    if let Some(path) = path {
+                        sender.input(AppMsg::ModpackDropped(path));
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+
            #[local_ref]
             toast_overlay -> adw::ToastOverlay {
 
@@ -467,6 +521,9 @@ impl SimpleComponent for AppModel {
                     version,
                     target,
                 },
+                InstallerOutput::InstallModpack { name, source } => {
+                    AppMsg::InstallModpack { name, source }
+                }
             });
 
         config_state.subscribe(sender.input_sender(), |_| AppMsg::Refresh);
@@ -516,7 +573,7 @@ impl SimpleComponent for AppModel {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
         match msg {
             AppMsg::Navigate(page) => {
                 self.current_page = page;
@@ -562,18 +619,7 @@ impl SimpleComponent for AppModel {
             AppMsg::CloseDownload => self.current_view = AppView::Main,
             AppMsg::CloseInstaller => self.current_view = self.installer_return_to,
             AppMsg::InstanceCreated(instance, entry) => {
-                spawn_install(
-                    &self.tasks,
-                    *instance,
-                    entry,
-                    InstallContext {
-                        mgr: Arc::clone(&self.instances),
-                        client: self.client.clone(),
-                        dirs: self.dirs.clone(),
-                        config: Arc::clone(&self.config),
-                        active_install: Arc::clone(&self.active_install),
-                    },
-                );
+                spawn_install(&self.tasks, *instance, entry, self.install_context());
                 self.current_page = NavPage::Tasks;
                 self.current_view = AppView::Main;
             }
@@ -603,6 +649,49 @@ impl SimpleComponent for AppModel {
                 self.current_page = NavPage::Tasks;
                 self.current_view = AppView::Main;
             }
+            AppMsg::InstallModpack { name, source } => {
+                spawn_modpack_install(&self.tasks, name, source, self.install_context());
+                self.current_page = NavPage::Tasks;
+                self.current_view = AppView::Main;
+            }
+            AppMsg::ModpackDropped(path) => {
+                let is_mrpack = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("mrpack"));
+
+                if !is_mrpack {
+                    sender.input(AppMsg::ShowToast(t!(
+                        "app-drop-unsupported-modpack",
+                        "Unsupported file format. Please drop a .mrpack file."
+                    )));
+                    return;
+                }
+
+                let sender = sender.clone();
+                relm4::tokio::task::spawn_blocking(move || {
+                    let result = ModpackManifest::parse_from_zip(&path)
+                        .map(Box::new)
+                        .map_err(|e| e.to_i18n());
+                    sender.input(AppMsg::LocalModpackParsed { path, result });
+                });
+            }
+            AppMsg::LocalModpackParsed { path, result } => match result {
+                Ok(manifest) => {
+                    // Avoid overwriting the return target if the user drops another pack while already on Installer.
+                    if self.current_view != AppView::Installer {
+                        self.installer_return_to = self.current_view;
+                    }
+
+                    self.installer_page
+                        .emit(InstallerInput::OpenLocalModpack { path, manifest });
+
+                    self.current_view = AppView::Installer;
+                }
+                Err(err) => {
+                    sender.input(AppMsg::ShowToast(err));
+                }
+            },
         }
     }
 }

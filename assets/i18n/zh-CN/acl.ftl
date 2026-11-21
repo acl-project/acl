@@ -49,6 +49,8 @@ add-offline-dialog-body = 请输入 Minecraft 用户名（3 到 16 个字符，�
 add-offline-dialog-cancel = 取消
 # Source: Add Offline Account
 add-offline-dialog-heading = 添加离线账户
+# Source: Unsupported file format. Please drop a .mrpack file.
+app-drop-unsupported-modpack = 不支持的文件格式，请拖入 .mrpack 文件
 # Source: Failed to load accounts, using defaults: { $err }
 app-init-error-load-accounts = 加载账户失败，使用默认配置：{ $err }
 # Source: Failed to load config, using defaults: { $err }
@@ -177,8 +179,18 @@ home-page-no-instance = 未选择实例
 home-page-tooltip-instance-settings = 实例设置
 # Source: Another installation is already in progress
 install-error-already-in-progress = 已有另一个安装任务正在进行中
+# Source: Failed to resolve forge version { $raw }
+install-error-resolve-forge-version = 解析 Forge 版本 { $raw } 失败
+# Source: Failed to resolve neoforge version { $raw }
+install-error-resolve-neoforge-version = 解析 NeoForge 版本 { $raw } 失败
+# Source: Applying overrides
+install-stage-applying-overrides = 应用覆盖文件...
 # Source: Downloading files
 install-stage-downloading-files = 下载文件...
+# Source: Downloading modpack
+install-stage-downloading-modpack = 下载整合包...
+# Source: Downloading modpack files
+install-stage-downloading-modpack-files = 下载整合包文件...
 # Source: Fetching asset index
 install-stage-fetching-asset-index = 获取资源索引...
 # Source: Fetching metadata
@@ -233,6 +245,12 @@ installer-asset-target-title = 安装位置
 installer-asset-vanilla-unsupported = 原版实例不支持安装模组
 # Source: Version
 installer-asset-version-title = 版本
+# Source: Modpack Files
+installer-modpack-files-label = 整合包文件
+# Source: Modpack Information
+installer-modpack-info-title = 整合包信息
+# Source: Pack Version
+installer-modpack-version-label = 整合包版本
 # Source: Installer
 installer-toolbar-title = 安装配置
 # Source: Back

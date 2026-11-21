@@ -685,6 +685,20 @@ impl NeoForgeManifest {
         )
         .await
     }
+
+    /// Resolve 1.20.1 NeoForge version to the exact Maven version
+    pub fn resolve_version(&self, game_version: &str, raw_version: &str) -> Option<String> {
+        if let Some(exact) = self.versions.iter().find(|v| v.as_str() == raw_version) {
+            return Some(exact.clone());
+        }
+
+        if game_version == "1.20.1" && !raw_version.starts_with("1.20.1-") {
+            let ver = format!("1.20.1-{raw_version}");
+            self.versions.iter().find(|v| v.as_str() == ver).cloned()
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1492,5 +1506,53 @@ mod tests {
         // Unknown game version or unknown Forge version returns None
         assert_eq!(manifest.resolve_version("1.19.2", "43.3.0"), None);
         assert_eq!(manifest.resolve_version("1.20.1", "47.99.0"), None);
+    }
+
+    #[test]
+    fn test_neoforge_manifest_resolve_version() {
+        let manifest_modern = NeoForgeManifest {
+            versions: vec![
+                "20.4.195".to_string(),
+                "21.1.72".to_string(),
+                "26.1.0.1-beta".to_string(),
+            ],
+        };
+
+        // Exact version match for modern NeoForge versions
+        assert_eq!(
+            manifest_modern.resolve_version("1.20.4", "20.4.195"),
+            Some("20.4.195".to_string())
+        );
+        assert_eq!(
+            manifest_modern.resolve_version("1.21.1", "21.1.72"),
+            Some("21.1.72".to_string())
+        );
+        assert_eq!(
+            manifest_modern.resolve_version("26.1", "26.1.0.1-beta"),
+            Some("26.1.0.1-beta".to_string())
+        );
+        assert_eq!(manifest_modern.resolve_version("1.21.1", "21.1.999"), None);
+
+        let manifest_1201 = NeoForgeManifest {
+            versions: vec!["1.20.1-47.1.84".to_string(), "1.20.1-47.1.106".to_string()],
+        };
+
+        // 1.20.1 short raw version resolves to "1.20.1-{raw}"
+        assert_eq!(
+            manifest_1201.resolve_version("1.20.1", "47.1.106"),
+            Some("1.20.1-47.1.106".to_string())
+        );
+
+        // 1.20.1 already-prefixed version matches directly without doubling prefix
+        assert_eq!(
+            manifest_1201.resolve_version("1.20.1", "1.20.1-47.1.84"),
+            Some("1.20.1-47.1.84".to_string())
+        );
+
+        // Non-1.20.1 game version does not apply "1.20.1-" prefix fallback
+        assert_eq!(manifest_1201.resolve_version("1.20.4", "47.1.106"), None);
+
+        // Unknown version for 1.20.1 returns None
+        assert_eq!(manifest_1201.resolve_version("1.20.1", "47.1.999"), None);
     }
 }
