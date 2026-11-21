@@ -497,6 +497,18 @@ settings-downloads-source-title = 下载源
 settings-downloads-title = 下载
 # Source: Failed to save configuration: { $err }
 settings-error-save-configuration = 保存配置失败：{ $err }
+# Source: Prefer running the game on the dedicated graphics card
+settings-graphics-discrete-gpu-subtitle = 优先使用独立显卡运行游戏
+# Source: Use Discrete GPU
+settings-graphics-discrete-gpu-title = 使用独立显卡
+# Source: Environment Variables
+settings-graphics-env-vars-title = 环境变量
+# Source: Force native Wayland (Minecraft 26.3+)
+settings-graphics-force-wayland-subtitle = 强制使用原生 Wayland（Minecraft 26.3+）
+# Source: Force Wayland
+settings-graphics-force-wayland-title = 强制 Wayland
+# Source: Graphics & Environment
+settings-graphics-title = 图形与环境
 # Source: Auto-detect (Recommended)
 settings-java-auto-detect = 自动检测（推荐）
 # Source: Max Memory

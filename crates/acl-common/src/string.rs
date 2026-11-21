@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-/// Parses a single-line input JVM argument string into an argument list,
+use std::collections::BTreeMap;
+
+/// Parses a single-line input shell argument string into an argument list,
 /// supporting single-quote and double-quote pairing as well as backslash escaping (similar to Shell lexical parsing)
-pub fn parse_jvm_args(raw: &str) -> Vec<String> {
+pub fn parse_shell_args(raw: &str) -> Vec<String> {
     #[derive(Clone, Copy)]
     enum Quote {
         None,
@@ -74,9 +76,9 @@ pub fn parse_jvm_args(raw: &str) -> Vec<String> {
     args
 }
 
-/// Formats a list of JVM arguments into a single-line string suitable for
-/// shell-like lexical parsing via [`parse_jvm_args`].
-pub fn format_jvm_args(args: &[String]) -> String {
+/// Formats a list of shell arguments into a single-line string suitable for
+/// shell-like lexical parsing via [`parse_shell_args`].
+pub fn format_shell_args(args: &[String]) -> String {
     args.iter()
         .map(|arg| {
             let needs_quotes = arg.is_empty()
@@ -95,21 +97,65 @@ pub fn format_jvm_args(args: &[String]) -> String {
         .join(" ")
 }
 
+/// Parses a shell-like `KEY=VALUE` string into an ordered map of environment variables.
+/// Supports quotes, backslash escaping, spaces, and newlines via [`parse_shell_args`].
+/// Invalid tokens (missing `=`, empty keys, or keys containing whitespace/NUL) are skipped.
+pub fn parse_env_vars(raw: &str) -> BTreeMap<String, String> {
+    let mut vars = BTreeMap::new();
+
+    for token in parse_shell_args(raw) {
+        let Some((key, value)) = token.split_once('=') else {
+            continue;
+        };
+
+        if key.is_empty()
+            || key.chars().any(|c| c.is_whitespace() || c == '\0')
+            || value.contains('\0')
+        {
+            continue;
+        }
+
+        vars.insert(key.to_string(), value.to_string());
+    }
+
+    vars
+}
+
+/// Formats an environment variable map into a single-line `KEY=VALUE` string
+/// compatible with [`parse_env_vars`].
+pub fn format_env_vars(vars: &BTreeMap<String, String>) -> String {
+    vars.iter()
+        .map(|(key, value)| {
+            let needs_quotes = value
+                .chars()
+                .any(|c| c.is_whitespace() || c == '"' || c == '\'' || c == '\\');
+
+            if needs_quotes {
+                let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+                format!("{key}=\"{escaped}\"")
+            } else {
+                format!("{key}={value}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_parse_jvm_args_empty_and_whitespace() {
-        assert_eq!(parse_jvm_args(""), Vec::<String>::new());
-        assert_eq!(parse_jvm_args("   \t\n\r  "), Vec::<String>::new());
+        assert_eq!(parse_shell_args(""), Vec::<String>::new());
+        assert_eq!(parse_shell_args("   \t\n\r  "), Vec::<String>::new());
     }
 
     #[test]
     fn test_parse_jvm_args_basic() {
-        assert_eq!(parse_jvm_args("-Xmx2G -Xms1G"), vec!["-Xmx2G", "-Xms1G"]);
+        assert_eq!(parse_shell_args("-Xmx2G -Xms1G"), vec!["-Xmx2G", "-Xms1G"]);
         assert_eq!(
-            parse_jvm_args("  -Xmx2G    -Xms1G  "),
+            parse_shell_args("  -Xmx2G    -Xms1G  "),
             vec!["-Xmx2G", "-Xms1G"]
         );
     }
@@ -117,35 +163,35 @@ mod tests {
     #[test]
     fn test_parse_jvm_args_quotes_and_escapes() {
         assert_eq!(
-            parse_jvm_args(r#"-Dfoo="bar baz" -Dtest='hello world'"#),
+            parse_shell_args(r#"-Dfoo="bar baz" -Dtest='hello world'"#),
             vec!["-Dfoo=bar baz", "-Dtest=hello world"]
         );
         assert_eq!(
-            parse_jvm_args(r#"-Dpath="C:\\Program Files\\App""#),
+            parse_shell_args(r#"-Dpath="C:\\Program Files\\App""#),
             vec![r"-Dpath=C:\Program Files\App"]
         );
         assert_eq!(
-            parse_jvm_args(r#"-Dquote="\"escaped\"""#),
+            parse_shell_args(r#"-Dquote="\"escaped\"""#),
             vec![r#"-Dquote="escaped""#]
         );
-        assert_eq!(parse_jvm_args(r"-Dfoo=bar\ baz"), vec!["-Dfoo=bar baz"]);
+        assert_eq!(parse_shell_args(r"-Dfoo=bar\ baz"), vec!["-Dfoo=bar baz"]);
     }
 
     #[test]
     fn test_parse_jvm_args_unclosed_quotes_and_trailing_backslash() {
-        assert_eq!(parse_jvm_args(r#"-Dfoo="bar"#), vec!["-Dfoo=bar"]);
-        assert_eq!(parse_jvm_args(r"-Dfoo=bar\"), vec![r"-Dfoo=bar\"]);
-        assert_eq!(parse_jvm_args(r#"-Dfoo="bar\"#), vec![r"-Dfoo=bar\"]);
+        assert_eq!(parse_shell_args(r#"-Dfoo="bar"#), vec!["-Dfoo=bar"]);
+        assert_eq!(parse_shell_args(r"-Dfoo=bar\"), vec![r"-Dfoo=bar\"]);
+        assert_eq!(parse_shell_args(r#"-Dfoo="bar\"#), vec![r"-Dfoo=bar\"]);
     }
 
     #[test]
     fn test_format_jvm_args_basic() {
         assert_eq!(
-            format_jvm_args(&["-Xmx2G".to_string(), "-Xms1G".to_string()]),
+            format_shell_args(&["-Xmx2G".to_string(), "-Xms1G".to_string()]),
             "-Xmx2G -Xms1G"
         );
         assert_eq!(
-            format_jvm_args(&[
+            format_shell_args(&[
                 "-Dfoo=bar baz".to_string(),
                 r"-Dpath=C:\test\app".to_string(),
                 "".to_string(),
@@ -174,8 +220,8 @@ mod tests {
         ];
 
         for original in test_cases {
-            let formatted = format_jvm_args(&original);
-            let parsed = parse_jvm_args(&formatted);
+            let formatted = format_shell_args(&original);
+            let parsed = parse_shell_args(&formatted);
             assert_eq!(
                 original, parsed,
                 "Roundtrip failed for formatted string: {formatted}"

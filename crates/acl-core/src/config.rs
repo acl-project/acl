@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    collections::BTreeMap,
     fs::{self},
     path::Path,
 };
@@ -38,6 +39,12 @@ pub struct LauncherConfig {
     pub enable_offline: bool,
     /// Current language.
     pub language: Language,
+    /// Force SDL to use the native Wayland video driver (Minecraft 26.3+).
+    pub force_wayland: bool,
+    /// Prefer running the game on the discrete GPU (PRIME render offload).
+    pub use_discrete_gpu: bool,
+    /// Extra environment variables passed to the game process.
+    pub env_vars: BTreeMap<String, String>,
 }
 
 impl Default for LauncherConfig {
@@ -52,6 +59,9 @@ impl Default for LauncherConfig {
             download_source: DownloadSource::Official,
             enable_offline: false,
             language: Language::System,
+            force_wayland: false,
+            use_discrete_gpu: false,
+            env_vars: BTreeMap::new(),
         }
     }
 }
@@ -87,6 +97,9 @@ impl LauncherConfig {
             download_source,
             enable_offline: false, // Offline login is disabled by default.
             language: Language::System,
+            force_wayland: false,
+            use_discrete_gpu: false,
+            env_vars: BTreeMap::new(),
         }
     }
 
@@ -217,6 +230,9 @@ mod tests {
                     download_source: DownloadSource::Official,
                     enable_offline,
                     language,
+                    force_wayland: false,
+                    use_discrete_gpu: false,
+                    env_vars: BTreeMap::new(),
                 };
 
                 let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");

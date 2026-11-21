@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    collections::BTreeMap,
     fs::{self, File},
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -88,6 +89,12 @@ pub struct InstanceConfig {
     /// Timestamp of the last launch
     #[serde(default)]
     pub last_play_at: u64,
+    #[serde(default)]
+    pub force_wayland: Option<bool>,
+    #[serde(default)]
+    pub use_discrete_gpu: Option<bool>,
+    #[serde(default)]
+    pub env_vars: BTreeMap<String, String>,
 }
 
 impl InstanceConfig {

@@ -4,6 +4,7 @@
 pub mod config;
 pub mod dirs;
 pub mod error;
+pub mod gpu;
 pub mod instance;
 pub mod java;
 pub mod launch;
