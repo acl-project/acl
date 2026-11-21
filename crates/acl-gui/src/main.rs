@@ -20,6 +20,8 @@ use tracing_subscriber::EnvFilter;
 
 use crate::app::AppModel;
 
+pub const APP_ID: &str = "io.github.acl_project.AdwaitaCraftLauncher";
+
 fn init_logging() {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"))
@@ -47,7 +49,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let app = relm4::RelmApp::new("com.acl-project.adwaita-craft-launcher");
+    let app = relm4::RelmApp::new(APP_ID);
 
     // Load the global stylesheet embedded at compile time.
     relm4::set_global_css(include_str!("style.css"));
