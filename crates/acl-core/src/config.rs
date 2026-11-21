@@ -201,6 +201,9 @@ mod tests {
         assert!(!config.close_launcher_on_launch);
         assert_eq!(config.download_source, DownloadSource::Official);
         assert!(!config.enable_offline);
+        assert!(!config.force_wayland);
+        assert!(!config.use_discrete_gpu);
+        assert!(config.env_vars.is_empty());
     }
 
     #[test]
@@ -214,6 +217,10 @@ mod tests {
                 is_64bit: true,
             },
         };
+        let env_vars = BTreeMap::from([
+            ("FOO".to_string(), "bar baz".to_string()),
+            ("MESA_GL_VERSION_OVERRIDE".to_string(), "4.6".to_string()),
+        ]);
         for enable_offline in [false, true] {
             for language in [
                 Language::System,
@@ -230,9 +237,9 @@ mod tests {
                     download_source: DownloadSource::Official,
                     enable_offline,
                     language,
-                    force_wayland: false,
-                    use_discrete_gpu: false,
-                    env_vars: BTreeMap::new(),
+                    force_wayland: true,
+                    use_discrete_gpu: true,
+                    env_vars: env_vars.clone(),
                 };
 
                 let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");
@@ -260,6 +267,9 @@ mod tests {
         assert_eq!(config.download_source, DownloadSource::Official);
         assert!(!config.enable_offline);
         assert_eq!(config.language, Language::System);
+        assert!(!config.force_wayland);
+        assert!(!config.use_discrete_gpu);
+        assert!(config.env_vars.is_empty());
     }
 
     #[test]
@@ -272,6 +282,9 @@ mod tests {
         assert!(!config.close_launcher_on_launch);
         assert!(!config.enable_offline);
         assert_eq!(config.language, Language::System);
+        assert!(!config.force_wayland);
+        assert!(!config.use_discrete_gpu);
+        assert!(config.env_vars.is_empty());
         assert!((16..=64).contains(&config.max_concurrent_downloads));
         if acl_common::region::is_mainland_china() {
             assert_eq!(config.download_source, DownloadSource::Bmclapi);

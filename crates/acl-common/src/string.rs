@@ -146,13 +146,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_jvm_args_empty_and_whitespace() {
+    fn test_parse_shell_args_empty_and_whitespace() {
         assert_eq!(parse_shell_args(""), Vec::<String>::new());
         assert_eq!(parse_shell_args("   \t\n\r  "), Vec::<String>::new());
     }
 
     #[test]
-    fn test_parse_jvm_args_basic() {
+    fn test_parse_shell_args_basic() {
         assert_eq!(parse_shell_args("-Xmx2G -Xms1G"), vec!["-Xmx2G", "-Xms1G"]);
         assert_eq!(
             parse_shell_args("  -Xmx2G    -Xms1G  "),
@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_jvm_args_quotes_and_escapes() {
+    fn test_parse_shell_args_quotes_and_escapes() {
         assert_eq!(
             parse_shell_args(r#"-Dfoo="bar baz" -Dtest='hello world'"#),
             vec!["-Dfoo=bar baz", "-Dtest=hello world"]
@@ -178,14 +178,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_jvm_args_unclosed_quotes_and_trailing_backslash() {
+    fn test_parse_shell_args_unclosed_quotes_and_trailing_backslash() {
         assert_eq!(parse_shell_args(r#"-Dfoo="bar"#), vec!["-Dfoo=bar"]);
         assert_eq!(parse_shell_args(r"-Dfoo=bar\"), vec![r"-Dfoo=bar\"]);
         assert_eq!(parse_shell_args(r#"-Dfoo="bar\"#), vec![r"-Dfoo=bar\"]);
     }
 
     #[test]
-    fn test_format_jvm_args_basic() {
+    fn test_format_shell_args_basic() {
         assert_eq!(
             format_shell_args(&["-Xmx2G".to_string(), "-Xms1G".to_string()]),
             "-Xmx2G -Xms1G"
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn test_jvm_args_roundtrip() {
+    fn test_shell_args_roundtrip() {
         let test_cases = vec![
             vec!["-Xmx2G".to_string(), "-Xms1G".to_string()],
             vec![r"-Dpath=C:\test\app".to_string(), "".to_string()],
@@ -225,6 +225,77 @@ mod tests {
             assert_eq!(
                 original, parsed,
                 "Roundtrip failed for formatted string: {formatted}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_env_vars_basic_and_quotes() {
+        assert_eq!(parse_env_vars(""), BTreeMap::new());
+        assert_eq!(parse_env_vars("   \t\n  "), BTreeMap::new());
+
+        let parsed = parse_env_vars(
+            r#"FOO=bar BAZ="hello world" SINGLE='it works' OPT=a=b=c EMPTY= DUP=1 DUP=2
+MULTI="line two" ESC="\"q\"\\s""#,
+        );
+        let expected = BTreeMap::from([
+            ("BAZ".to_string(), "hello world".to_string()),
+            ("DUP".to_string(), "2".to_string()),
+            ("EMPTY".to_string(), "".to_string()),
+            ("ESC".to_string(), r#""q"\s"#.to_string()),
+            ("FOO".to_string(), "bar".to_string()),
+            ("MULTI".to_string(), "line two".to_string()),
+            ("OPT".to_string(), "a=b=c".to_string()),
+            ("SINGLE".to_string(), "it works".to_string()),
+        ]);
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn test_parse_env_vars_ignores_invalid_tokens() {
+        let parsed = parse_env_vars(
+            "MISSING_EQ =empty_key \"BAD KEY\"=1 OTHER\\ KEY=2 BAD\0KEY=3 KEY=bad\0val VALID=yes",
+        );
+        assert_eq!(
+            parsed,
+            BTreeMap::from([("VALID".to_string(), "yes".to_string())])
+        );
+    }
+
+    #[test]
+    fn test_format_env_vars_and_roundtrip() {
+        let map = BTreeMap::from([
+            ("A".to_string(), "1".to_string()),
+            ("EMPTY".to_string(), "".to_string()),
+            ("QUOTE".to_string(), r#"a"b"#.to_string()),
+            ("SINGLE".to_string(), "it's".to_string()),
+            ("SLASH".to_string(), r"C:\a\b".to_string()),
+            ("SPACE".to_string(), "foo bar".to_string()),
+        ]);
+        assert_eq!(
+            format_env_vars(&map),
+            r#"A=1 EMPTY= QUOTE="a\"b" SINGLE="it's" SLASH="C:\\a\\b" SPACE="foo bar""#
+        );
+
+        let cases = vec![
+            BTreeMap::new(),
+            map,
+            BTreeMap::from([
+                ("OPT".to_string(), "x=y=z".to_string()),
+                ("TAB_NEWLINE".to_string(), "a\tb\nc".to_string()),
+                (
+                    "MIXED".to_string(),
+                    r#"hello 'single' "double" \end"#.to_string(),
+                ),
+            ]),
+        ];
+
+        for original in cases {
+            let formatted = format_env_vars(&original);
+            let parsed = parse_env_vars(&formatted);
+            assert_eq!(
+                original, parsed,
+                "Env var roundtrip failed for formatted string: {formatted}"
             );
         }
     }

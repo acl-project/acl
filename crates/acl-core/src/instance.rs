@@ -700,6 +700,9 @@ mod tests {
         assert!(config.extra_jvm_args.is_empty());
         assert!(config.created_at > 0);
         assert_eq!(config.last_play_at, 0);
+        assert_eq!(config.force_wayland, None);
+        assert_eq!(config.use_discrete_gpu, None);
+        assert!(config.env_vars.is_empty());
 
         let err = InstanceConfig::new("../invalid", "Invalid", "1.21");
         assert!(matches!(err, Err(CoreError::InvalidInstanceId { .. })));
@@ -718,6 +721,11 @@ mod tests {
         config.min_memory_mb = Some(2048);
         config.max_memory_mb = Some(8192);
         config.extra_jvm_args = vec!["-Xmx8G".to_string(), "-Dfoo=bar".to_string()];
+        config.force_wayland = Some(true);
+        config.use_discrete_gpu = Some(false);
+        config
+            .env_vars
+            .insert("MESA_GL_VERSION_OVERRIDE".to_string(), "4.6".to_string());
 
         config.save(&cfg_path).expect("failed to save config");
         assert!(cfg_path.exists());
@@ -732,6 +740,12 @@ mod tests {
         assert_eq!(loaded.min_memory_mb, Some(2048));
         assert_eq!(loaded.max_memory_mb, Some(8192));
         assert_eq!(loaded.extra_jvm_args, vec!["-Xmx8G", "-Dfoo=bar"]);
+        assert_eq!(loaded.force_wayland, Some(true));
+        assert_eq!(loaded.use_discrete_gpu, Some(false));
+        assert_eq!(
+            loaded.env_vars,
+            BTreeMap::from([("MESA_GL_VERSION_OVERRIDE".to_string(), "4.6".to_string())])
+        );
 
         let non_existent = temp.path().join("missing.toml");
         assert!(matches!(

@@ -1006,7 +1006,10 @@ mod tests {
                 "--version".to_string(),
                 "1.21.1".to_string(),
             ],
-            env_vars: BTreeMap::new(),
+            env_vars: BTreeMap::from([(
+                "SECRET_ENV_KEY".to_string(),
+                "super_secret_env_value".to_string(),
+            )]),
         };
 
         let debug_str = format!("{cmd:?}");
@@ -1015,5 +1018,104 @@ mod tests {
         assert!(debug_str.contains("[REDACTED]"));
         assert!(debug_str.contains("--accessToken=[REDACTED]"));
         assert!(debug_str.contains("Player"));
+        assert!(debug_str.contains("SECRET_ENV_KEY"));
+        assert!(!debug_str.contains("super_secret_env_value"));
+    }
+
+    #[test]
+    fn test_resolve_env_vars_precedence_and_custom_settings() {
+        let mesa_gpu = DiscreteGpuEnv {
+            has_nvidia_driver: false,
+            nvidia_egl_vendor_json: None,
+        };
+        let nvidia_gpu = DiscreteGpuEnv {
+            has_nvidia_driver: true,
+            nvidia_egl_vendor_json: Some(
+                "/usr/share/glvnd/egl_vendor.d/10_nvidia.json".to_string(),
+            ),
+        };
+
+        // 1. Default global + default instance -> empty
+        let mut global = LauncherConfig::default();
+        let mut instance = mock_instance("env_inst");
+        assert!(LaunchCommand::resolve_env_vars(&instance, &global, None).is_empty());
+
+        // 2. Global switches with Mesa vs NVIDIA
+        global.force_wayland = true;
+        global.use_discrete_gpu = true;
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, Some(&mesa_gpu)),
+            BTreeMap::from([
+                ("DRI_PRIME".to_string(), "1".to_string()),
+                ("SDL_VIDEO_DRIVER".to_string(), "wayland".to_string()),
+            ])
+        );
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, Some(&nvidia_gpu)),
+            BTreeMap::from([
+                ("SDL_VIDEO_DRIVER".to_string(), "wayland".to_string()),
+                (
+                    "__EGL_VENDOR_LIBRARY_FILENAMES".to_string(),
+                    "/usr/share/glvnd/egl_vendor.d/10_nvidia.json".to_string()
+                ),
+                (
+                    "__GLX_VENDOR_LIBRARY_NAME".to_string(),
+                    "nvidia".to_string()
+                ),
+                ("__NV_PRIME_RENDER_OFFLOAD".to_string(), "1".to_string()),
+                (
+                    "__VK_LAYER_NV_optimus".to_string(),
+                    "NVIDIA_only".to_string()
+                ),
+            ])
+        );
+
+        // 3. custom_settings = false ignores instance toggles and instance env_vars, while global env_vars override presets
+        global.env_vars = BTreeMap::from([
+            ("SDL_VIDEO_DRIVER".to_string(), "x11".to_string()),
+            ("SHARED".to_string(), "from_global".to_string()),
+        ]);
+        instance.config.custom_settings = false;
+        instance.config.force_wayland = Some(false);
+        instance.config.use_discrete_gpu = Some(false);
+        instance.config.env_vars = BTreeMap::from([
+            ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
+            ("SHARED".to_string(), "from_instance".to_string()),
+        ]);
+
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, Some(&mesa_gpu)),
+            BTreeMap::from([
+                ("DRI_PRIME".to_string(), "1".to_string()),
+                ("SDL_VIDEO_DRIVER".to_string(), "x11".to_string()),
+                ("SHARED".to_string(), "from_global".to_string()),
+            ])
+        );
+
+        // 4. custom_settings = true with None inherits global toggles and applies preset < global < instance precedence
+        instance.config.custom_settings = true;
+        instance.config.force_wayland = None;
+        instance.config.use_discrete_gpu = None;
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, Some(&mesa_gpu)),
+            BTreeMap::from([
+                ("DRI_PRIME".to_string(), "1".to_string()),
+                ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
+                ("SDL_VIDEO_DRIVER".to_string(), "x11".to_string()),
+                ("SHARED".to_string(), "from_instance".to_string()),
+            ])
+        );
+
+        // 5. custom_settings = true with Some(false) disables preset switches even when global is true
+        instance.config.force_wayland = Some(false);
+        instance.config.use_discrete_gpu = Some(false);
+        global.env_vars.remove("SDL_VIDEO_DRIVER");
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, Some(&mesa_gpu)),
+            BTreeMap::from([
+                ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
+                ("SHARED".to_string(), "from_instance".to_string()),
+            ])
+        );
     }
 }
