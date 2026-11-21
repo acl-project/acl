@@ -538,4 +538,107 @@ mod tests {
         ));
         assert!(!temp.path().join("escape.txt").exists());
     }
+
+    #[test]
+    fn test_modpack_manifest_download_tasks() {
+        let game_dir = Path::new("/tmp/test_instance");
+        let manifest = ModpackManifest {
+            host: ProjectHost::Modrinth,
+            name: "Test Pack".to_string(),
+            version: "1.0.0".to_string(),
+            summary: None,
+            author: None,
+            game_version: "1.20.1".to_string(),
+            loader: Some(ModpackLoader::Fabric("0.15.11".to_string())),
+            recommended_ram_mb: None,
+            override_dirs: vec!["overrides".to_string()],
+            files: vec![
+                // Required file with SHA-1 and multiple URLs (first blank, second valid)
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "mods\\sodium.jar".to_string(),
+                        downloads: vec![
+                            "   ".to_string(),
+                            "https://cdn.modrinth.com/sodium.jar".to_string(),
+                            "https://mirror.example.com/sodium.jar".to_string(),
+                        ],
+                        size: 2048,
+                        sha1: Some("abc123".to_string()),
+                        sha512: Some("def456".to_string()),
+                    },
+                    required: true,
+                },
+                // Optional file without SHA-1
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "./mods/optional_mod.jar".to_string(),
+                        downloads: vec!["https://cdn.modrinth.com/optional.jar".to_string()],
+                        size: 1024,
+                        sha1: None,
+                        sha512: None,
+                    },
+                    required: false,
+                },
+                // CurseForge entry (should be skipped)
+                ModpackFile {
+                    source: ModpackFileSource::CurseForge {
+                        project_id: 123,
+                        file_id: 456,
+                    },
+                    required: true,
+                },
+                // Unsafe path entry (should be skipped)
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "../escape.jar".to_string(),
+                        downloads: vec!["https://cdn.modrinth.com/escape.jar".to_string()],
+                        size: 512,
+                        sha1: Some("000".to_string()),
+                        sha512: None,
+                    },
+                    required: true,
+                },
+                // Entry with no valid download URLs (should be skipped)
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "mods/no_url.jar".to_string(),
+                        downloads: vec!["".to_string(), "   ".to_string()],
+                        size: 256,
+                        sha1: Some("111".to_string()),
+                        sha512: None,
+                    },
+                    required: true,
+                },
+            ],
+        };
+
+        // include_optional = false: only required valid direct files
+        let required_only = manifest.download_tasks(game_dir, false);
+        assert_eq!(required_only.len(), 1);
+        assert_eq!(
+            required_only[0],
+            DownloadTask {
+                name: "mods/sodium.jar".to_string(),
+                url: "https://cdn.modrinth.com/sodium.jar".to_string(),
+                destination: game_dir.join("mods/sodium.jar"),
+                sha1: "abc123".to_string(),
+                size: 2048,
+            }
+        );
+
+        // include_optional = true: includes both required and optional valid direct files
+        let all_tasks = manifest.download_tasks(game_dir, true);
+        assert_eq!(all_tasks.len(), 2);
+        assert_eq!(all_tasks[0], required_only[0]);
+        assert_eq!(
+            all_tasks[1],
+            DownloadTask {
+                name: "mods/optional_mod.jar".to_string(),
+                url: "https://cdn.modrinth.com/optional.jar".to_string(),
+                destination: game_dir.join("mods/optional_mod.jar"),
+                sha1: String::new(),
+                size: 1024,
+            }
+        );
+    }
 }

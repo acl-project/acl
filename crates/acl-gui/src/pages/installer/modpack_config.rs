@@ -509,3 +509,229 @@ impl Component for ModpackPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acl_minecraft::{AssetFile, ModpackFile, ModpackFileSource};
+
+    fn sample_online_item() -> AssetItemData {
+        AssetItemData {
+            host: ProjectHost::Modrinth,
+            project_type: ProjectType::Modpack,
+            project_id: "pack-1".to_string(),
+            title: "Online Test Pack".to_string(),
+            author: "Author".to_string(),
+            description: "Desc".to_string(),
+            icon_url: None,
+            downloads: 100,
+            display_categories: Vec::new(),
+            latest_version: Some("1.0.0".to_string()),
+        }
+    }
+
+    fn sample_asset_version(release_type: ReleaseType, with_file: bool) -> AssetVersion {
+        AssetVersion {
+            host: ProjectHost::Modrinth,
+            id: "ver-1".to_string(),
+            project_id: "pack-1".to_string(),
+            name: "Pack 1.0.0".to_string(),
+            version_number: "1.0.0".to_string(),
+            release_type,
+            game_versions: vec!["1.20.1".to_string(), "1.20.2".to_string()],
+            loaders: vec!["fabric".to_string(), "quilt".to_string()],
+            date_published: "2026-01-01T00:00:00Z".to_string(),
+            downloads: 50,
+            primary_file: with_file.then(|| AssetFile {
+                url: "https://cdn.modrinth.com/pack.mrpack".to_string(),
+                filename: "pack.mrpack".to_string(),
+                size: 4096,
+                sha1: Some("abc".to_string()),
+                sha512: None,
+            }),
+            dependencies: Vec::new(),
+        }
+    }
+
+    fn sample_local_manifest(loader: Option<ModpackLoader>) -> ModpackManifest {
+        ModpackManifest {
+            host: ProjectHost::Modrinth,
+            name: "Local Test Pack".to_string(),
+            version: "2.3.4".to_string(),
+            summary: Some("Local pack".to_string()),
+            author: None,
+            game_version: "1.21.1".to_string(),
+            loader,
+            recommended_ram_mb: None,
+            override_dirs: vec!["overrides".to_string()],
+            files: vec![ModpackFile {
+                source: ModpackFileSource::Direct {
+                    path: "mods/a.jar".to_string(),
+                    downloads: vec!["https://example.com/a.jar".to_string()],
+                    size: 128,
+                    sha1: None,
+                    sha512: None,
+                },
+                required: true,
+            }],
+        }
+    }
+
+    #[test]
+    fn test_modpack_page_logic() {
+        // Isolate GTK initialization in a single-test subprocess so it does not
+        // collide with other tests calling `gtk::init()` on different libtest threads.
+        if std::env::var_os("ACL_MODPACK_GTK_TEST_CHILD").is_none() {
+            let exe = std::env::current_exe().expect("failed to resolve current test executable");
+            let output = std::process::Command::new(exe)
+                .env("ACL_MODPACK_GTK_TEST_CHILD", "1")
+                .args([
+                    "--exact",
+                    "pages::installer::modpack_config::tests::test_modpack_page_logic",
+                    "--nocapture",
+                ])
+                .output()
+                .expect("failed to spawn isolated GTK test subprocess");
+
+            assert!(
+                output.status.success(),
+                "isolated GTK test subprocess failed (status: {:?}):\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            return;
+        }
+
+        if gtk::init().is_err() {
+            return;
+        }
+
+        let config = Arc::new(SharedState::new());
+        let mut page = ModpackPage {
+            config,
+            client: reqwest::Client::new(),
+            cache_dir: PathBuf::from("/tmp/cache"),
+            source: None,
+            default_name: "DefaultPack".to_string(),
+            instance_name: String::new(),
+            name_entry: adw::EntryRow::new(),
+            all_versions: Vec::new(),
+            selected_version: None,
+            is_loading: false,
+            request_id: 0,
+        };
+
+        // 1. Initial None source state
+        assert!(!page.is_online());
+        assert!(!page.is_local());
+        assert_eq!(page.title(), "");
+        assert_eq!(page.effective_name(), "DefaultPack");
+        assert!(!page.can_install());
+        assert_eq!(page.game_version_text(), "");
+        assert_eq!(page.loader_text(), "");
+        assert_eq!(page.pack_version_text(), "");
+        assert_eq!(page.files_count_text(), "");
+
+        // 2. effective_name trimming and fallback
+        page.instance_name = "  Custom Pack  ".to_string();
+        assert_eq!(page.effective_name(), "Custom Pack");
+        page.instance_name = "   ".to_string();
+        assert_eq!(page.effective_name(), "DefaultPack");
+
+        // 3. Local modpack source
+        page.source = Some(ModpackSource::Local {
+            path: PathBuf::from("/tmp/local.mrpack"),
+            manifest: sample_local_manifest(None),
+        });
+        assert!(!page.is_online());
+        assert!(page.is_local());
+        assert_eq!(page.title(), "Local Test Pack");
+        assert!(page.can_install());
+        assert_eq!(page.game_version_text(), "1.21.1");
+        assert_eq!(page.loader_text(), "Vanilla");
+        assert_eq!(page.pack_version_text(), "2.3.4");
+        assert_eq!(page.files_count_text(), "1");
+
+        // Invalid instance name disables install in Local mode
+        page.instance_name = "invalid/name".to_string();
+        assert!(!page.can_install());
+        page.instance_name = "ValidLocalPack".to_string();
+        assert!(page.can_install());
+
+        // Local loader variants
+        for (loader, expected) in [
+            (
+                Some(ModpackLoader::Fabric("0.16.0".to_string())),
+                "Fabric 0.16.0",
+            ),
+            (
+                Some(ModpackLoader::Quilt("0.26.0".to_string())),
+                "Quilt 0.26.0",
+            ),
+            (
+                Some(ModpackLoader::Forge("47.3.0".to_string())),
+                "Forge 47.3.0",
+            ),
+            (
+                Some(ModpackLoader::NeoForge("21.1.72".to_string())),
+                "NeoForge 21.1.72",
+            ),
+        ] {
+            page.source = Some(ModpackSource::Local {
+                path: PathBuf::from("/tmp/local.mrpack"),
+                manifest: sample_local_manifest(loader),
+            });
+            assert_eq!(page.loader_text(), expected);
+        }
+
+        // 4. Online modpack source
+        page.source = Some(ModpackSource::Online(sample_online_item()));
+        page.is_loading = true;
+        page.selected_version = None;
+        assert!(page.is_online());
+        assert!(!page.is_local());
+        assert_eq!(page.title(), "Online Test Pack");
+        assert!(!page.can_install());
+        assert_eq!(page.game_version_text(), "...");
+        assert_eq!(page.loader_text(), "...");
+        assert_eq!(page.pack_version_text(), "");
+        assert_eq!(page.files_count_text(), "");
+        assert!(!page.version_title().is_empty());
+        assert!(!page.version_subtitle().is_empty());
+
+        // Loaded but no version selected
+        page.is_loading = false;
+        assert!(!page.can_install());
+        assert_eq!(page.game_version_text(), "-");
+        assert_eq!(page.loader_text(), "-");
+        assert!(!page.version_title().is_empty());
+        assert!(!page.version_subtitle().is_empty());
+
+        // Version selected without primary_file cannot install
+        page.selected_version = Some(sample_asset_version(ReleaseType::Beta, false));
+        assert!(!page.can_install());
+        assert_eq!(page.version_title(), "Pack 1.0.0");
+        assert!(page.version_subtitle().contains("1.0.0"));
+        assert_eq!(page.game_version_text(), "1.20.1, 1.20.2");
+        assert_eq!(page.loader_text(), "fabric, quilt");
+
+        // Version selected with primary_file can install (unless loading or empty game_versions/loaders)
+        let mut ver_with_file = sample_asset_version(ReleaseType::Alpha, true);
+        page.selected_version = Some(ver_with_file.clone());
+        assert!(page.can_install());
+        assert!(page.version_subtitle().contains("1.0.0"));
+
+        page.is_loading = true;
+        assert!(!page.can_install());
+        page.is_loading = false;
+
+        ver_with_file.release_type = ReleaseType::Release;
+        ver_with_file.game_versions.clear();
+        ver_with_file.loaders.clear();
+        page.selected_version = Some(ver_with_file);
+        assert!(page.can_install());
+        assert_eq!(page.game_version_text(), "-");
+        assert_eq!(page.loader_text(), "-");
+    }
+}

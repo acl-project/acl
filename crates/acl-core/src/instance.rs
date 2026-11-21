@@ -609,6 +609,44 @@ mod tests {
     }
 
     #[test]
+    fn test_sanitize_instance_id() {
+        // Valid names are preserved
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id("Fabulously Optimized"),
+            "Fabulously Optimized"
+        );
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id("1.20.1-fabric_pack"),
+            "1.20.1-fabric_pack"
+        );
+
+        // Surrounding whitespace is trimmed (including whitespace exposed after removing forbidden chars)
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id("  My Pack  "),
+            "My Pack"
+        );
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id(" / : My Pack * ? "),
+            "My Pack"
+        );
+
+        // Forbidden characters and control characters are stripped
+        assert_eq!(
+            InstanceConfig::sanitize_instance_id("Pack/\\<>:\"|?*\0\n\t\x07v1"),
+            "Packv1"
+        );
+
+        // Inputs that remain invalid after sanitization return an empty string
+        assert_eq!(InstanceConfig::sanitize_instance_id(""), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id("   "), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id("/*?<>|\"\\:\0\n"), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id("."), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id(".."), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id(" .? "), "");
+        assert_eq!(InstanceConfig::sanitize_instance_id("*..*"), "");
+    }
+
+    #[test]
     fn test_mod_loader_serde_and_default() {
         assert_eq!(ModLoader::default(), ModLoader::Vanilla);
 

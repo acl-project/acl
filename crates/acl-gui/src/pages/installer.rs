@@ -515,5 +515,6 @@ mod tests {
         assert_eq!(InstallerStep::SelectLoader.as_str(), "select_loader");
         assert_eq!(InstallerStep::AssetConfig.as_str(), "asset_config");
         assert_eq!(InstallerStep::SelectVersion.as_str(), "select_version");
+        assert_eq!(InstallerStep::ModpackConfig.as_str(), "modpack_config");
     }
 }
