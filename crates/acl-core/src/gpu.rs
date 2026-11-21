@@ -18,6 +18,7 @@ const DEFAULT_EGL_VENDOR_DIRS: &[&str] = &[
 ];
 
 fn egl_vendor_search_dirs() -> Vec<PathBuf> {
+    // Empty in normal desktop environment
     if let Some(raw) = env::var_os("__EGL_VENDOR_LIBRARY_DIRS") {
         let dirs: Vec<PathBuf> = env::split_paths(&raw)
             .filter(|p| !p.as_os_str().is_empty())

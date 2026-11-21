@@ -20,6 +20,11 @@ use crate::{
 const LAUNCHER_NAME: &str = "ACL";
 const LAUNCHER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn is_wayland_session() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var("XDG_SESSION_TYPE").is_ok_and(|s| s.eq_ignore_ascii_case("wayland"))
+}
+
 pub struct GameProcess {
     pub id: Option<u32>,
     pub child: tokio::process::Child,
@@ -84,6 +89,7 @@ impl LaunchCommand {
     fn resolve_env_vars(
         instance: &Instance,
         global_config: &LauncherConfig,
+        is_wayland_session: bool,
         gpu_env: Option<&DiscreteGpuEnv>,
     ) -> BTreeMap<String, String> {
         let mut env = BTreeMap::new();
@@ -108,7 +114,10 @@ impl LaunchCommand {
         };
 
         // Preset switches (lowest priority, can be overridden by user env vars)
-        if force_wayland {
+
+        // Only inject environment variables when "force_wayland" is enabled and running
+        // under an actual Wayland session, preventing crashes on X11.
+        if force_wayland && is_wayland_session {
             env.insert("SDL_VIDEO_DRIVER".to_string(), "wayland".to_string());
         }
         if use_discrete_gpu && let Some(gpu) = gpu_env {
@@ -277,9 +286,14 @@ impl LaunchCommand {
         };
 
         let env_vars = if use_discrete_gpu {
-            Self::resolve_env_vars(instance, global_config, Some(&DiscreteGpuEnv::detect()))
+            Self::resolve_env_vars(
+                instance,
+                global_config,
+                is_wayland_session(),
+                Some(&DiscreteGpuEnv::detect()),
+            )
         } else {
-            Self::resolve_env_vars(instance, global_config, None)
+            Self::resolve_env_vars(instance, global_config, is_wayland_session(), None)
         };
 
         Ok(Self {
@@ -1035,23 +1049,31 @@ mod tests {
             ),
         };
 
-        // 1. Default global + default instance -> empty
-        let mut global = LauncherConfig::default();
+        // 1. Both switches disabled -> empty even under a Wayland session
+        let mut global = LauncherConfig {
+            force_wayland: false,
+            use_discrete_gpu: false,
+            ..Default::default()
+        };
         let mut instance = mock_instance("env_inst");
-        assert!(LaunchCommand::resolve_env_vars(&instance, &global, None).is_empty());
+        assert!(LaunchCommand::resolve_env_vars(&instance, &global, true, None).is_empty());
 
-        // 2. Global switches with Mesa vs NVIDIA
+        // 2. Global switches enabled: X11 session skips SDL_VIDEO_DRIVER=wayland, Wayland session injects it
         global.force_wayland = true;
         global.use_discrete_gpu = true;
         assert_eq!(
-            LaunchCommand::resolve_env_vars(&instance, &global, Some(&mesa_gpu)),
+            LaunchCommand::resolve_env_vars(&instance, &global, false, Some(&mesa_gpu)),
+            BTreeMap::from([("DRI_PRIME".to_string(), "1".to_string())])
+        );
+        assert_eq!(
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&mesa_gpu)),
             BTreeMap::from([
                 ("DRI_PRIME".to_string(), "1".to_string()),
                 ("SDL_VIDEO_DRIVER".to_string(), "wayland".to_string()),
             ])
         );
         assert_eq!(
-            LaunchCommand::resolve_env_vars(&instance, &global, Some(&nvidia_gpu)),
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&nvidia_gpu)),
             BTreeMap::from([
                 ("SDL_VIDEO_DRIVER".to_string(), "wayland".to_string()),
                 (
@@ -1084,7 +1106,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            LaunchCommand::resolve_env_vars(&instance, &global, Some(&mesa_gpu)),
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&mesa_gpu)),
             BTreeMap::from([
                 ("DRI_PRIME".to_string(), "1".to_string()),
                 ("SDL_VIDEO_DRIVER".to_string(), "x11".to_string()),
@@ -1097,7 +1119,7 @@ mod tests {
         instance.config.force_wayland = None;
         instance.config.use_discrete_gpu = None;
         assert_eq!(
-            LaunchCommand::resolve_env_vars(&instance, &global, Some(&mesa_gpu)),
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&mesa_gpu)),
             BTreeMap::from([
                 ("DRI_PRIME".to_string(), "1".to_string()),
                 ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
@@ -1111,7 +1133,7 @@ mod tests {
         instance.config.use_discrete_gpu = Some(false);
         global.env_vars.remove("SDL_VIDEO_DRIVER");
         assert_eq!(
-            LaunchCommand::resolve_env_vars(&instance, &global, Some(&mesa_gpu)),
+            LaunchCommand::resolve_env_vars(&instance, &global, true, Some(&mesa_gpu)),
             BTreeMap::from([
                 ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
                 ("SHARED".to_string(), "from_instance".to_string()),

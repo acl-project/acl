@@ -59,8 +59,8 @@ impl Default for LauncherConfig {
             download_source: DownloadSource::Official,
             enable_offline: false,
             language: Language::System,
-            force_wayland: false,
-            use_discrete_gpu: false,
+            force_wayland: true,
+            use_discrete_gpu: true,
             env_vars: BTreeMap::new(),
         }
     }
@@ -97,8 +97,8 @@ impl LauncherConfig {
             download_source,
             enable_offline: false, // Offline login is disabled by default.
             language: Language::System,
-            force_wayland: false,
-            use_discrete_gpu: false,
+            force_wayland: true,
+            use_discrete_gpu: true,
             env_vars: BTreeMap::new(),
         }
     }
@@ -201,8 +201,8 @@ mod tests {
         assert!(!config.close_launcher_on_launch);
         assert_eq!(config.download_source, DownloadSource::Official);
         assert!(!config.enable_offline);
-        assert!(!config.force_wayland);
-        assert!(!config.use_discrete_gpu);
+        assert!(config.force_wayland);
+        assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
     }
 
@@ -237,8 +237,8 @@ mod tests {
                     download_source: DownloadSource::Official,
                     enable_offline,
                     language,
-                    force_wayland: true,
-                    use_discrete_gpu: true,
+                    force_wayland: enable_offline,
+                    use_discrete_gpu: !enable_offline,
                     env_vars: env_vars.clone(),
                 };
 
@@ -267,8 +267,8 @@ mod tests {
         assert_eq!(config.download_source, DownloadSource::Official);
         assert!(!config.enable_offline);
         assert_eq!(config.language, Language::System);
-        assert!(!config.force_wayland);
-        assert!(!config.use_discrete_gpu);
+        assert!(config.force_wayland);
+        assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
     }
 
@@ -282,8 +282,8 @@ mod tests {
         assert!(!config.close_launcher_on_launch);
         assert!(!config.enable_offline);
         assert_eq!(config.language, Language::System);
-        assert!(!config.force_wayland);
-        assert!(!config.use_discrete_gpu);
+        assert!(config.force_wayland);
+        assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
         assert!((16..=64).contains(&config.max_concurrent_downloads));
         if acl_common::region::is_mainland_china() {
