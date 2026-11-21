@@ -23,7 +23,7 @@ pub struct LauncherDirs {
 impl LauncherDirs {
     /// Creates a new `LauncherDirs` using system standard directories.
     pub fn new() -> Result<Self> {
-        let project_dirs = ProjectDirs::from("com", "acl-project", "adwaita-craft-launcher")
+        let project_dirs = ProjectDirs::from("io.github", "acl_project", "adwaita-craft-launcher")
             .ok_or(CoreError::ProjectDirsUnavailable)?;
 
         Ok(Self {
