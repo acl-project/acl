@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use acl_common::string::{format_env_vars, format_shell_args, parse_env_vars, parse_shell_args};
-use acl_core::LauncherConfig;
 use acl_core::manager::InstanceManager;
+use acl_core::{InstanceConfig, LauncherConfig};
 use gtk::gio::prelude::ListModelExt;
 
 use libadwaita::prelude::*;
@@ -34,6 +34,8 @@ pub enum InstanceSettingsInput {
     SetForceWayland(bool),
     SetUseDiscreteGpu(bool),
     SetEnvVars(String),
+    SetFullscreen(bool),
+    SetAutoGameLanguage(bool),
     Refresh,
 }
 
@@ -209,36 +211,6 @@ impl InstanceSettings {
             .unwrap_or_default()
     }
 
-    fn current_force_wayland(&self) -> bool {
-        let global = self.config.read().force_wayland;
-        let Some(current) = self.current.as_deref() else {
-            return global;
-        };
-        if !self.is_custom_enabled() {
-            return global;
-        }
-        self.instances
-            .read()
-            .instance(current)
-            .and_then(|ins| ins.config.force_wayland)
-            .unwrap_or(global)
-    }
-
-    fn current_use_discrete_gpu(&self) -> bool {
-        let global = self.config.read().use_discrete_gpu;
-        let Some(current) = self.current.as_deref() else {
-            return global;
-        };
-        if !self.is_custom_enabled() {
-            return global;
-        }
-        self.instances
-            .read()
-            .instance(current)
-            .and_then(|ins| ins.config.use_discrete_gpu)
-            .unwrap_or(global)
-    }
-
     fn current_env_vars(&self) -> String {
         let Some(current) = self.current.as_deref() else {
             return String::new();
@@ -248,6 +220,55 @@ impl InstanceSettings {
             .instance(current)
             .map(|ins| format_env_vars(&ins.config.env_vars))
             .unwrap_or_default()
+    }
+
+    fn resolve_settings<T: Copy>(
+        &self,
+        from_global: impl FnOnce(&LauncherConfig) -> T,
+        from_instance: impl FnOnce(&InstanceConfig) -> Option<T>,
+    ) -> T {
+        let global = from_global(&self.config.read());
+        let Some(current) = self.current.as_deref() else {
+            return global;
+        };
+        self.instances
+            .read()
+            .instance(current)
+            .filter(|ins| ins.config.custom_settings)
+            .and_then(|ins| from_instance(&ins.config))
+            .unwrap_or(global)
+    }
+
+    fn set_override<T: Copy + PartialEq>(
+        &self,
+        val: T,
+        from_global: impl FnOnce(&LauncherConfig) -> T,
+        field: impl FnOnce(&mut InstanceConfig) -> &mut Option<T>,
+        sender: &ComponentSender<Self>,
+    ) {
+        let Some(current) = self.current.as_deref() else {
+            return;
+        };
+        let global = from_global(&self.config.read());
+        let changed = {
+            let mut instances = self.instances.write();
+            let Some(ins) = instances.instance_mut(current) else {
+                return;
+            };
+            if !ins.config.custom_settings {
+                return;
+            }
+            let slot = field(&mut ins.config);
+            if slot.unwrap_or(global) == val {
+                false
+            } else {
+                *slot = Some(val);
+                true
+            }
+        };
+        if changed {
+            self.save_config(sender);
+        }
     }
 }
 
@@ -309,7 +330,45 @@ impl SimpleComponent for InstanceSettings {
                 }
 
             },
+            adw::PreferencesGroup {
+                #[watch]
+                set_title: &t!("settings-game-title", "Game"),
 
+                #[watch]
+                set_sensitive: model.is_custom_enabled(),
+
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-game-fullscreen-title", "Fullscreen"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-game-fullscreen-subtitle",
+                        "Launch the game in fullscreen mode"
+                    ),
+                    #[watch]
+                    set_active: model.resolve_settings(|g| g.fullscreen, |i| i.fullscreen),
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(InstanceSettingsInput::SetFullscreen(row.is_active()));
+                    },
+                },
+
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-game-auto-language-title", "Auto-Set Game Language"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-game-auto-language-subtitle",
+                        "Set Minecraft language to match the launcher on first launch"
+                    ),
+                    #[watch]
+                    set_active: model.resolve_settings(|g| g.auto_game_language, |i| i.auto_game_language),
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(InstanceSettingsInput::SetAutoGameLanguage(row.is_active()));
+                    },
+                },
+            },
 
             adw::PreferencesGroup {
                 #[watch]
@@ -424,7 +483,7 @@ impl SimpleComponent for InstanceSettings {
                         "Force native Wayland (Minecraft 26.3+)"
                     ),
                     #[watch]
-                    set_active: model.current_force_wayland(),
+                    set_active: model.resolve_settings(|g| g.force_wayland, |i| i.force_wayland),
 
                     connect_active_notify[sender] => move |row| {
                         sender.input(InstanceSettingsInput::SetForceWayland(row.is_active()));
@@ -440,7 +499,7 @@ impl SimpleComponent for InstanceSettings {
                         "Prefer running the game on the dedicated graphics card"
                     ),
                     #[watch]
-                    set_active: model.current_use_discrete_gpu(),
+                    set_active: model.resolve_settings(|g| g.use_discrete_gpu, |i| i.use_discrete_gpu),
 
                     connect_active_notify[sender] => move |row| {
                         sender.input(InstanceSettingsInput::SetUseDiscreteGpu(row.is_active()));
@@ -597,28 +656,26 @@ impl SimpleComponent for InstanceSettings {
                 }
             }
             InstanceSettingsInput::SetForceWayland(val) => {
-                if !self.is_custom_enabled() || val == self.current_force_wayland() {
-                    return;
-                }
-                let Some(current) = self.current.as_deref() else {
-                    return;
-                };
-                if let Some(ins) = self.instances.write().instance_mut(current) {
-                    ins.config.force_wayland = Some(val);
-                }
-                self.save_config(&sender);
+                self.set_override(val, |g| g.force_wayland, |i| &mut i.force_wayland, &sender);
             }
             InstanceSettingsInput::SetUseDiscreteGpu(val) => {
-                if !self.is_custom_enabled() || val == self.current_use_discrete_gpu() {
-                    return;
-                }
-                let Some(current) = self.current.as_deref() else {
-                    return;
-                };
-                if let Some(ins) = self.instances.write().instance_mut(current) {
-                    ins.config.use_discrete_gpu = Some(val);
-                }
-                self.save_config(&sender);
+                self.set_override(
+                    val,
+                    |g| g.use_discrete_gpu,
+                    |i| &mut i.use_discrete_gpu,
+                    &sender,
+                );
+            }
+            InstanceSettingsInput::SetFullscreen(val) => {
+                self.set_override(val, |g| g.fullscreen, |i| &mut i.fullscreen, &sender);
+            }
+            InstanceSettingsInput::SetAutoGameLanguage(val) => {
+                self.set_override(
+                    val,
+                    |g| g.auto_game_language,
+                    |i| &mut i.auto_game_language,
+                    &sender,
+                );
             }
             InstanceSettingsInput::SetEnvVars(raw) => {
                 if !self.is_custom_enabled() {
