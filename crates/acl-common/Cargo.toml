@@ -9,3 +9,4 @@ iana-time-zone = { workspace = true }
 serde = { workspace = true }
 version-compare = { workspace = true }
 semver = { workspace = true }
+unic-langid = { workspace = true }

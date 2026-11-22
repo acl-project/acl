@@ -4,18 +4,20 @@
 use std::{
     collections::BTreeMap,
     fs::{self, File},
-    io::ErrorKind,
+    io::{self, ErrorKind},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
+use acl_common::Language;
 use acl_minecraft::{
     AssetIndex, DownloadSource, ProjectType, VersionEntry, VersionMetadata, download::DownloadTask,
     version::VersionPatch,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
+use walkdir::WalkDir;
 
 const CONFIG_NAME: &str = "aclcfg.toml";
 const ABNORMAL_MARK: &str = ".abnormal";
@@ -95,6 +97,12 @@ pub struct InstanceConfig {
     pub use_discrete_gpu: Option<bool>,
     #[serde(default)]
     pub env_vars: BTreeMap<String, String>,
+    #[serde(default)]
+    pub fullscreen: Option<bool>,
+    #[serde(default)]
+    pub auto_game_language: Option<bool>,
+    #[serde(default)]
+    pub auto_memory: Option<bool>,
 }
 
 impl InstanceConfig {
@@ -546,6 +554,57 @@ impl Instance {
             ProjectType::ResourcePack => Some(self.resourcepacks_dir()),
             ProjectType::Shader => Some(self.shaderpacks_dir()),
             ProjectType::Modpack => None, // Modpack is to create a new instance
+        }
+    }
+
+    pub fn has_options_file(&self) -> bool {
+        let game_dir = self.game_dir();
+        if game_dir.join("options.txt").exists() {
+            return true;
+        }
+
+        let config_dir = game_dir.join("config");
+        WalkDir::new(config_dir)
+            .max_depth(2)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_type().is_file() && entry.file_name() == "options.txt")
+    }
+
+    /// Automatically set the game language. If options exist, they will not be automatically set.
+    pub fn ensure_language(&self, language: Language, asset_index: &AssetIndex) {
+        if self.has_options_file() {
+            return;
+        }
+        let Some(base_code) = language.to_mojang_code() else {
+            return;
+        };
+        let Some(mc_lang) = asset_index.resolve_language(&base_code) else {
+            return;
+        };
+
+        if let Err(err) = fs::create_dir_all(self.game_dir()) {
+            warn!("Failed to create game directory for options.txt: {err}");
+            return;
+        }
+
+        let options_path = self.game_dir().join("options.txt");
+
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&options_path)
+            .and_then(|mut f| io::Write::write_all(&mut f, format!("lang:{mc_lang}\n").as_bytes()))
+        {
+            Ok(()) => info!(
+                "Initialized game language to '{mc_lang}' in {}",
+                options_path.display()
+            ),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(err) => warn!(
+                "Failed to write default game language to {}: {err}",
+                options_path.display()
+            ),
         }
     }
 }
@@ -1657,5 +1716,168 @@ mod tests {
             Some(instance.shaderpacks_dir())
         );
         assert_eq!(instance.asset_dir(ProjectType::Modpack), None);
+    }
+
+    #[test]
+    fn test_instance_config_game_settings_defaults_and_roundtrip() {
+        let config = InstanceConfig::new("game-settings", "Game Settings", "1.21.1")
+            .expect("should create instance config");
+        assert_eq!(config.fullscreen, None);
+        assert_eq!(config.auto_game_language, None);
+        assert_eq!(config.auto_memory, None);
+
+        let mut custom_config = config;
+        custom_config.custom_settings = true;
+        custom_config.fullscreen = Some(true);
+        custom_config.auto_game_language = Some(false);
+        custom_config.auto_memory = Some(false);
+
+        let serialized = toml::to_string_pretty(&custom_config).expect("serialize instance config");
+        let deserialized: InstanceConfig =
+            toml::from_str(&serialized).expect("deserialize instance config");
+        assert_eq!(deserialized.fullscreen, Some(true));
+        assert_eq!(deserialized.auto_game_language, Some(false));
+        assert_eq!(deserialized.auto_memory, Some(false));
+
+        // Legacy TOML without the new fields defaults them to None
+        let minimal_toml = r#"
+            id = "legacy"
+            name = "Legacy"
+            game_version = "1.20.4"
+        "#;
+        let parsed: InstanceConfig = toml::from_str(minimal_toml).expect("parse minimal toml");
+        assert_eq!(parsed.fullscreen, None);
+        assert_eq!(parsed.auto_game_language, None);
+        assert_eq!(parsed.auto_memory, None);
+    }
+
+    #[test]
+    fn test_instance_has_options_file() {
+        let temp = TempDirGuard::new("has_options_file");
+
+        // 1. Fresh instance without options.txt
+        let inst_empty = Instance::new("inst_empty", "Empty", "1.21.1", temp.path())
+            .expect("create empty instance");
+        assert!(!inst_empty.has_options_file());
+
+        // 2. Root game_dir/options.txt
+        let inst_root = Instance::new("inst_root", "Root", "1.21.1", temp.path())
+            .expect("create root instance");
+        fs::create_dir_all(inst_root.game_dir()).expect("create game dir");
+        fs::write(inst_root.game_dir().join("options.txt"), "lang:en_us\n")
+            .expect("write root options.txt");
+        assert!(inst_root.has_options_file());
+
+        // 3. config/options.txt (depth 1 under config/)
+        let inst_cfg_d1 = Instance::new("inst_cfg_d1", "CfgD1", "1.21.1", temp.path())
+            .expect("create cfg depth 1 instance");
+        let cfg_dir_1 = inst_cfg_d1.game_dir().join("config");
+        fs::create_dir_all(&cfg_dir_1).expect("create config dir");
+        fs::write(cfg_dir_1.join("options.txt"), "lang:zh_cn\n").expect("write config/options.txt");
+        assert!(inst_cfg_d1.has_options_file());
+
+        // 4. config/defaultoptions/options.txt (depth 2 under config/)
+        let inst_cfg_d2 = Instance::new("inst_cfg_d2", "CfgD2", "1.21.1", temp.path())
+            .expect("create cfg depth 2 instance");
+        let cfg_dir_2 = inst_cfg_d2.game_dir().join("config").join("defaultoptions");
+        fs::create_dir_all(&cfg_dir_2).expect("create nested config dir");
+        fs::write(cfg_dir_2.join("options.txt"), "lang:zh_cn\n").expect("write nested options.txt");
+        assert!(inst_cfg_d2.has_options_file());
+
+        // 5. Deeper than max_depth(2) under config/ is ignored
+        let inst_cfg_d3 = Instance::new("inst_cfg_d3", "CfgD3", "1.21.1", temp.path())
+            .expect("create cfg depth 3 instance");
+        let cfg_dir_3 = inst_cfg_d3.game_dir().join("config").join("a").join("b");
+        fs::create_dir_all(&cfg_dir_3).expect("create deep config dir");
+        fs::write(cfg_dir_3.join("options.txt"), "lang:zh_cn\n").expect("write deep options.txt");
+        assert!(!inst_cfg_d3.has_options_file());
+
+        // 6. A directory named options.txt under config/ does not count as a file
+        let inst_cfg_dir = Instance::new("inst_cfg_dir", "CfgDir", "1.21.1", temp.path())
+            .expect("create cfg dir-named instance");
+        fs::create_dir_all(inst_cfg_dir.game_dir().join("config").join("options.txt"))
+            .expect("create options.txt dir");
+        assert!(!inst_cfg_dir.has_options_file());
+    }
+
+    #[test]
+    fn test_instance_ensure_language() {
+        use acl_minecraft::AssetObject;
+        use std::collections::HashMap;
+
+        let temp = TempDirGuard::new("ensure_language");
+
+        let make_asset_index = |lang_key: Option<&str>| {
+            let mut objects = HashMap::new();
+            if let Some(key) = lang_key {
+                objects.insert(
+                    key.to_string(),
+                    AssetObject {
+                        hash: "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598".to_string(),
+                        size: 10,
+                    },
+                );
+            }
+            AssetIndex {
+                objects,
+                map_to_resources: false,
+                is_virtual: false,
+            }
+        };
+
+        // 1. Initializes options.txt with exact casing from AssetIndex (modern lowercase .json)
+        let inst_modern = Instance::new("lang_modern", "Modern", "1.21.1", temp.path())
+            .expect("create modern instance");
+        let modern_assets = make_asset_index(Some("minecraft/lang/zh_cn.json"));
+        inst_modern.ensure_language(Language::SimplifiedChinese, &modern_assets);
+        let content = fs::read_to_string(inst_modern.game_dir().join("options.txt"))
+            .expect("options.txt should be created");
+        assert_eq!(content, "lang:zh_cn\n");
+
+        // 2. Initializes options.txt with exact casing for legacy .lang
+        let inst_legacy = Instance::new("lang_legacy", "Legacy", "1.12.2", temp.path())
+            .expect("create legacy instance");
+        let legacy_assets = make_asset_index(Some("minecraft/lang/zh_CN.lang"));
+        inst_legacy.ensure_language(Language::SimplifiedChinese, &legacy_assets);
+        let content = fs::read_to_string(inst_legacy.game_dir().join("options.txt"))
+            .expect("legacy options.txt should be created");
+        assert_eq!(content, "lang:zh_CN\n");
+
+        // 3. Does not overwrite existing root options.txt
+        let inst_existing = Instance::new("lang_existing", "Existing", "1.21.1", temp.path())
+            .expect("create existing instance");
+        fs::create_dir_all(inst_existing.game_dir()).expect("create game dir");
+        fs::write(
+            inst_existing.game_dir().join("options.txt"),
+            "lang:ja_jp\nfov:0.5\n",
+        )
+        .expect("write existing options.txt");
+        inst_existing.ensure_language(Language::SimplifiedChinese, &modern_assets);
+        let content = fs::read_to_string(inst_existing.game_dir().join("options.txt"))
+            .expect("read existing options.txt");
+        assert_eq!(content, "lang:ja_jp\nfov:0.5\n");
+
+        // 4. Skips writing when config/*/options.txt exists
+        let inst_preset = Instance::new("lang_preset", "Preset", "1.21.1", temp.path())
+            .expect("create preset instance");
+        let preset_dir = inst_preset.game_dir().join("config").join("defaultoptions");
+        fs::create_dir_all(&preset_dir).expect("create preset dir");
+        fs::write(preset_dir.join("options.txt"), "lang:en_us\n")
+            .expect("write preset options.txt");
+        inst_preset.ensure_language(Language::SimplifiedChinese, &modern_assets);
+        assert!(!inst_preset.game_dir().join("options.txt").exists());
+
+        // 5. Skips writing for English (uses Minecraft default en_us)
+        let inst_en = Instance::new("lang_en", "English", "1.21.1", temp.path())
+            .expect("create english instance");
+        inst_en.ensure_language(Language::English, &modern_assets);
+        assert!(!inst_en.game_dir().join("options.txt").exists());
+
+        // 6. Skips writing when AssetIndex does not contain the language
+        let inst_missing = Instance::new("lang_missing", "Missing", "1.21.1", temp.path())
+            .expect("create missing-lang instance");
+        let empty_assets = make_asset_index(None);
+        inst_missing.ensure_language(Language::SimplifiedChinese, &empty_assets);
+        assert!(!inst_missing.game_dir().join("options.txt").exists());
     }
 }

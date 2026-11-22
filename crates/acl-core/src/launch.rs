@@ -14,7 +14,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     CoreError, Instance, LauncherConfig, LauncherDirs, Result, gpu::DiscreteGpuEnv,
-    java::JavaInstallation,
+    java::JavaInstallation, system::memory_info,
 };
 
 const LAUNCHER_NAME: &str = "ACL";
@@ -221,20 +221,24 @@ impl LaunchCommand {
             .collect()
     }
 
-    pub fn build(
+    fn resolve_memory_limits(
         instance: &Instance,
         global_config: &LauncherConfig,
-        dirs: &LauncherDirs,
-        metadata: &VersionMetadata,
-        account: &Account,
-        access_token: &str,
-        java_path: PathBuf,
-    ) -> Result<Self> {
-        let mut jvm_args = Vec::new();
-
+        available_bytes: u64,
+        is_64bit: bool,
+    ) -> (u32, u32) {
         let custom = instance.config.custom_settings;
 
-        let max_mem = if custom {
+        let auto_memory = if custom {
+            instance
+                .config
+                .auto_memory
+                .unwrap_or(global_config.auto_memory)
+        } else {
+            global_config.auto_memory
+        };
+
+        let mut max_mem = if custom {
             instance
                 .config
                 .max_memory_mb
@@ -243,7 +247,37 @@ impl LaunchCommand {
             global_config.max_memory_mb
         };
 
-        let min_mem = global_config.min_memory_mb;
+        if auto_memory && let Some(suggested) = suggested_max_memory_mb(available_bytes, is_64bit) {
+            max_mem = suggested;
+        }
+
+        let min_mem = if auto_memory {
+            global_config.min_memory_mb.min(max_mem)
+        } else {
+            global_config.min_memory_mb
+        };
+        (min_mem, max_mem)
+    }
+
+    pub fn build(
+        instance: &Instance,
+        global_config: &LauncherConfig,
+        dirs: &LauncherDirs,
+        metadata: &VersionMetadata,
+        account: &Account,
+        access_token: &str,
+        java: &JavaInstallation,
+    ) -> Result<Self> {
+        let mut jvm_args = Vec::new();
+
+        let custom = instance.config.custom_settings;
+
+        let (min_mem, max_mem) = Self::resolve_memory_limits(
+            instance,
+            global_config,
+            memory_info().available,
+            java.info.is_64bit,
+        );
 
         if min_mem > max_mem {
             return Err(CoreError::InvalidMemoryConfig {
@@ -251,6 +285,8 @@ impl LaunchCommand {
                 max_mb: max_mem,
             });
         }
+
+        info!("Launching game with max memory: {max_mem} MiB");
 
         // Memory arguments.
         jvm_args.push(format!("-Xms{min_mem}M"));
@@ -274,7 +310,21 @@ impl LaunchCommand {
         jvm_args.extend(instance.config.extra_jvm_args.iter().cloned());
 
         // Command-line arguments for the game.
-        let game_args = Self::apply_placeholders(metadata.resolve_game_arguments(), &vars);
+        let mut game_args = Self::apply_placeholders(metadata.resolve_game_arguments(), &vars);
+
+        let fullscreen = if custom {
+            instance
+                .config
+                .fullscreen
+                .unwrap_or(global_config.fullscreen)
+        } else {
+            global_config.fullscreen
+        };
+
+        let fullscreen_param = "--fullscreen".to_string();
+        if fullscreen && !game_args.contains(&fullscreen_param) {
+            game_args.push(fullscreen_param);
+        }
 
         let use_discrete_gpu = if custom {
             instance
@@ -297,7 +347,7 @@ impl LaunchCommand {
         };
 
         Ok(Self {
-            java_path,
+            java_path: java.path.to_path_buf(),
             game_dir: instance.game_dir().to_path_buf(),
             jvm_args,
             main_class: metadata.main_class.clone(),
@@ -436,6 +486,40 @@ pub fn select_java(
     })
 }
 
+const MIB: u64 = 1024 * 1024;
+const RESERVE_MB: u64 = 512;
+const EIGHT_GIB_MB: u64 = 8 * 1024;
+const BASE_TIER_MB: u64 = 6553; // EIGHT_GIB_MB * 4 / 5
+const SIXTEEN_GIB_MB: u64 = 16 * 1024;
+const BIT32_CAP_MB: u32 = 768;
+
+pub fn suggested_max_memory_mb(available_bytes: u64, is_64bit: bool) -> Option<u32> {
+    let available_mb = available_bytes.checked_div(MIB)?;
+    if available_mb == 0 {
+        return None;
+    }
+
+    let usable_mb = available_mb.saturating_sub(RESERVE_MB);
+
+    let tiered_mb = if usable_mb <= EIGHT_GIB_MB {
+        usable_mb.saturating_mul(4).checked_div(5)?
+    } else {
+        let extra = usable_mb.saturating_sub(EIGHT_GIB_MB).checked_div(5)?;
+        BASE_TIER_MB.saturating_add(extra).min(SIXTEEN_GIB_MB)
+    };
+
+    // Fallback memory
+    let floor_mb = available_mb.checked_div(2)?.clamp(1, RESERVE_MB);
+
+    let suggested_mb = tiered_mb.max(floor_mb).min(SIXTEEN_GIB_MB);
+
+    let mut mb = u32::try_from(suggested_mb).unwrap_or(u32::MAX);
+    if !is_64bit {
+        mb = mb.min(BIT32_CAP_MB);
+    }
+    Some(mb)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,7 +620,10 @@ mod tests {
     #[test]
     fn test_launch_command_build_modern() {
         let instance = mock_instance("modern_inst");
-        let global_config = LauncherConfig::default();
+        let global_config = LauncherConfig {
+            auto_memory: false,
+            ..Default::default()
+        };
         let dirs = LauncherDirs::with_paths(
             PathBuf::from("/mock/config"),
             PathBuf::from("/mock/data"),
@@ -544,7 +631,17 @@ mod tests {
         );
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").expect("failed to create account");
+
         let java_path = PathBuf::from("/mock/java/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -554,7 +651,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path.clone(),
+            &java,
         )
         .expect("build launch command should succeed");
 
@@ -626,6 +723,15 @@ mod tests {
         let hex_uuid = "4566e69fc90748ee8d71d7ba5aaafced";
         let account = Account::new_microsoft("Steve", hex_uuid).expect("failed to create account");
         let java_path = PathBuf::from("/mock/java/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "mock_msa_access_token_xyz".to_string();
 
         let cmd = LaunchCommand::build(
@@ -635,7 +741,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path,
+            &java,
         )
         .expect("build launch command should succeed");
 
@@ -666,7 +772,10 @@ mod tests {
     #[test]
     fn test_launch_command_build_legacy() {
         let instance = mock_instance("legacy_inst");
-        let global_config = LauncherConfig::default();
+        let global_config = LauncherConfig {
+            auto_memory: false,
+            ..Default::default()
+        };
         let dirs = LauncherDirs::with_paths(
             PathBuf::from("/mock/config"),
             PathBuf::from("/mock/data"),
@@ -675,6 +784,15 @@ mod tests {
         let metadata = mock_version_metadata("1.12.2", true, Some(8));
         let account = Account::new_offline("Alex").expect("failed to create account");
         let java_path = PathBuf::from("/mock/java8/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "1.8".to_string(),
+                major_version: 8,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -684,7 +802,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path.clone(),
+            &java,
         )
         .expect("build legacy launch command should succeed");
 
@@ -724,6 +842,7 @@ mod tests {
         let global_config = LauncherConfig {
             min_memory_mb: 2048,
             max_memory_mb: 4096,
+            auto_memory: false,
             ..Default::default()
         };
         let dirs = LauncherDirs::with_paths(
@@ -734,6 +853,15 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -743,7 +871,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path.clone(),
+            &java,
         )
         .expect("memory config should be valid");
 
@@ -760,7 +888,7 @@ mod tests {
             &metadata,
             &account,
             "0",
-            java_path,
+            &java,
         )
         .expect_err("min_mem > max_mem should fail");
 
@@ -782,6 +910,7 @@ mod tests {
         let global_config = LauncherConfig {
             min_memory_mb: 1024,
             max_memory_mb: 4096,
+            auto_memory: false,
             ..Default::default()
         };
         let dirs = LauncherDirs::with_paths(
@@ -792,6 +921,15 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -801,7 +939,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path,
+            &java,
         )
         .expect("memory config should be valid");
 
@@ -824,6 +962,15 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -833,7 +980,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path,
+            &java,
         )
         .expect("build should succeed");
 
@@ -1138,6 +1285,215 @@ mod tests {
                 ("INSTANCE_ONLY".to_string(), "ignored".to_string()),
                 ("SHARED".to_string(), "from_instance".to_string()),
             ])
+        );
+    }
+
+    #[test]
+    fn test_suggested_max_memory_mb_tiers_caps_and_monotonicity() {
+        // Zero and sub-MiB values cannot be allocated
+        assert_eq!(suggested_max_memory_mb(0, true), None);
+        assert_eq!(suggested_max_memory_mb(MIB - 1, true), None);
+        assert_eq!(suggested_max_memory_mb(0, false), None);
+
+        // Low-memory floor: 50% clamped to [1, 512] MiB
+        assert_eq!(suggested_max_memory_mb(MIB, true), Some(1));
+        assert_eq!(suggested_max_memory_mb(2 * MIB, true), Some(1));
+        assert_eq!(suggested_max_memory_mb(256 * MIB, true), Some(128));
+        assert_eq!(suggested_max_memory_mb(512 * MIB, true), Some(256));
+        assert_eq!(suggested_max_memory_mb(513 * MIB, true), Some(256));
+        assert_eq!(suggested_max_memory_mb(1024 * MIB, true), Some(512));
+        assert_eq!(suggested_max_memory_mb(1152 * MIB, true), Some(512));
+
+        // First tier: usable <= 8 GiB -> usable * 4 / 5
+        assert_eq!(suggested_max_memory_mb(2048 * MIB, true), Some(1228));
+        assert_eq!(suggested_max_memory_mb(4096 * MIB, true), Some(2867));
+        assert_eq!(suggested_max_memory_mb(8704 * MIB, true), Some(6553));
+
+        // Second tier: usable > 8 GiB -> 6553 + (usable - 8192) / 5, capped at 16 GiB
+        assert_eq!(suggested_max_memory_mb(16384 * MIB, true), Some(8089));
+        assert_eq!(suggested_max_memory_mb(32768 * MIB, true), Some(11365));
+        assert_eq!(suggested_max_memory_mb(65536 * MIB, true), Some(16384));
+        assert_eq!(suggested_max_memory_mb(u64::MAX, true), Some(16384));
+
+        // 32-bit JVM cap at 768 MiB
+        assert_eq!(suggested_max_memory_mb(512 * MIB, false), Some(256));
+        assert_eq!(suggested_max_memory_mb(1024 * MIB, false), Some(512));
+        assert_eq!(suggested_max_memory_mb(2048 * MIB, false), Some(768));
+        assert_eq!(suggested_max_memory_mb(32768 * MIB, false), Some(768));
+
+        // Monotonicity across transition boundaries
+        let sample_mbs = [
+            1, 2, 100, 256, 511, 512, 513, 514, 768, 1024, 1152, 1365, 2048, 4096, 8703, 8704,
+            8705, 16384, 32768, 65536,
+        ];
+        let mut prev = 0;
+        for mb in sample_mbs {
+            let suggested = suggested_max_memory_mb(mb * MIB, true)
+                .expect("non-zero MiB should produce a suggestion");
+            assert!(
+                suggested >= prev,
+                "expected monotonic suggestion at {mb} MiB: {suggested} < {prev}"
+            );
+            prev = suggested;
+        }
+    }
+
+    #[test]
+    fn test_resolve_memory_limits_precedence_and_clamping() {
+        let mut instance = mock_instance("auto_mem_inst");
+        let global = LauncherConfig {
+            min_memory_mb: 1024,
+            max_memory_mb: 4096,
+            auto_memory: true,
+            ..Default::default()
+        };
+
+        // 1. Global auto_memory enabled with 4 GiB available -> suggested 2867 MiB
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global, 4096 * MIB, true),
+            (1024, 2867)
+        );
+
+        // 2. Auto memory clamps min_memory_mb down to max_mem when available RAM is low or 32-bit
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global, 1024 * MIB, true),
+            (512, 512)
+        );
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global, 4096 * MIB, false),
+            (768, 768)
+        );
+
+        // 3. Unavailable memory info (0 bytes) falls back to configured max_memory_mb
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global, 0, true),
+            (1024, 4096)
+        );
+
+        // 4. custom_settings = false ignores instance auto_memory and max_memory_mb overrides
+        instance.config.custom_settings = false;
+        instance.config.auto_memory = Some(false);
+        instance.config.max_memory_mb = Some(6144);
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global, 4096 * MIB, true),
+            (1024, 2867)
+        );
+
+        // 5. custom_settings = true with auto_memory = Some(false) uses instance max_memory_mb without clamping min
+        instance.config.custom_settings = true;
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global, 4096 * MIB, true),
+            (1024, 6144)
+        );
+        instance.config.max_memory_mb = Some(512);
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global, 4096 * MIB, true),
+            (1024, 512)
+        );
+
+        // 6. custom_settings = true with auto_memory = None inherits global auto_memory
+        instance.config.auto_memory = None;
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global, 16384 * MIB, true),
+            (1024, 8089)
+        );
+
+        // 7. Global auto_memory = false, instance override auto_memory = Some(true)
+        let global_manual = LauncherConfig {
+            min_memory_mb: 1024,
+            max_memory_mb: 4096,
+            auto_memory: false,
+            ..Default::default()
+        };
+        instance.config.auto_memory = Some(true);
+        assert_eq!(
+            LaunchCommand::resolve_memory_limits(&instance, &global_manual, 16384 * MIB, true),
+            (1024, 8089)
+        );
+    }
+
+    #[test]
+    fn test_launch_command_fullscreen_flag_precedence_and_dedup() {
+        let mut instance = mock_instance("fullscreen_inst");
+        let dirs = LauncherDirs::with_paths(
+            PathBuf::from("/mock/config"),
+            PathBuf::from("/mock/data"),
+            PathBuf::from("/mock/cache"),
+        );
+        let account = Account::new_offline("Steve").expect("failed to create account");
+        let java = mock_java("/mock/java/bin/java", 21);
+
+        // 1. Disabled by default
+        let mut global = LauncherConfig {
+            auto_memory: false,
+            fullscreen: false,
+            ..Default::default()
+        };
+        let metadata = mock_version_metadata("1.21.1", false, Some(21));
+        let cmd = LaunchCommand::build(&instance, &global, &dirs, &metadata, &account, "0", &java)
+            .expect("build should succeed");
+        assert!(!cmd.game_args.iter().any(|arg| arg == "--fullscreen"));
+
+        // 2. Global fullscreen enabled injects --fullscreen
+        global.fullscreen = true;
+        let cmd = LaunchCommand::build(&instance, &global, &dirs, &metadata, &account, "0", &java)
+            .expect("build should succeed");
+        assert_eq!(
+            cmd.game_args
+                .iter()
+                .filter(|arg| arg.as_str() == "--fullscreen")
+                .count(),
+            1
+        );
+
+        // 3. custom_settings = false ignores instance fullscreen override
+        instance.config.custom_settings = false;
+        instance.config.fullscreen = Some(false);
+        let cmd = LaunchCommand::build(&instance, &global, &dirs, &metadata, &account, "0", &java)
+            .expect("build should succeed");
+        assert!(cmd.game_args.iter().any(|arg| arg == "--fullscreen"));
+
+        // 4. custom_settings = true respects instance fullscreen = Some(false)
+        instance.config.custom_settings = true;
+        let cmd = LaunchCommand::build(&instance, &global, &dirs, &metadata, &account, "0", &java)
+            .expect("build should succeed");
+        assert!(!cmd.game_args.iter().any(|arg| arg == "--fullscreen"));
+
+        // 5. custom_settings = true with Some(true) overrides global false
+        global.fullscreen = false;
+        instance.config.fullscreen = Some(true);
+        let cmd = LaunchCommand::build(&instance, &global, &dirs, &metadata, &account, "0", &java)
+            .expect("build should succeed");
+        assert_eq!(
+            cmd.game_args
+                .iter()
+                .filter(|arg| arg.as_str() == "--fullscreen")
+                .count(),
+            1
+        );
+
+        // 6. Does not duplicate --fullscreen if already present in metadata game arguments
+        let mut metadata_with_fs = mock_version_metadata("1.21.1", false, Some(21));
+        if let Some(args) = &mut metadata_with_fs.arguments {
+            args.game
+                .push(ArgumentEntry::Simple("--fullscreen".to_string()));
+        }
+        let cmd = LaunchCommand::build(
+            &instance,
+            &global,
+            &dirs,
+            &metadata_with_fs,
+            &account,
+            "0",
+            &java,
+        )
+        .expect("build should succeed");
+        assert_eq!(
+            cmd.game_args
+                .iter()
+                .filter(|arg| arg.as_str() == "--fullscreen")
+                .count(),
+            1
         );
     }
 }

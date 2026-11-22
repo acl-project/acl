@@ -359,8 +359,27 @@ impl HomePage {
                         let inst_clone = instance.clone();
                         let dirs_clone = dirs.clone();
                         let metadata_clone = metadata.clone();
-                        tokio::task::spawn_blocking(move || {
-                            inst_clone.prepare_runtime(&metadata_clone, &asset_index, &dirs_clone)
+                        let language = global_config.language;
+
+                        let auto_lang = if instance.config.custom_settings {
+                            instance
+                                .config
+                                .auto_game_language
+                                .unwrap_or(global_config.auto_game_language)
+                        } else {
+                            global_config.auto_game_language
+                        };
+
+                        tokio::task::spawn_blocking(move || -> acl_core::Result<()> {
+                            inst_clone.prepare_runtime(
+                                &metadata_clone,
+                                &asset_index,
+                                &dirs_clone,
+                            )?;
+                            if auto_lang {
+                                inst_clone.ensure_language(language, &asset_index);
+                            }
+                            Ok(())
                         })
                         .await
                         .map_err(|e| {
@@ -387,7 +406,7 @@ impl HomePage {
                             &metadata,
                             &account,
                             &access_token,
-                            java.path,
+                            &java,
                         )
                         .map_err(|e| {
                             t!(

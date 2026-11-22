@@ -45,6 +45,12 @@ pub struct LauncherConfig {
     pub use_discrete_gpu: bool,
     /// Extra environment variables passed to the game process.
     pub env_vars: BTreeMap<String, String>,
+    /// Launch the game in fullscreen mode
+    pub fullscreen: bool,
+    /// Set Minecraft language to match the launcher on first launch
+    pub auto_game_language: bool,
+    /// Automatically set the maximum memory for the game
+    pub auto_memory: bool,
 }
 
 impl Default for LauncherConfig {
@@ -62,6 +68,9 @@ impl Default for LauncherConfig {
             force_wayland: true,
             use_discrete_gpu: true,
             env_vars: BTreeMap::new(),
+            fullscreen: false,
+            auto_game_language: true,
+            auto_memory: true,
         }
     }
 }
@@ -100,6 +109,9 @@ impl LauncherConfig {
             force_wayland: true,
             use_discrete_gpu: true,
             env_vars: BTreeMap::new(),
+            fullscreen: false,
+            auto_game_language: true,
+            auto_memory: true,
         }
     }
 
@@ -204,6 +216,9 @@ mod tests {
         assert!(config.force_wayland);
         assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
+        assert!(!config.fullscreen);
+        assert!(config.auto_game_language);
+        assert!(config.auto_memory);
     }
 
     #[test]
@@ -240,6 +255,9 @@ mod tests {
                     force_wayland: enable_offline,
                     use_discrete_gpu: !enable_offline,
                     env_vars: env_vars.clone(),
+                    fullscreen: enable_offline,
+                    auto_game_language: !enable_offline,
+                    auto_memory: !enable_offline,
                 };
 
                 let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");
@@ -270,6 +288,9 @@ mod tests {
         assert!(config.force_wayland);
         assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
+        assert!(!config.fullscreen);
+        assert!(config.auto_game_language);
+        assert!(config.auto_memory);
     }
 
     #[test]
@@ -285,6 +306,9 @@ mod tests {
         assert!(config.force_wayland);
         assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
+        assert!(!config.fullscreen);
+        assert!(config.auto_game_language);
+        assert!(config.auto_memory);
         assert!((16..=64).contains(&config.max_concurrent_downloads));
         if acl_common::region::is_mainland_china() {
             assert_eq!(config.download_source, DownloadSource::Bmclapi);

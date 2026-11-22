@@ -17,3 +17,5 @@ tracing = { workspace = true }
 glob = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
+walkdir = { workspace = true }
+sysinfo = { workspace = true }

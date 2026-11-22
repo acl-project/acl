@@ -497,6 +497,16 @@ settings-downloads-source-title = 下载源
 settings-downloads-title = 下载
 # Source: Failed to save configuration: { $err }
 settings-error-save-configuration = 保存配置失败：{ $err }
+# Source: Set Minecraft language to match the launcher on first launch
+settings-game-auto-language-subtitle = 首次启动时将 Minecraft 语言设置为与启动器一致
+# Source: Auto-Set Game Language
+settings-game-auto-language-title = 自动设置游戏语言
+# Source: Launch the game in fullscreen mode
+settings-game-fullscreen-subtitle = 以全屏模式启动游戏
+# Source: Fullscreen
+settings-game-fullscreen-title = 全屏启动
+# Source: Game
+settings-game-title = 游戏
 # Source: Prefer running the game on the dedicated graphics card
 settings-graphics-discrete-gpu-subtitle = 优先使用独立显卡运行游戏
 # Source: Use Discrete GPU
@@ -511,6 +521,10 @@ settings-graphics-force-wayland-title = 强制 Wayland
 settings-graphics-title = 图形与环境
 # Source: Auto-detect (Recommended)
 settings-java-auto-detect = 自动检测（推荐）
+# Source: Automatically allocate maximum memory based on available RAM
+settings-java-auto-memory-subtitle = 根据可用内存自动分配最大内存
+# Source: Auto Memory
+settings-java-auto-memory-title = 自动分配内存
 # Source: Max Memory
 settings-java-max-memory-title = 最大内存
 # Source: Rescan for installed Java runtimes

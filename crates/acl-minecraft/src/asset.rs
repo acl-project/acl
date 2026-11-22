@@ -153,6 +153,20 @@ impl AssetIndex {
 
         tasks
     }
+
+    /// Searches the `AssetIndex` for the given language code (case-insensitive),
+    /// returning the exact casing required by this version if found.
+    pub fn resolve_language(&self, code: &str) -> Option<String> {
+        self.objects
+            .keys()
+            .filter_map(|k| k.strip_prefix("minecraft/lang/"))
+            .filter_map(|name| {
+                name.strip_suffix(".json")
+                    .or_else(|| name.strip_suffix(".lang"))
+            })
+            .find(|lang| lang.eq_ignore_ascii_case(code))
+            .map(str::to_string)
+    }
 }
 
 #[cfg(test)]
@@ -565,5 +579,40 @@ mod tests {
                 panic!("unexpected task sha1: {}", task.sha1);
             }
         }
+    }
+
+    #[test]
+    fn test_asset_index_resolve_language() {
+        let mut objects = HashMap::new();
+        let dummy_obj = || AssetObject {
+            hash: "bdf48ef6b5d0d23ebb4f8a6179d4a1bfab1a9598".to_string(),
+            size: 10,
+        };
+
+        // Modern JSON language entry (lowercase)
+        objects.insert("minecraft/lang/zh_cn.json".to_string(), dummy_obj());
+        // Legacy .lang language entry (mixed case)
+        objects.insert("minecraft/lang/zh_TW.lang".to_string(), dummy_obj());
+        // Non-language or unsupported suffix entries that must be ignored
+        objects.insert("minecraft/lang/ja_jp.txt".to_string(), dummy_obj());
+        objects.insert("other/lang/fr_fr.json".to_string(), dummy_obj());
+        objects.insert("minecraft/sounds/zh_cn.json".to_string(), dummy_obj());
+
+        let index = AssetIndex {
+            objects,
+            map_to_resources: false,
+            is_virtual: false,
+        };
+
+        // Preserves exact casing from the asset index regardless of input casing
+        assert_eq!(index.resolve_language("zh_CN").as_deref(), Some("zh_cn"));
+        assert_eq!(index.resolve_language("ZH_CN").as_deref(), Some("zh_cn"));
+        assert_eq!(index.resolve_language("zh_tw").as_deref(), Some("zh_TW"));
+        assert_eq!(index.resolve_language("zh_TW").as_deref(), Some("zh_TW"));
+
+        // Unsupported extensions, wrong prefixes, or missing languages return None
+        assert_eq!(index.resolve_language("ja_jp"), None);
+        assert_eq!(index.resolve_language("fr_fr"), None);
+        assert_eq!(index.resolve_language("de_de"), None);
     }
 }

@@ -14,8 +14,8 @@ use relm4::{SharedState, prelude::*};
 use tracing::error;
 
 use crate::i18n::apply_language;
-use crate::system::memory_info;
 use crate::t;
+use acl_core::system::memory_info;
 pub struct SettingsPage {
     config: Arc<SharedState<LauncherConfig>>,
     config_path: PathBuf,
@@ -46,6 +46,9 @@ pub enum SettingsInput {
     SetForceWayland(bool),
     SetUseDiscreteGpu(bool),
     SetEnvVars(String),
+    SetFullscreen(bool),
+    SetAutoGameLanguage(bool),
+    SetAutoMemory(bool),
     Refresh,
 }
 
@@ -110,6 +113,27 @@ impl SettingsPage {
         self.language_model
             .splice(0, self.language_model.n_items(), &name_refs);
     }
+
+    fn update_field<T: PartialEq>(
+        &self,
+        val: T,
+        field: impl FnOnce(&mut LauncherConfig) -> &mut T,
+        sender: &ComponentSender<Self>,
+    ) {
+        let changed = {
+            let mut cfg = self.config.write();
+            let slot = field(&mut cfg);
+            if *slot == val {
+                false
+            } else {
+                *slot = val;
+                true
+            }
+        };
+        if changed {
+            self.save_config(sender);
+        }
+    }
 }
 
 #[relm4::component(pub)]
@@ -120,6 +144,44 @@ impl SimpleComponent for SettingsPage {
 
     view! {
         adw::PreferencesPage {
+            adw::PreferencesGroup {
+                #[watch]
+                set_title: &t!("settings-game-title", "Game"),
+
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-game-fullscreen-title", "Fullscreen"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-game-fullscreen-subtitle",
+                        "Launch the game in fullscreen mode"
+                    ),
+                    #[watch]
+                    set_active: model.config.read().fullscreen,
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(SettingsInput::SetFullscreen(row.is_active()));
+                    },
+                },
+
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-game-auto-language-title", "Auto-Set Game Language"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-game-auto-language-subtitle",
+                        "Set Minecraft language to match the launcher on first launch"
+                    ),
+                    #[watch]
+                    set_active: model.config.read().auto_game_language,
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(SettingsInput::SetAutoGameLanguage(row.is_active()
+                        ));
+                    },
+                },
+            },
+
             adw::PreferencesGroup {
                 #[watch]
                 set_title: &t!("settings-java-title","Java"),
@@ -138,7 +200,25 @@ impl SimpleComponent for SettingsPage {
                     },
                 },
 
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-java-auto-memory-title", "Auto Memory"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-java-auto-memory-subtitle",
+                        "Automatically allocate maximum memory based on available RAM"
+                    ),
+                    #[watch]
+                    set_active: model.config.read().auto_memory,
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(SettingsInput::SetAutoMemory(row.is_active()));
+                    },
+                },
+
                 add = &adw::ActionRow {
+                    #[watch]
+                    set_sensitive: !model.config.read().auto_memory,
                     #[watch]
                     set_title: &t!("settings-java-max-memory-title","Max Memory"),
                     #[watch]
@@ -383,18 +463,7 @@ impl SimpleComponent for SettingsPage {
     fn update(&mut self, message: Self::Input, sender: ComponentSender<Self>) {
         match message {
             SettingsInput::SetMinMemory(val) => {
-                let changed = {
-                    let mut cfg = self.config.write();
-                    if cfg.min_memory_mb == val {
-                        false
-                    } else {
-                        cfg.min_memory_mb = val;
-                        true
-                    }
-                };
-                if changed {
-                    self.save_config(&sender);
-                }
+                self.update_field(val, |c| &mut c.min_memory_mb, &sender);
             }
             SettingsInput::SetMaxMemory(val) => {
                 let changed = {
@@ -417,32 +486,10 @@ impl SimpleComponent for SettingsPage {
                 }
             }
             SettingsInput::SetMaxConcurrentDownloads(val) => {
-                let changed = {
-                    let mut cfg = self.config.write();
-                    if cfg.max_concurrent_downloads == val {
-                        false
-                    } else {
-                        cfg.max_concurrent_downloads = val;
-                        true
-                    }
-                };
-                if changed {
-                    self.save_config(&sender);
-                }
+                self.update_field(val, |c| &mut c.max_concurrent_downloads, &sender);
             }
             SettingsInput::SetCloseOnLaunch(val) => {
-                let changed = {
-                    let mut cfg = self.config.write();
-                    if cfg.close_launcher_on_launch == val {
-                        false
-                    } else {
-                        cfg.close_launcher_on_launch = val;
-                        true
-                    }
-                };
-                if changed {
-                    self.save_config(&sender);
-                }
+                self.update_field(val, |c| &mut c.close_launcher_on_launch, &sender);
             }
             SettingsInput::SelectDefaultJava(index) => {
                 let mut cfg = self.config.write();
@@ -465,18 +512,7 @@ impl SimpleComponent for SettingsPage {
                 self.save_config(&sender);
             }
             SettingsInput::SelectDownloadSource(val) => {
-                let changed = {
-                    let mut cfg = self.config.write();
-                    if cfg.download_source == val {
-                        false
-                    } else {
-                        cfg.download_source = val;
-                        true
-                    }
-                };
-                if changed {
-                    self.save_config(&sender);
-                }
+                self.update_field(val, |c| &mut c.download_source, &sender);
             }
             SettingsInput::SelectLanguage(idx) => {
                 let lang = Language::from_index(idx as u32);
@@ -500,47 +536,22 @@ impl SimpleComponent for SettingsPage {
                 self.refresh_language_model();
             }
             SettingsInput::SetForceWayland(val) => {
-                let changed = {
-                    let mut cfg = self.config.write();
-                    if cfg.force_wayland == val {
-                        false
-                    } else {
-                        cfg.force_wayland = val;
-                        true
-                    }
-                };
-                if changed {
-                    self.save_config(&sender);
-                }
+                self.update_field(val, |c| &mut c.force_wayland, &sender);
             }
             SettingsInput::SetUseDiscreteGpu(val) => {
-                let changed = {
-                    let mut cfg = self.config.write();
-                    if cfg.use_discrete_gpu == val {
-                        false
-                    } else {
-                        cfg.use_discrete_gpu = val;
-                        true
-                    }
-                };
-                if changed {
-                    self.save_config(&sender);
-                }
+                self.update_field(val, |c| &mut c.use_discrete_gpu, &sender);
             }
             SettingsInput::SetEnvVars(raw) => {
-                let parsed = parse_env_vars(&raw);
-                let changed = {
-                    let mut cfg = self.config.write();
-                    if cfg.env_vars == parsed {
-                        false
-                    } else {
-                        cfg.env_vars = parsed;
-                        true
-                    }
-                };
-                if changed {
-                    self.save_config(&sender);
-                }
+                self.update_field(parse_env_vars(&raw), |c| &mut c.env_vars, &sender);
+            }
+            SettingsInput::SetFullscreen(val) => {
+                self.update_field(val, |c| &mut c.fullscreen, &sender);
+            }
+            SettingsInput::SetAutoGameLanguage(val) => {
+                self.update_field(val, |c| &mut c.auto_game_language, &sender);
+            }
+            SettingsInput::SetAutoMemory(val) => {
+                self.update_field(val, |c| &mut c.auto_memory, &sender);
             }
         }
     }

@@ -8,8 +8,6 @@ pub mod install;
 pub mod pages;
 pub mod widgets;
 
-mod system;
-
 use std::process::ExitCode;
 
 use acl_core::LauncherDirs;
