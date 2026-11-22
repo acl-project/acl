@@ -216,6 +216,9 @@ mod tests {
         assert!(config.force_wayland);
         assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
+        assert!(!config.fullscreen);
+        assert!(config.auto_game_language);
+        assert!(config.auto_memory);
     }
 
     #[test]
@@ -252,9 +255,9 @@ mod tests {
                     force_wayland: enable_offline,
                     use_discrete_gpu: !enable_offline,
                     env_vars: env_vars.clone(),
-                    fullscreen: false,
-                    auto_game_language: true,
-                    auto_memory: true,
+                    fullscreen: enable_offline,
+                    auto_game_language: !enable_offline,
+                    auto_memory: !enable_offline,
                 };
 
                 let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");
@@ -285,6 +288,9 @@ mod tests {
         assert!(config.force_wayland);
         assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
+        assert!(!config.fullscreen);
+        assert!(config.auto_game_language);
+        assert!(config.auto_memory);
     }
 
     #[test]
@@ -300,6 +306,9 @@ mod tests {
         assert!(config.force_wayland);
         assert!(config.use_discrete_gpu);
         assert!(config.env_vars.is_empty());
+        assert!(!config.fullscreen);
+        assert!(config.auto_game_language);
+        assert!(config.auto_memory);
         assert!((16..=64).contains(&config.max_concurrent_downloads));
         if acl_common::region::is_mainland_china() {
             assert_eq!(config.download_source, DownloadSource::Bmclapi);
