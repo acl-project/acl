@@ -5,7 +5,7 @@ use std::sync::{Mutex, OnceLock};
 use sysinfo::System;
 use tracing::error;
 /// Make system information a singleton.
-pub static SYSTEM: OnceLock<Option<Mutex<System>>> = OnceLock::new();
+static SYSTEM: OnceLock<Option<Mutex<System>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MemoryInfo {

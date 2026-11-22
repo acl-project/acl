@@ -286,7 +286,7 @@ impl LaunchCommand {
             });
         }
 
-        info!("Launch game use max memory {max_mem}");
+        info!("Launching game with max memory: {max_mem} MiB");
 
         // Memory arguments.
         jvm_args.push(format!("-Xms{min_mem}M"));
@@ -487,38 +487,36 @@ pub fn select_java(
 }
 
 const MIB: u64 = 1024 * 1024;
-const RESERVE_BYTES: u64 = 512 * MIB;
-const EIGHT_GIB: u64 = 8 * 1024 * MIB;
-const SIXTEEN_GIB: u64 = 16 * 1024 * MIB;
+const RESERVE_MB: u64 = 512;
+const EIGHT_GIB_MB: u64 = 8 * 1024;
+const BASE_TIER_MB: u64 = 6553; // EIGHT_GIB_MB * 4 / 5
+const SIXTEEN_GIB_MB: u64 = 16 * 1024;
 const BIT32_CAP_MB: u32 = 768;
 
 pub fn suggested_max_memory_mb(available_bytes: u64, is_64bit: bool) -> Option<u32> {
-    if available_bytes == 0 {
+    let available_mb = available_bytes.checked_div(MIB)?;
+    if available_mb == 0 {
         return None;
     }
 
-    // Reserve 512 MiB; if available <= 512 MiB, use available directly
-    let suggested_bytes: u64 = match available_bytes.checked_sub(RESERVE_BYTES) {
-        None | Some(0) => available_bytes,
-        // Calculate in tiers with an 8 GiB threshold, capped at 16 GiB
-        Some(usable) if usable <= EIGHT_GIB => (u128::from(usable) * 4 / 5) as u64,
-        Some(usable) => {
-            let base = u128::from(EIGHT_GIB) * 4 / 5;
-            let extra = u128::from(usable.saturating_sub(EIGHT_GIB)) / 5;
-            base.saturating_add(extra).min(u128::from(SIXTEEN_GIB)) as u64
-        }
+    let usable_mb = available_mb.saturating_sub(RESERVE_MB);
+
+    let tiered_mb = if usable_mb <= EIGHT_GIB_MB {
+        usable_mb.saturating_mul(4).checked_div(5)?
+    } else {
+        let extra = usable_mb.saturating_sub(EIGHT_GIB_MB).checked_div(5)?;
+        BASE_TIER_MB.saturating_add(extra).min(SIXTEEN_GIB_MB)
     };
 
-    let mut mb = (suggested_bytes / MIB).min(u64::from(u32::MAX)) as u32;
+    // Fallback memory
+    let floor_mb = available_mb.checked_div(2)?.clamp(1, RESERVE_MB);
 
+    let suggested_mb = tiered_mb.max(floor_mb).min(SIXTEEN_GIB_MB);
+
+    let mut mb = u32::try_from(suggested_mb).unwrap_or(u32::MAX);
     if !is_64bit {
         mb = mb.min(BIT32_CAP_MB);
     }
-
-    if mb == 0 {
-        return None;
-    }
-
     Some(mb)
 }
 
