@@ -49,6 +49,8 @@ pub struct LauncherConfig {
     pub fullscreen: bool,
     /// Set Minecraft language to match the launcher on first launch
     pub auto_game_language: bool,
+    /// Automatically set the maximum memory for the game
+    pub auto_memory: bool,
 }
 
 impl Default for LauncherConfig {
@@ -68,6 +70,7 @@ impl Default for LauncherConfig {
             env_vars: BTreeMap::new(),
             fullscreen: false,
             auto_game_language: true,
+            auto_memory: true,
         }
     }
 }
@@ -108,6 +111,7 @@ impl LauncherConfig {
             env_vars: BTreeMap::new(),
             fullscreen: false,
             auto_game_language: true,
+            auto_memory: true,
         }
     }
 
@@ -250,6 +254,7 @@ mod tests {
                     env_vars: env_vars.clone(),
                     fullscreen: false,
                     auto_game_language: true,
+                    auto_memory: true,
                 };
 
                 let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");

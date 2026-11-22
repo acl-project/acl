@@ -13,8 +13,8 @@ use relm4::{ComponentParts, SimpleComponent};
 use relm4::{SharedState, prelude::*};
 use tracing::error;
 
-use crate::system::memory_info;
 use crate::t;
+use acl_core::system::memory_info;
 
 #[derive(Debug)]
 pub enum InstanceSettingsOutput {
@@ -36,6 +36,7 @@ pub enum InstanceSettingsInput {
     SetEnvVars(String),
     SetFullscreen(bool),
     SetAutoGameLanguage(bool),
+    SetAutoMemory(bool),
     Refresh,
 }
 
@@ -377,7 +378,25 @@ impl SimpleComponent for InstanceSettings {
                 #[watch]
                 set_sensitive: model.is_custom_enabled(),
 
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-java-auto-memory-title", "Auto Memory"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-java-auto-memory-subtitle",
+                        "Automatically allocate maximum memory based on available RAM"
+                    ),
+                    #[watch]
+                    set_active: model.resolve_settings(|g| g.auto_memory, |i| i.auto_memory),
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(InstanceSettingsInput::SetAutoMemory(row.is_active()));
+                    },
+                },
+
                 add = &adw::ActionRow {
+                    #[watch]
+                    set_sensitive: !model.resolve_settings(|g| g.auto_memory, |i| i.auto_memory),
                     #[watch]
                     set_title: &t!("settings-java-max-memory-title","Max Memory"),
                     #[watch]
@@ -701,6 +720,9 @@ impl SimpleComponent for InstanceSettings {
                 if changed {
                     self.save_config(&sender);
                 }
+            }
+            InstanceSettingsInput::SetAutoMemory(val) => {
+                self.set_override(val, |g| g.auto_memory, |i| &mut i.auto_memory, &sender);
             }
         }
     }

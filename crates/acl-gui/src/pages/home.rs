@@ -406,7 +406,7 @@ impl HomePage {
                             &metadata,
                             &account,
                             &access_token,
-                            java.path,
+                            &java,
                         )
                         .map_err(|e| {
                             t!(

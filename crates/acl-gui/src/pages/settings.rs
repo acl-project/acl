@@ -14,8 +14,8 @@ use relm4::{SharedState, prelude::*};
 use tracing::error;
 
 use crate::i18n::apply_language;
-use crate::system::memory_info;
 use crate::t;
+use acl_core::system::memory_info;
 pub struct SettingsPage {
     config: Arc<SharedState<LauncherConfig>>,
     config_path: PathBuf,
@@ -48,6 +48,7 @@ pub enum SettingsInput {
     SetEnvVars(String),
     SetFullscreen(bool),
     SetAutoGameLanguage(bool),
+    SetAutoMemory(bool),
     Refresh,
 }
 
@@ -199,7 +200,25 @@ impl SimpleComponent for SettingsPage {
                     },
                 },
 
+                add = &adw::SwitchRow {
+                    #[watch]
+                    set_title: &t!("settings-java-auto-memory-title", "Auto Memory"),
+                    #[watch]
+                    set_subtitle: &t!(
+                        "settings-java-auto-memory-subtitle",
+                        "Automatically allocate maximum memory based on available RAM"
+                    ),
+                    #[watch]
+                    set_active: model.config.read().auto_memory,
+
+                    connect_active_notify[sender] => move |row| {
+                        sender.input(SettingsInput::SetAutoMemory(row.is_active()));
+                    },
+                },
+
                 add = &adw::ActionRow {
+                    #[watch]
+                    set_sensitive: !model.config.read().auto_memory,
                     #[watch]
                     set_title: &t!("settings-java-max-memory-title","Max Memory"),
                     #[watch]
@@ -530,6 +549,9 @@ impl SimpleComponent for SettingsPage {
             }
             SettingsInput::SetAutoGameLanguage(val) => {
                 self.update_field(val, |c| &mut c.auto_game_language, &sender);
+            }
+            SettingsInput::SetAutoMemory(val) => {
+                self.update_field(val, |c| &mut c.auto_memory, &sender);
             }
         }
     }

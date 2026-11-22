@@ -521,6 +521,10 @@ settings-graphics-force-wayland-title = 强制 Wayland
 settings-graphics-title = 图形与环境
 # Source: Auto-detect (Recommended)
 settings-java-auto-detect = 自动检测（推荐）
+# Source: Automatically allocate maximum memory based on available RAM
+settings-java-auto-memory-subtitle = 根据可用内存自动分配最大内存
+# Source: Auto Memory
+settings-java-auto-memory-title = 自动分配内存
 # Source: Max Memory
 settings-java-max-memory-title = 最大内存
 # Source: Rescan for installed Java runtimes

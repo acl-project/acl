@@ -101,6 +101,8 @@ pub struct InstanceConfig {
     pub fullscreen: Option<bool>,
     #[serde(default)]
     pub auto_game_language: Option<bool>,
+    #[serde(default)]
+    pub auto_memory: Option<bool>,
 }
 
 impl InstanceConfig {

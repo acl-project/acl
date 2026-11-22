@@ -347,7 +347,7 @@ impl SimpleComponent for AppModel {
     ) -> relm4::prelude::ComponentParts<Self> {
         // Initialize launcher core
 
-        let config = match LauncherConfig::load_or_recommended(&dirs.config_file()) {
+        let mut config = match LauncherConfig::load_or_recommended(&dirs.config_file()) {
             Ok(cfg) => cfg,
             Err(err) => {
                 error!("Failed to load config, using defaults: {err}");
@@ -362,6 +362,9 @@ impl SimpleComponent for AppModel {
         };
 
         apply_language(config.language);
+
+        // Scan for Java on every startup; the target directories are few, so it is fast
+        config.search_java();
 
         let config_state = Arc::new(SharedState::<LauncherConfig>::new());
         *config_state.write() = config;

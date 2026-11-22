@@ -14,7 +14,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     CoreError, Instance, LauncherConfig, LauncherDirs, Result, gpu::DiscreteGpuEnv,
-    java::JavaInstallation,
+    java::JavaInstallation, system::memory_info,
 };
 
 const LAUNCHER_NAME: &str = "ACL";
@@ -221,20 +221,24 @@ impl LaunchCommand {
             .collect()
     }
 
-    pub fn build(
+    fn resolve_memory_limits(
         instance: &Instance,
         global_config: &LauncherConfig,
-        dirs: &LauncherDirs,
-        metadata: &VersionMetadata,
-        account: &Account,
-        access_token: &str,
-        java_path: PathBuf,
-    ) -> Result<Self> {
-        let mut jvm_args = Vec::new();
-
+        available_bytes: u64,
+        is_64bit: bool,
+    ) -> (u32, u32) {
         let custom = instance.config.custom_settings;
 
-        let max_mem = if custom {
+        let auto_memory = if custom {
+            instance
+                .config
+                .auto_memory
+                .unwrap_or(global_config.auto_memory)
+        } else {
+            global_config.auto_memory
+        };
+
+        let mut max_mem = if custom {
             instance
                 .config
                 .max_memory_mb
@@ -243,7 +247,37 @@ impl LaunchCommand {
             global_config.max_memory_mb
         };
 
-        let min_mem = global_config.min_memory_mb;
+        if auto_memory && let Some(suggested) = suggested_max_memory_mb(available_bytes, is_64bit) {
+            max_mem = suggested;
+        }
+
+        let min_mem = if auto_memory {
+            global_config.min_memory_mb.min(max_mem)
+        } else {
+            global_config.min_memory_mb
+        };
+        (min_mem, max_mem)
+    }
+
+    pub fn build(
+        instance: &Instance,
+        global_config: &LauncherConfig,
+        dirs: &LauncherDirs,
+        metadata: &VersionMetadata,
+        account: &Account,
+        access_token: &str,
+        java: &JavaInstallation,
+    ) -> Result<Self> {
+        let mut jvm_args = Vec::new();
+
+        let custom = instance.config.custom_settings;
+
+        let (min_mem, max_mem) = Self::resolve_memory_limits(
+            instance,
+            global_config,
+            memory_info().available,
+            java.info.is_64bit,
+        );
 
         if min_mem > max_mem {
             return Err(CoreError::InvalidMemoryConfig {
@@ -251,6 +285,8 @@ impl LaunchCommand {
                 max_mb: max_mem,
             });
         }
+
+        info!("Launch game use max memory {max_mem}");
 
         // Memory arguments.
         jvm_args.push(format!("-Xms{min_mem}M"));
@@ -311,7 +347,7 @@ impl LaunchCommand {
         };
 
         Ok(Self {
-            java_path,
+            java_path: java.path.to_path_buf(),
             game_dir: instance.game_dir().to_path_buf(),
             jvm_args,
             main_class: metadata.main_class.clone(),
@@ -450,6 +486,42 @@ pub fn select_java(
     })
 }
 
+const MIB: u64 = 1024 * 1024;
+const RESERVE_BYTES: u64 = 512 * MIB;
+const EIGHT_GIB: u64 = 8 * 1024 * MIB;
+const SIXTEEN_GIB: u64 = 16 * 1024 * MIB;
+const BIT32_CAP_MB: u32 = 768;
+
+pub fn suggested_max_memory_mb(available_bytes: u64, is_64bit: bool) -> Option<u32> {
+    if available_bytes == 0 {
+        return None;
+    }
+
+    // Reserve 512 MiB; if available <= 512 MiB, use available directly
+    let suggested_bytes: u64 = match available_bytes.checked_sub(RESERVE_BYTES) {
+        None | Some(0) => available_bytes,
+        // Calculate in tiers with an 8 GiB threshold, capped at 16 GiB
+        Some(usable) if usable <= EIGHT_GIB => (u128::from(usable) * 4 / 5) as u64,
+        Some(usable) => {
+            let base = u128::from(EIGHT_GIB) * 4 / 5;
+            let extra = u128::from(usable.saturating_sub(EIGHT_GIB)) / 5;
+            base.saturating_add(extra).min(u128::from(SIXTEEN_GIB)) as u64
+        }
+    };
+
+    let mut mb = (suggested_bytes / MIB).min(u64::from(u32::MAX)) as u32;
+
+    if !is_64bit {
+        mb = mb.min(BIT32_CAP_MB);
+    }
+
+    if mb == 0 {
+        return None;
+    }
+
+    Some(mb)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,7 +630,17 @@ mod tests {
         );
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").expect("failed to create account");
+
         let java_path = PathBuf::from("/mock/java/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -568,7 +650,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path.clone(),
+            &java,
         )
         .expect("build launch command should succeed");
 
@@ -640,6 +722,15 @@ mod tests {
         let hex_uuid = "4566e69fc90748ee8d71d7ba5aaafced";
         let account = Account::new_microsoft("Steve", hex_uuid).expect("failed to create account");
         let java_path = PathBuf::from("/mock/java/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "mock_msa_access_token_xyz".to_string();
 
         let cmd = LaunchCommand::build(
@@ -649,7 +740,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path,
+            &java,
         )
         .expect("build launch command should succeed");
 
@@ -689,6 +780,15 @@ mod tests {
         let metadata = mock_version_metadata("1.12.2", true, Some(8));
         let account = Account::new_offline("Alex").expect("failed to create account");
         let java_path = PathBuf::from("/mock/java8/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "1.8".to_string(),
+                major_version: 8,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -698,7 +798,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path.clone(),
+            &java,
         )
         .expect("build legacy launch command should succeed");
 
@@ -748,6 +848,15 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -757,7 +866,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path.clone(),
+            &java,
         )
         .expect("memory config should be valid");
 
@@ -774,7 +883,7 @@ mod tests {
             &metadata,
             &account,
             "0",
-            java_path,
+            &java,
         )
         .expect_err("min_mem > max_mem should fail");
 
@@ -806,6 +915,15 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -815,7 +933,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path,
+            &java,
         )
         .expect("memory config should be valid");
 
@@ -838,6 +956,15 @@ mod tests {
         let metadata = mock_version_metadata("1.21.1", false, Some(21));
         let account = Account::new_offline("Steve").unwrap();
         let java_path = PathBuf::from("/mock/bin/java");
+        let java = JavaInstallation {
+            path: java_path.clone(),
+            info: JavaInfo {
+                version: "17".to_string(),
+                major_version: 17,
+                vendor: None,
+                is_64bit: true,
+            },
+        };
         let access_token = "0".to_string();
 
         let cmd = LaunchCommand::build(
@@ -847,7 +974,7 @@ mod tests {
             &metadata,
             &account,
             &access_token,
-            java_path,
+            &java,
         )
         .expect("build should succeed");
 
