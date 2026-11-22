@@ -4,18 +4,20 @@
 use std::{
     collections::BTreeMap,
     fs::{self, File},
-    io::ErrorKind,
+    io::{self, ErrorKind},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
+use acl_common::Language;
 use acl_minecraft::{
     AssetIndex, DownloadSource, ProjectType, VersionEntry, VersionMetadata, download::DownloadTask,
     version::VersionPatch,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
+use walkdir::WalkDir;
 
 const CONFIG_NAME: &str = "aclcfg.toml";
 const ABNORMAL_MARK: &str = ".abnormal";
@@ -95,6 +97,10 @@ pub struct InstanceConfig {
     pub use_discrete_gpu: Option<bool>,
     #[serde(default)]
     pub env_vars: BTreeMap<String, String>,
+    #[serde(default)]
+    pub fullscreen: Option<bool>,
+    #[serde(default)]
+    pub auto_game_language: Option<bool>,
 }
 
 impl InstanceConfig {
@@ -546,6 +552,57 @@ impl Instance {
             ProjectType::ResourcePack => Some(self.resourcepacks_dir()),
             ProjectType::Shader => Some(self.shaderpacks_dir()),
             ProjectType::Modpack => None, // Modpack is to create a new instance
+        }
+    }
+
+    pub fn has_options_file(&self) -> bool {
+        let game_dir = self.game_dir();
+        if game_dir.join("options.txt").exists() {
+            return true;
+        }
+
+        let config_dir = game_dir.join("config");
+        WalkDir::new(config_dir)
+            .max_depth(2)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_type().is_file() && entry.file_name() == "options.txt")
+    }
+
+    /// Automatically set the game language. If options exist, they will not be automatically set.
+    pub fn ensure_language(&self, language: Language, asset_index: &AssetIndex) {
+        if self.has_options_file() {
+            return;
+        }
+        let Some(base_code) = language.to_mojang_code() else {
+            return;
+        };
+        let Some(mc_lang) = asset_index.resolve_language(&base_code) else {
+            return;
+        };
+
+        if let Err(err) = fs::create_dir_all(self.game_dir()) {
+            warn!("Failed to create game directory for options.txt: {err}");
+            return;
+        }
+
+        let options_path = self.game_dir().join("options.txt");
+
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&options_path)
+            .and_then(|mut f| io::Write::write_all(&mut f, format!("lang:{mc_lang}\n").as_bytes()))
+        {
+            Ok(()) => info!(
+                "Initialized game language to '{mc_lang}' in {}",
+                options_path.display()
+            ),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(err) => warn!(
+                "Failed to write default game language to {}: {err}",
+                options_path.display()
+            ),
         }
     }
 }

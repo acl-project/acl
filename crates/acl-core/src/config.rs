@@ -45,6 +45,10 @@ pub struct LauncherConfig {
     pub use_discrete_gpu: bool,
     /// Extra environment variables passed to the game process.
     pub env_vars: BTreeMap<String, String>,
+    /// Launch the game in fullscreen mode
+    pub fullscreen: bool,
+    /// Set Minecraft language to match the launcher on first launch
+    pub auto_game_language: bool,
 }
 
 impl Default for LauncherConfig {
@@ -62,6 +66,8 @@ impl Default for LauncherConfig {
             force_wayland: true,
             use_discrete_gpu: true,
             env_vars: BTreeMap::new(),
+            fullscreen: false,
+            auto_game_language: true,
         }
     }
 }
@@ -100,6 +106,8 @@ impl LauncherConfig {
             force_wayland: true,
             use_discrete_gpu: true,
             env_vars: BTreeMap::new(),
+            fullscreen: false,
+            auto_game_language: true,
         }
     }
 
@@ -240,6 +248,8 @@ mod tests {
                     force_wayland: enable_offline,
                     use_discrete_gpu: !enable_offline,
                     env_vars: env_vars.clone(),
+                    fullscreen: false,
+                    auto_game_language: true,
                 };
 
                 let toml_str = toml::to_string_pretty(&config).expect("failed to serialize config");

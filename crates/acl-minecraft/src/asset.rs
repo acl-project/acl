@@ -153,6 +153,20 @@ impl AssetIndex {
 
         tasks
     }
+
+    /// Searches the `AssetIndex` for the given language code (case-insensitive),
+    /// returning the exact casing required by this version if found.
+    pub fn resolve_language(&self, code: &str) -> Option<String> {
+        self.objects
+            .keys()
+            .filter_map(|k| k.strip_prefix("minecraft/lang/"))
+            .filter_map(|name| {
+                name.strip_suffix(".json")
+                    .or_else(|| name.strip_suffix(".lang"))
+            })
+            .find(|lang| lang.eq_ignore_ascii_case(code))
+            .map(str::to_string)
+    }
 }
 
 #[cfg(test)]

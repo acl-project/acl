@@ -274,7 +274,21 @@ impl LaunchCommand {
         jvm_args.extend(instance.config.extra_jvm_args.iter().cloned());
 
         // Command-line arguments for the game.
-        let game_args = Self::apply_placeholders(metadata.resolve_game_arguments(), &vars);
+        let mut game_args = Self::apply_placeholders(metadata.resolve_game_arguments(), &vars);
+
+        let fullscreen = if custom {
+            instance
+                .config
+                .fullscreen
+                .unwrap_or(global_config.fullscreen)
+        } else {
+            global_config.fullscreen
+        };
+
+        let fullscreen_param = "--fullscreen".to_string();
+        if fullscreen && !game_args.contains(&fullscreen_param) {
+            game_args.push(fullscreen_param);
+        }
 
         let use_discrete_gpu = if custom {
             instance

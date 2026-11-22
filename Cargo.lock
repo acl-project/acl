@@ -30,6 +30,7 @@ dependencies = [
  "semver",
  "serde",
  "sys-locale",
+ "unic-langid",
  "version-compare",
 ]
 
@@ -49,6 +50,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "walkdir",
 ]
 
 [[package]]

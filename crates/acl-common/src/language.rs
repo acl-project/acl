@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use serde::{Deserialize, Serialize};
+use unic_langid::LanguageIdentifier;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,6 +38,41 @@ impl Language {
             2 => Self::SimplifiedChinese,
             _ => Self::System,
         }
+    }
+    pub fn to_mojang_code(self) -> Option<String> {
+        match self {
+            Language::English => None,
+            Language::SimplifiedChinese => Some("zh_CN".to_string()),
+            Language::System => {
+                let raw = sys_locale::get_locale()?;
+                locale_to_mojang(&raw)
+            }
+        }
+    }
+}
+
+/// Converts a single system locale string into Mojang format with an uppercase region code.
+pub fn locale_to_mojang(raw: &str) -> Option<String> {
+    // Handle POSIX suffixes that Linux may return, such as 'zh_CN.UTF-8' or 'sr_RS@latin'
+    let cleaned = raw.split(['.', '@']).next()?.trim();
+    let id: LanguageIdentifier = cleaned.parse().ok()?;
+
+    let lang = id.language.as_str();
+    let script = id.script.as_ref().map(|s| s.as_str());
+    let region = id.region.as_ref().map(|r| r.as_str());
+
+    match (lang, script, region) {
+        ("en", _, None | Some("US")) => None,
+        ("lzh", _, _) => Some("lzh".to_string()),
+        ("zh", _, Some("HK" | "MO")) => Some("zh_HK".to_string()),
+        ("zh", _, Some("TW")) | ("zh", Some("Hant"), _) => Some("zh_TW".to_string()),
+        ("zh", _, Some("CN" | "SG")) | ("zh", Some("Hans"), _) => Some("zh_CN".to_string()),
+        ("nb", _, _) => Some("no_NO".to_string()),
+        ("iw", _, _) => Some("he_IL".to_string()),
+        ("in", _, _) => Some("id_ID".to_string()),
+        // Other languages: unic-langid guarantees lowercase lang and uppercase region; join as xx_YY
+        (l, _, Some(r)) => Some(format!("{l}_{r}")),
+        _ => None,
     }
 }
 
