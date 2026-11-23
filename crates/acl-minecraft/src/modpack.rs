@@ -17,6 +17,9 @@ use zip::result::ZipError;
 use crate::MinecraftError;
 use crate::ProjectHost;
 use crate::Result;
+use crate::cfpack::CFPACK_MANIFEST_FILE;
+use crate::cfpack::CfpackFile;
+use crate::cfpack::CfpackManifest;
 use crate::download::DownloadTask;
 use crate::mrpack::MRPACK_INDEX_FILE;
 use crate::mrpack::MrpackIndex;
@@ -54,6 +57,90 @@ pub struct ModpackFile {
     pub required: bool,
 }
 
+/// The final download file after parsing the URL
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedModpackFile {
+    /// Path relative to the instance directory (CurseForge is mapped to mods/, resourcepacks/, shaderpacks/, etc. by classId)
+    pub path: String,
+    /// List of candidate download links (in order fallback)
+    pub urls: Vec<String>,
+    pub size: u64,
+    pub sha1: Option<String>,
+    pub sha512: Option<String>,
+}
+
+impl ResolvedModpackFile {
+    pub fn to_download_task(&self, game_dir: &Path) -> Option<DownloadTask> {
+        let rel_path = match normalize_relative_path(&self.path) {
+            Ok(p) => p,
+            Err(err) => {
+                warn!(
+                    "Skipping resolved modpack file with unsafe path '{}': {err}",
+                    self.path
+                );
+                return None;
+            }
+        };
+
+        let Some(url) = self.urls.iter().find(|u| !u.trim().is_empty()) else {
+            warn!("Skipping resolved modpack file '{rel_path}' with no valid download URL");
+            return None;
+        };
+
+        Some(DownloadTask {
+            name: rel_path.clone(),
+            url: url.trim().to_string(),
+            destination: game_dir.join(&rel_path),
+            sha1: self.sha1.clone().unwrap_or_default(),
+            size: self.size,
+        })
+    }
+}
+
+/// Reason why a modpack file requires manual download.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualDownloadReason {
+    /// CurseForge author disabled third-party distribution (`downloadUrl` is null).
+    DistributionDisabled,
+    /// CurseForge API did not return metadata for the requested file ID.
+    MetadataNotFound,
+}
+
+/// A modpack file that cannot be downloaded automatically and must be handled manually.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualModpackFile {
+    pub project_id: u64,
+    pub file_id: u64,
+    pub project_name: Option<String>,
+    pub file_name: Option<String>,
+    /// Target directory relative to the instance root, e.g. "mods" or "resourcepacks".
+    pub target_dir: String,
+    /// Web page URL where the user can download the file manually.
+    pub page_url: String,
+    pub required: bool,
+    pub reason: ManualDownloadReason,
+}
+
+/// Result of resolving all modpack files into downloadable and manual-download entries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModpackResolution {
+    pub files: Vec<ResolvedModpackFile>,
+    pub manual_files: Vec<ManualModpackFile>,
+}
+
+impl ModpackResolution {
+    pub fn download_tasks(&self, game_dir: &Path) -> Vec<DownloadTask> {
+        self.files
+            .iter()
+            .filter_map(|file| file.to_download_task(game_dir))
+            .collect()
+    }
+
+    pub fn has_manual_files(&self) -> bool {
+        !self.manual_files.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModpackManifest {
     pub host: ProjectHost,
@@ -78,18 +165,12 @@ pub struct ModpackManifest {
 }
 
 impl ModpackManifest {
-    pub fn parse_from_zip(path: &Path) -> Result<Self> {
-        let file = File::open(path).map_err(|source| MinecraftError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-        let mut archive = ZipArchive::new(file).map_err(|source| MinecraftError::Zip {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-        match archive.by_name(MRPACK_INDEX_FILE) {
+    fn read_zip_entry_limited(
+        archive: &mut ZipArchive<File>,
+        path: &Path,
+        entry_name: &str,
+    ) -> Result<Option<Vec<u8>>> {
+        match archive.by_name(entry_name) {
             Ok(entry) => {
                 let mut content =
                     Vec::with_capacity(usize::try_from(entry.size().min(1024 * 1024)).unwrap_or(0));
@@ -108,18 +189,45 @@ impl ModpackManifest {
                     });
                 }
 
-                let mrpack: MrpackIndex = serde_json::from_slice(&content)?;
-
-                ModpackManifest::try_from(mrpack)
+                Ok(Some(content))
             }
-            Err(ZipError::FileNotFound) => Err(MinecraftError::ModpackIndexNotFound {
-                path: path.to_path_buf(),
-            }),
+            Err(ZipError::FileNotFound) => Ok(None),
             Err(source) => Err(MinecraftError::Zip {
                 path: path.to_path_buf(),
                 source,
             }),
         }
+    }
+
+    pub fn parse_from_zip(path: &Path) -> Result<Self> {
+        let file = File::open(path).map_err(|source| MinecraftError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        let mut archive = ZipArchive::new(file).map_err(|source| MinecraftError::Zip {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        if let Some(content) = Self::read_zip_entry_limited(&mut archive, path, MRPACK_INDEX_FILE)?
+        {
+            let mrpack: MrpackIndex = serde_json::from_slice(&content)?;
+
+            return ModpackManifest::try_from(mrpack);
+        }
+
+        if let Some(content) =
+            Self::read_zip_entry_limited(&mut archive, path, CFPACK_MANIFEST_FILE)?
+        {
+            let cfpack: CfpackManifest = serde_json::from_slice(&content)?;
+
+            return ModpackManifest::try_from(cfpack);
+        }
+
+        Err(MinecraftError::ModpackIndexNotFound {
+            path: path.to_path_buf(),
+        })
     }
 
     pub fn extract_overrides(&self, path: &Path, target_dir: &Path) -> Result<()> {
@@ -240,18 +348,79 @@ impl ModpackManifest {
 
         tasks
     }
-}
 
-/// The final download file after parsing the URL
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedModpackFile {
-    /// Path relative to the instance directory (CurseForge is mapped to mods/, resourcepacks/, shaderpacks/, etc. by classId)
-    pub path: String,
-    /// List of candidate download links (in order fallback)
-    pub urls: Vec<String>,
-    pub size: u64,
-    pub sha1: Option<String>,
-    pub sha512: Option<String>,
+    pub async fn resolve_files(
+        &self,
+        client: &reqwest::Client,
+        cache_dir: &Path,
+        include_optional: bool,
+    ) -> Result<ModpackResolution> {
+        let mut resolution = ModpackResolution::default();
+        let mut cf_entries = Vec::new();
+
+        for file in &self.files {
+            if !include_optional && !file.required {
+                continue;
+            }
+
+            match &file.source {
+                ModpackFileSource::Direct {
+                    path,
+                    downloads,
+                    size,
+                    sha1,
+                    sha512,
+                } => {
+                    let rel_path = match normalize_relative_path(path) {
+                        Ok(p) => p,
+                        Err(err) => {
+                            warn!("Skipping modpack file with unsafe path '{path}': {err}");
+                            continue;
+                        }
+                    };
+
+                    let urls: Vec<String> = downloads
+                        .iter()
+                        .map(|u| u.trim().to_string())
+                        .filter(|u| !u.is_empty())
+                        .collect();
+
+                    if urls.is_empty() {
+                        warn!("Skipping modpack file '{rel_path}' with no valid download URL");
+                        continue;
+                    }
+
+                    resolution.files.push(ResolvedModpackFile {
+                        path: rel_path,
+                        urls,
+                        size: *size,
+                        sha1: sha1.clone(),
+                        sha512: sha512.clone(),
+                    });
+                }
+
+                ModpackFileSource::CurseForge {
+                    project_id,
+                    file_id,
+                } => {
+                    cf_entries.push(CfpackFile {
+                        project_id: *project_id,
+                        file_id: *file_id,
+                        required: file.required,
+                    });
+                }
+            }
+        }
+
+        if !cf_entries.is_empty() {
+            let cf_resolution =
+                crate::cfpack::resolve_files(&cf_entries, client, cache_dir).await?;
+            resolution.files.extend(cf_resolution.files);
+            resolution.manual_files.extend(cf_resolution.manual_files);
+        }
+
+        Ok(resolution)
+    }
 }
 
 /// Validates and normalizes a relative modpack file path (prevents path traversal).

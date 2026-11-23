@@ -539,7 +539,7 @@ struct DataResponse<T> {
     data: T,
 }
 
-pub async fn fetch_mods_batch_with_cache(
+pub async fn fetch_projects_batch_with_cache(
     client: &reqwest::Client,
     mod_ids: &[u64],
     cache_dir: &Path,
@@ -1352,7 +1352,7 @@ mod tests {
         // Empty input returns empty Vec immediately even without an API key
         {
             let _guard = EnvGuard::remove("CURSEFORGE_API_KEY");
-            let empty = fetch_mods_batch_with_cache(&client, &[], temp.path(), false)
+            let empty = fetch_projects_batch_with_cache(&client, &[], temp.path(), false)
                 .await
                 .expect("empty slice should succeed");
             assert!(empty.is_empty());
@@ -1361,7 +1361,7 @@ mod tests {
                 .filter(|k| !k.trim().is_empty())
                 .is_none()
             {
-                let err = fetch_mods_batch_with_cache(&client, &[1], temp.path(), false)
+                let err = fetch_projects_batch_with_cache(&client, &[1], temp.path(), false)
                     .await
                     .expect_err("non-empty batch without key should fail");
                 assert!(matches!(err, MinecraftError::CurseForgeApiKeyMissing));
@@ -1397,7 +1397,7 @@ mod tests {
                 .expect("save mods batch cache");
         }
 
-        let mods = fetch_mods_batch_with_cache(&client, &input_ids, temp.path(), false)
+        let mods = fetch_projects_batch_with_cache(&client, &input_ids, temp.path(), false)
             .await
             .expect("should load chunked mods batch from cache");
         let ids: Vec<u64> = mods.iter().map(|m| m.id).collect();
