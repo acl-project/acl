@@ -153,6 +153,8 @@ where
 
     fetch_cached_request(client.get(&url), &url, cache_dir, ttl, force_refresh).await
 }
+
+/// Fetches TTL-cached JSON from a pre-built request, with offline fallback to expired cache.
 pub async fn fetch_cached_request<T>(
     request: reqwest::RequestBuilder,
     cache_key_seed: &str,

@@ -34,6 +34,15 @@ impl ProjectType {
             Self::Shader => 6552,
         }
     }
+
+    pub const fn from_curseforge_class_id(class_id: Option<u32>) -> ProjectType {
+        match class_id {
+            Some(4471) => ProjectType::Modpack,
+            Some(12) => ProjectType::ResourcePack,
+            Some(6552) => ProjectType::Shader,
+            _ => ProjectType::Mod,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

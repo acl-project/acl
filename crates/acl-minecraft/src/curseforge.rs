@@ -20,8 +20,14 @@ pub const CURSEFORGE_API_KEY: Option<&'static str> = option_env!("CURSEFORGE_API
 pub fn api_key() -> Option<String> {
     std::env::var("CURSEFORGE_API_KEY")
         .ok()
-        .filter(|k| !k.trim().is_empty())
-        .or_else(|| CURSEFORGE_API_KEY.map(String::from))
+        .map(|s| s.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .or_else(|| {
+            CURSEFORGE_API_KEY
+                .map(str::trim)
+                .filter(|k| !k.is_empty())
+                .map(str::to_string)
+        })
 }
 
 fn require_api_key() -> Result<String> {
@@ -30,7 +36,7 @@ fn require_api_key() -> Result<String> {
 
 // Oh look, a magic number. The world is saved.
 pub fn mod_loader_type(loader: &str) -> Option<u32> {
-    match loader.to_ascii_lowercase().as_str() {
+    match loader.trim().to_ascii_lowercase().as_str() {
         "forge" => Some(1),
         "fabric" => Some(4),
         "quilt" => Some(5),
@@ -224,15 +230,6 @@ impl SearchResponse {
     }
 }
 
-fn project_type_from_class_id(class_id: Option<u32>) -> ProjectType {
-    match class_id {
-        Some(4471) => ProjectType::Modpack,
-        Some(12) => ProjectType::ResourcePack,
-        Some(6552) => ProjectType::Shader,
-        _ => ProjectType::Mod,
-    }
-}
-
 impl From<ModInfo> for AssetItemData {
     fn from(m: ModInfo) -> Self {
         let author = m
@@ -262,7 +259,7 @@ impl From<ModInfo> for AssetItemData {
 
         Self {
             host: ProjectHost::CurseForge,
-            project_type: project_type_from_class_id(m.class_id),
+            project_type: ProjectType::from_curseforge_class_id(m.class_id),
             project_id: m.id.to_string(),
             title: m.name,
             author,
@@ -448,7 +445,7 @@ fn is_mc_version(s: &str) -> bool {
         return false;
     }
 
-    if s.to_ascii_lowercase().ends_with("-snapshot") {
+    if s.ends_with("-snapshot") {
         return false;
     }
 
@@ -542,7 +539,7 @@ struct DataResponse<T> {
     data: T,
 }
 
-pub async fn fetch_mods_batch(
+pub async fn fetch_mods_batch_with_cache(
     client: &reqwest::Client,
     mod_ids: &[u64],
     cache_dir: &Path,
@@ -561,7 +558,7 @@ pub async fn fetch_mods_batch(
     let mut results = Vec::with_capacity(unique_ids.len());
 
     for chunk in unique_ids.chunks(BATCH_CHUNK_SIZE) {
-        let body = serde_json::json!({"modId": chunk});
+        let body = serde_json::json!({"modIds": chunk});
         let cache_seed = format!("POST:{url}:{body}");
         let req = client
             .post(&url)
@@ -584,7 +581,7 @@ pub async fn fetch_mods_batch(
     Ok(results)
 }
 
-pub async fn fetch_files_batch(
+pub async fn fetch_files_batch_with_cache(
     client: &reqwest::Client,
     file_ids: &[u64],
     cache_dir: &Path,

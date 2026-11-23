@@ -309,11 +309,11 @@ impl LocalizeError for acl_minecraft::MinecraftError {
             ),
             Self::CurseForgeApiKeyMissing => crate::t!(
                 "minecraft-error-curse-forge-api-key-missing",
-                "Missing CurseForge api key"
+                "Missing CurseForge API key"
             ),
             Self::CurseForgeInvalidId { id } => crate::t!(
                 "minecraft-error-curse-forge-invalid-id",
-                "CurseForge project id {id} is invalid",
+                "CurseForge project ID {id} is invalid",
                 id = id
             ),
         }
