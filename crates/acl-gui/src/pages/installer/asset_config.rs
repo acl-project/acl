@@ -58,7 +58,7 @@ pub enum AssetConfigInput {
     /// Folder selection popup callback
     CustomDirPicked(PathBuf),
     OpenVersionSelect,
-    OpenDependency(ResolvedDep),
+    OpenDependency(Box<ResolvedDep>),
     ConfirmInstall,
     BackClicked,
     Refresh,
@@ -124,9 +124,9 @@ pub struct AssetConfigPage {
 
 impl AssetConfigPage {
     fn manual_download_url(&self) -> Option<String> {
-        self.selected_version
-            .as_ref()
-            .and_then(super::manual_download_url)
+        let item = self.item.as_ref()?;
+        let version = self.selected_version.as_ref()?;
+        super::manual_download_url(item, version)
     }
 
     fn selected_instance(&self) -> Option<Instance> {
@@ -352,7 +352,9 @@ impl AssetConfigPage {
                 let sender_clone = sender.clone();
                 let dep_clone = dep.clone();
                 row.connect_activated(move |_| {
-                    sender_clone.input(AssetConfigInput::OpenDependency(dep_clone.clone()));
+                    sender_clone.input(AssetConfigInput::OpenDependency(Box::new(
+                        dep_clone.clone(),
+                    )));
                 });
             } else {
                 row.add_suffix(&adw::Spinner::new());
@@ -766,7 +768,7 @@ impl Component for AssetConfigPage {
             }
 
             AssetConfigInput::OpenDependency(dep) => {
-                let _ = sender.output(AssetConfigOutput::OpenDependency(Box::new(dep)));
+                let _ = sender.output(AssetConfigOutput::OpenDependency(dep));
             }
 
             AssetConfigInput::ConfirmInstall => {

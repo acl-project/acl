@@ -181,6 +181,13 @@ pub struct ModFileIndex {
     pub mod_loader: Option<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModLinks {
+    #[serde(default)]
+    pub website_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModInfo {
@@ -204,6 +211,38 @@ pub struct ModInfo {
     pub latest_files_indexes: Vec<ModFileIndex>,
     #[serde(default)]
     pub allow_mod_distribution: Option<bool>,
+    #[serde(default)]
+    pub links: Option<ModLinks>,
+}
+
+impl ModInfo {
+    pub fn website_url(&self) -> Option<String> {
+        if let Some(url) = self
+            .links
+            .as_ref()
+            .and_then(|l| l.website_url.as_deref())
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
+            return Some(url.trim_end_matches('/').to_string());
+        }
+
+        let slug = self.slug.trim();
+        if slug.is_empty() {
+            return None;
+        }
+
+        let section = match ProjectType::from_curseforge_class_id(self.class_id) {
+            ProjectType::Mod => "mc-mods",
+            ProjectType::Modpack => "modpacks",
+            ProjectType::ResourcePack => "texture-packs",
+            ProjectType::Shader => "shaders",
+        };
+
+        Some(format!(
+            "https://www.curseforge.com/minecraft/{section}/{slug}"
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,6 +271,8 @@ impl SearchResponse {
 
 impl From<ModInfo> for AssetItemData {
     fn from(m: ModInfo) -> Self {
+        let website_url = m.website_url();
+
         let author = m
             .authors
             .into_iter()
@@ -268,6 +309,7 @@ impl From<ModInfo> for AssetItemData {
             downloads: m.download_count,
             display_categories,
             latest_version,
+            website_url,
         }
     }
 }
@@ -727,6 +769,7 @@ pub(crate) mod tests {
                 mod_loader: Some(4),
             }],
             allow_mod_distribution: Some(true),
+            links: None,
         }
     }
 
@@ -1459,5 +1502,48 @@ pub(crate) mod tests {
             .expect("should load chunked files batch from cache");
         let ids: Vec<u64> = files.iter().map(|f| f.id).collect();
         assert_eq!(ids, vec![1001, 1203]);
+    }
+
+    #[test]
+    fn test_mod_info_website_url() {
+        let mut info = sample_mod_info(560_808, "Mirabilis");
+        info.slug = "mirabilis-vanilla-biome-overhaul".to_string();
+        info.links = Some(ModLinks {
+            website_url: Some(
+                "  https://www.curseforge.com/minecraft/mc-mods/custom-link/  ".to_string(),
+            ),
+        });
+        assert_eq!(
+            info.website_url().as_deref(),
+            Some("https://www.curseforge.com/minecraft/mc-mods/custom-link")
+        );
+
+        // Blank links.website_url falls back to slug + class_id section.
+        info.links = Some(ModLinks {
+            website_url: Some("   ".to_string()),
+        });
+        for (class_id, expected_section) in [
+            (Some(6), "mc-mods"),
+            (Some(4471), "modpacks"),
+            (Some(12), "texture-packs"),
+            (Some(6552), "shaders"),
+            (None, "mc-mods"),
+        ] {
+            info.class_id = class_id;
+            assert_eq!(
+                info.website_url().as_deref(),
+                Some(
+                    format!(
+                        "https://www.curseforge.com/minecraft/{expected_section}/mirabilis-vanilla-biome-overhaul"
+                    )
+                    .as_str()
+                )
+            );
+        }
+
+        // Missing links and empty slug returns None.
+        info.links = None;
+        info.slug = "   ".to_string();
+        assert_eq!(info.website_url(), None);
     }
 }

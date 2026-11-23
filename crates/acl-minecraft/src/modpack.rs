@@ -1106,7 +1106,7 @@ mod tests {
                 project_name: Some("Manual Resource Pack".to_string()),
                 file_name: Some("manual_pack.zip".to_string()),
                 target_dir: "resourcepacks".to_string(),
-                page_url: "https://www.curseforge.com/projects/102/files/1002".to_string(),
+                page_url: "https://www.curseforge.com/projects/102".to_string(),
                 required: false,
                 reason: ManualDownloadReason::DistributionDisabled,
             }]

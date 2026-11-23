@@ -112,6 +112,7 @@ pub struct AssetItemData {
     pub downloads: u64,
     pub display_categories: Vec<String>,
     pub latest_version: Option<String>,
+    pub website_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

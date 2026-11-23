@@ -130,16 +130,31 @@ async fn fetch_project_details(
     }
 }
 
-fn manual_download_url(version: &AssetVersion) -> Option<String> {
+fn manual_download_url(item: &AssetItemData, version: &AssetVersion) -> Option<String> {
     if version.primary_file.is_some() {
         return None;
     }
 
     match version.host {
-        ProjectHost::CurseForge => Some(format!(
-            "https://www.curseforge.com/projects/{}/files/{}",
-            version.project_id, version.id
-        )),
+        ProjectHost::CurseForge => {
+            if let Some(base) = item
+                .website_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+            {
+                Some(format!(
+                    "{}/files/{}",
+                    base.trim_end_matches('/'),
+                    version.id
+                ))
+            } else {
+                Some(format!(
+                    "https://www.curseforge.com/projects/{}",
+                    version.project_id
+                ))
+            }
+        }
         ProjectHost::Modrinth => None,
     }
 }
@@ -644,22 +659,62 @@ mod tests {
         assert_eq!(InstallerStep::ModpackConfig.as_str(), "modpack_config");
     }
 
+    fn sample_asset_item(host: ProjectHost, website_url: Option<&str>) -> AssetItemData {
+        AssetItemData {
+            host,
+            project_type: ProjectType::Mod,
+            project_id: "12345".to_string(),
+            title: "Sample Mod".to_string(),
+            author: "Tester".to_string(),
+            description: "Desc".to_string(),
+            icon_url: None,
+            downloads: 100,
+            display_categories: Vec::new(),
+            latest_version: None,
+            website_url: website_url.map(str::to_string),
+        }
+    }
+
     #[test]
     fn test_manual_download_url() {
         let cf_manual = sample_asset_version(ProjectHost::CurseForge, false);
+        let cf_item_with_url = sample_asset_item(
+            ProjectHost::CurseForge,
+            Some(
+                "  https://www.curseforge.com/minecraft/mc-mods/mirabilis-vanilla-biome-overhaul/  ",
+            ),
+        );
         assert_eq!(
-            manual_download_url(&cf_manual).as_deref(),
-            Some("https://www.curseforge.com/projects/12345/files/54321")
+            manual_download_url(&cf_item_with_url, &cf_manual).as_deref(),
+            Some(
+                "https://www.curseforge.com/minecraft/mc-mods/mirabilis-vanilla-biome-overhaul/files/54321"
+            )
+        );
+
+        let cf_item_no_url = sample_asset_item(ProjectHost::CurseForge, None);
+        assert_eq!(
+            manual_download_url(&cf_item_no_url, &cf_manual).as_deref(),
+            Some("https://www.curseforge.com/projects/12345")
+        );
+
+        let cf_item_blank_url = sample_asset_item(ProjectHost::CurseForge, Some("   "));
+        assert_eq!(
+            manual_download_url(&cf_item_blank_url, &cf_manual).as_deref(),
+            Some("https://www.curseforge.com/projects/12345")
         );
 
         let cf_auto = sample_asset_version(ProjectHost::CurseForge, true);
-        assert_eq!(manual_download_url(&cf_auto), None);
+        assert_eq!(manual_download_url(&cf_item_with_url, &cf_auto), None);
 
+        let mr_item = sample_asset_item(
+            ProjectHost::Modrinth,
+            Some("https://modrinth.com/mod/sample"),
+        );
         let mr_no_file = sample_asset_version(ProjectHost::Modrinth, false);
-        assert_eq!(manual_download_url(&mr_no_file), None);
+        assert_eq!(manual_download_url(&mr_item, &mr_no_file), None);
 
         let mr_with_file = sample_asset_version(ProjectHost::Modrinth, true);
-        assert_eq!(manual_download_url(&mr_with_file), None);
+        assert_eq!(manual_download_url(&mr_item, &mr_with_file), None);
     }
 
     #[test]

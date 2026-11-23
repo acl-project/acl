@@ -517,6 +517,7 @@ mod tests {
             downloads: 100,
             display_categories: Vec::new(),
             latest_version: Some("1.0.0".to_string()),
+            website_url: None,
         }
     }
 
