@@ -389,6 +389,10 @@ loader-stability-beta = 测试版
 loader-stability-stable = 稳定版
 # Source: Failed to construct classpath: { $arg0 }
 minecraft-error-classpath = 构建 classpath 失败：{ $arg0 }
+# Source: Missing CurseForge API key
+minecraft-error-curse-forge-api-key-missing = 缺少 CurseForge API 密钥
+# Source: CurseForge project ID { $id } is invalid
+minecraft-error-curse-forge-invalid-id = 无效的 CurseForge 项目 ID：{ $id }
 # Source: Modern Forge install profile is missing version.json
 minecraft-error-forge-missing-version-json = 现代 Forge 安装配置文件缺少 version.json
 # Source: SHA-1 mismatch for '{ $target }': expected { $expected }, actual { $actual }

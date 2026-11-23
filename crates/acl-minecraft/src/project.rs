@@ -34,6 +34,15 @@ impl ProjectType {
             Self::Shader => 6552,
         }
     }
+
+    pub const fn from_curseforge_class_id(class_id: Option<u32>) -> ProjectType {
+        match class_id {
+            Some(4471) => ProjectType::Modpack,
+            Some(12) => ProjectType::ResourcePack,
+            Some(6552) => ProjectType::Shader,
+            _ => ProjectType::Mod,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -235,6 +244,28 @@ mod tests {
         assert_eq!(ProjectType::Modpack.curseforge_class_id(), 4471);
         assert_eq!(ProjectType::ResourcePack.curseforge_class_id(), 12);
         assert_eq!(ProjectType::Shader.curseforge_class_id(), 6552);
+
+        for variant in [
+            ProjectType::Mod,
+            ProjectType::Modpack,
+            ProjectType::ResourcePack,
+            ProjectType::Shader,
+        ] {
+            assert_eq!(
+                ProjectType::from_curseforge_class_id(Some(variant.curseforge_class_id())),
+                variant
+            );
+        }
+
+        // None and unknown class IDs fall back to ProjectType::Mod
+        assert_eq!(
+            ProjectType::from_curseforge_class_id(None),
+            ProjectType::Mod
+        );
+        assert_eq!(
+            ProjectType::from_curseforge_class_id(Some(99999)),
+            ProjectType::Mod
+        );
     }
 
     #[test]

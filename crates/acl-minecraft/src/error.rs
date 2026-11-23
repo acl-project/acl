@@ -90,6 +90,12 @@ pub enum MinecraftError {
 
     #[error("Modpack specifies multiple mod loaders")]
     ModpackMultipleModLoaders,
+
+    #[error("Missing CurseForge API key")]
+    CurseForgeApiKeyMissing,
+
+    #[error("CurseForge project ID {id} is invalid")]
+    CurseForgeInvalidId { id: String },
 }
 
 pub type Result<T> = std::result::Result<T, MinecraftError>;
@@ -250,6 +256,22 @@ mod tests {
         assert_eq!(
             MinecraftError::ModpackMultipleModLoaders.to_string(),
             "Modpack specifies multiple mod loaders"
+        );
+    }
+
+    #[test]
+    fn test_curseforge_error_display() {
+        assert_eq!(
+            MinecraftError::CurseForgeApiKeyMissing.to_string(),
+            "Missing CurseForge API key"
+        );
+
+        let invalid_id = MinecraftError::CurseForgeInvalidId {
+            id: "abc".to_string(),
+        };
+        assert_eq!(
+            invalid_id.to_string(),
+            "CurseForge project ID abc is invalid"
         );
     }
 }
