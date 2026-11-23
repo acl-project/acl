@@ -609,6 +609,30 @@ impl Component for InstallerPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acl_minecraft::{AssetFile, ReleaseType};
+
+    fn sample_asset_version(host: ProjectHost, with_file: bool) -> AssetVersion {
+        AssetVersion {
+            host,
+            id: "54321".to_string(),
+            project_id: "12345".to_string(),
+            name: "Sample 1.0.0".to_string(),
+            version_number: "1.0.0".to_string(),
+            release_type: ReleaseType::Release,
+            game_versions: vec!["1.21.1".to_string()],
+            loaders: vec!["fabric".to_string()],
+            date_published: "2026-01-01T00:00:00Z".to_string(),
+            downloads: 42,
+            primary_file: with_file.then(|| AssetFile {
+                url: "https://example.com/sample.jar".to_string(),
+                filename: "sample.jar".to_string(),
+                size: 1024,
+                sha1: None,
+                sha512: None,
+            }),
+            dependencies: Vec::new(),
+        }
+    }
 
     #[test]
     fn test_installer_step_default_and_as_str() {
@@ -618,5 +642,78 @@ mod tests {
         assert_eq!(InstallerStep::AssetConfig.as_str(), "asset_config");
         assert_eq!(InstallerStep::SelectVersion.as_str(), "select_version");
         assert_eq!(InstallerStep::ModpackConfig.as_str(), "modpack_config");
+    }
+
+    #[test]
+    fn test_manual_download_url() {
+        let cf_manual = sample_asset_version(ProjectHost::CurseForge, false);
+        assert_eq!(
+            manual_download_url(&cf_manual).as_deref(),
+            Some("https://www.curseforge.com/projects/12345/files/54321")
+        );
+
+        let cf_auto = sample_asset_version(ProjectHost::CurseForge, true);
+        assert_eq!(manual_download_url(&cf_auto), None);
+
+        let mr_no_file = sample_asset_version(ProjectHost::Modrinth, false);
+        assert_eq!(manual_download_url(&mr_no_file), None);
+
+        let mr_with_file = sample_asset_version(ProjectHost::Modrinth, true);
+        assert_eq!(manual_download_url(&mr_with_file), None);
+    }
+
+    #[test]
+    fn test_fetch_helpers_hermetic_paths() {
+        let rt = relm4::tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("failed to build current-thread tokio runtime");
+        let client = reqwest::Client::new();
+        let cache_dir = Path::new("/tmp/acl-unused-cache");
+
+        rt.block_on(async {
+            // Invalid CurseForge project IDs fail during ID parsing before any I/O.
+            for invalid_id in ["", "   ", "not-a-number", "-1"] {
+                let err = fetch_asset_versions(
+                    &client,
+                    ProjectHost::CurseForge,
+                    invalid_id,
+                    cache_dir,
+                    DownloadSource::Official,
+                    false,
+                )
+                .await
+                .expect_err("invalid CurseForge project ID should fail");
+                assert!(!err.is_empty());
+            }
+
+            // Empty ID batches return an empty map without network or API key access.
+            for host in [ProjectHost::Modrinth, ProjectHost::CurseForge] {
+                let details = fetch_project_details(
+                    &client,
+                    host,
+                    &[],
+                    cache_dir,
+                    DownloadSource::Official,
+                    false,
+                )
+                .await
+                .expect("empty project ID batch should succeed");
+                assert!(details.is_empty());
+            }
+
+            // Invalid CurseForge ID inside a batch fails before any network call.
+            let batch_ids = vec!["12345".to_string(), "bad-id".to_string()];
+            let err = fetch_project_details(
+                &client,
+                ProjectHost::CurseForge,
+                &batch_ids,
+                cache_dir,
+                DownloadSource::Official,
+                false,
+            )
+            .await
+            .expect_err("batch with invalid CurseForge ID should fail");
+            assert!(!err.is_empty());
+        });
     }
 }

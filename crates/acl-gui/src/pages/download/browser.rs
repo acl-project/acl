@@ -694,4 +694,38 @@ mod tests {
         assert_eq!(format_downloads(1_000_000), "1.0M");
         assert_eq!(format_downloads(45_670_000), "45.7M");
     }
+
+    #[test]
+    fn test_clamp_total_hits() {
+        // Modrinth total hits should never be clamped.
+        for total in [0, 1, 9_999, 10_000, 10_001, 150_000, u32::MAX] {
+            assert_eq!(
+                BrowserPage::clamp_total_hits(ProjectHost::Modrinth, total),
+                total
+            );
+        }
+
+        // CurseForge total hits should be capped at CURSEFORGE_MAX_RESULTS (10,000).
+        assert_eq!(BrowserPage::clamp_total_hits(ProjectHost::CurseForge, 0), 0);
+        assert_eq!(
+            BrowserPage::clamp_total_hits(ProjectHost::CurseForge, 9_999),
+            9_999
+        );
+        assert_eq!(
+            BrowserPage::clamp_total_hits(ProjectHost::CurseForge, CURSEFORGE_MAX_RESULTS),
+            CURSEFORGE_MAX_RESULTS
+        );
+        assert_eq!(
+            BrowserPage::clamp_total_hits(ProjectHost::CurseForge, 10_001),
+            CURSEFORGE_MAX_RESULTS
+        );
+        assert_eq!(
+            BrowserPage::clamp_total_hits(ProjectHost::CurseForge, 150_000),
+            CURSEFORGE_MAX_RESULTS
+        );
+        assert_eq!(
+            BrowserPage::clamp_total_hits(ProjectHost::CurseForge, u32::MAX),
+            CURSEFORGE_MAX_RESULTS
+        );
+    }
 }
