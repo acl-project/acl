@@ -709,6 +709,9 @@ pub fn spawn_modpack_install(
                     .await
                     .map_err(|e| e.to_i18n())?;
 
+                // Per CurseForge API guidelines, third-party automated downloads are disabled
+                // for these files. Yielding to manual browser redirection to ensure users
+                // properly visit the official web portal for each individual dependency.
                 if resolution.has_manual_files() {
                     warn!(
                         "Modpack '{}' has {} file(s) requiring manual download",
