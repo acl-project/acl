@@ -466,4 +466,212 @@ mod tests {
             Cached::load_from_file(&cache_path).expect("load updated cache");
         assert_eq!(reloaded.data, vec!["fresh_network_entry".to_string()]);
     }
+
+    #[tokio::test]
+    async fn test_fetch_cached_request_from_fresh_local_cache() {
+        let temp = TempDirGuard::new("fetch_cached_request_fresh");
+        let cache_seed = r#"POST:https://api.example.com/v1/mods:{"modIds":[1,2]}"#;
+        let cache_path = temp.path().join(cache_key_for_url(cache_seed));
+
+        let data = vec!["cached_mod_1".to_string(), "cached_mod_2".to_string()];
+        Cached::new(data.clone(), Duration::from_secs(3600))
+            .expect("create cache")
+            .save_to_file(&cache_path)
+            .expect("save cache");
+
+        let client = reqwest::Client::new();
+        let req = client
+            .post("http://127.0.0.1:9/unused")
+            .header("x-api-key", "test-key");
+        let loaded: Vec<String> = fetch_cached_request(
+            req,
+            cache_seed,
+            temp.path(),
+            Duration::from_secs(3600),
+            false,
+        )
+        .await
+        .expect("should load from fresh local cache without network");
+
+        assert_eq!(loaded, data);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_cached_request_force_refresh_sends_custom_headers_and_body() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let temp = TempDirGuard::new("fetch_cached_request_post");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let local_addr = listener.local_addr().expect("get local addr");
+        let url = format!("http://{local_addr}/batch");
+        let request_body = serde_json::json!({ "modIds": [1, 2] });
+        let cache_seed = format!("POST:{url}:{request_body}");
+        let cache_path = temp.path().join(cache_key_for_url(&cache_seed));
+
+        // Pre-seed fresh old cache to verify force_refresh bypasses it
+        Cached::new(vec!["stale_data".to_string()], Duration::from_secs(3600))
+            .expect("create cache")
+            .save_to_file(&cache_path)
+            .expect("save cache");
+
+        let server_handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept connection");
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 1024];
+
+            // Read until full HTTP headers and body (per Content-Length) arrive
+            let header_end = loop {
+                let n = stream.read(&mut buf).await.expect("read request");
+                if n == 0 {
+                    break None;
+                }
+                raw.extend_from_slice(&buf[..n]);
+                if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break Some(pos + 4);
+                }
+            };
+
+            if let Some(body_start) = header_end {
+                let headers_str = String::from_utf8_lossy(&raw[..body_start]);
+                let content_len = headers_str
+                    .lines()
+                    .find_map(|line| {
+                        let (k, v) = line.split_once(':')?;
+                        k.eq_ignore_ascii_case("content-length")
+                            .then(|| v.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                while raw.len() < body_start + content_len {
+                    let n = stream.read(&mut buf).await.expect("read body");
+                    if n == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&buf[..n]);
+                }
+            }
+
+            let payload = br#"["fresh_post_entry"]"#;
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                payload.len()
+            );
+            stream
+                .write_all(header.as_bytes())
+                .await
+                .expect("write header");
+            stream.write_all(payload).await.expect("write payload");
+            stream.flush().await.expect("flush response");
+
+            String::from_utf8_lossy(&raw).into_owned()
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("create test client");
+        let req = client
+            .post(&url)
+            .header("x-api-key", "secret-test-key")
+            .header(reqwest::header::ACCEPT, "application/json")
+            .json(&request_body);
+
+        let loaded: Vec<String> = fetch_cached_request(
+            req,
+            &cache_seed,
+            temp.path(),
+            Duration::from_secs(3600),
+            true,
+        )
+        .await
+        .expect("should fetch fresh response from mock server");
+
+        let received = server_handle.await.expect("join server task");
+        let received_lower = received.to_ascii_lowercase();
+        assert!(received.starts_with("POST /batch "));
+        assert!(received_lower.contains("x-api-key: secret-test-key"));
+        assert!(received_lower.contains("accept: application/json"));
+        assert!(received.ends_with(r#"{"modIds":[1,2]}"#));
+
+        assert_eq!(loaded, vec!["fresh_post_entry".to_string()]);
+        let reloaded: Cached<Vec<String>> =
+            Cached::load_from_file(&cache_path).expect("reload updated cache");
+        assert_eq!(reloaded.data, vec!["fresh_post_entry".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_cached_request_error_fallback_and_uncached_error() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let temp = TempDirGuard::new("fetch_cached_request_fallback");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let local_addr = listener.local_addr().expect("get local addr");
+        let url = format!("http://{local_addr}/error");
+
+        // Serve two HTTP 500 responses: one for expired-cache fallback, one for uncached error
+        let server_handle = tokio::spawn(async move {
+            for _ in 0..2 {
+                if let Ok((mut stream, _)) = listener.accept().await {
+                    let mut buf = [0u8; 512];
+                    let _ = stream.read(&mut buf).await;
+                    let response =
+                        b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                    let _ = stream.write_all(response).await;
+                    let _ = stream.flush().await;
+                }
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("create test client");
+
+        // 1. Expired cache exists -> fall back to expired cache on HTTP error
+        let expired_seed = "fallback-seed";
+        let expired_path = temp.path().join(cache_key_for_url(expired_seed));
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_secs();
+        let expired = Cached {
+            cached_at: now.saturating_sub(120),
+            ttl_secs: 10,
+            data: vec!["expired_fallback_value".to_string()],
+        };
+        expired
+            .save_to_file(&expired_path)
+            .expect("save expired cache");
+
+        let fallback_loaded: Vec<String> = fetch_cached_request(
+            client.get(&url),
+            expired_seed,
+            temp.path(),
+            Duration::from_secs(60),
+            false,
+        )
+        .await
+        .expect("should fall back to expired cache on HTTP 500");
+        assert_eq!(fallback_loaded, vec!["expired_fallback_value".to_string()]);
+
+        // 2. No cache exists -> propagate HTTP error
+        let err = fetch_cached_request::<Vec<String>>(
+            client.get(&url),
+            "uncached-seed",
+            temp.path(),
+            Duration::from_secs(60),
+            false,
+        )
+        .await
+        .expect_err("should return error when no cache exists");
+        assert!(matches!(err, MinecraftError::Http(_)));
+
+        let _ = server_handle.await;
+    }
 }

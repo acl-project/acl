@@ -258,4 +258,20 @@ mod tests {
             "Modpack specifies multiple mod loaders"
         );
     }
+
+    #[test]
+    fn test_curseforge_error_display() {
+        assert_eq!(
+            MinecraftError::CurseForgeApiKeyMissing.to_string(),
+            "Missing CurseForge API key"
+        );
+
+        let invalid_id = MinecraftError::CurseForgeInvalidId {
+            id: "abc".to_string(),
+        };
+        assert_eq!(
+            invalid_id.to_string(),
+            "CurseForge project ID abc is invalid"
+        );
+    }
 }
