@@ -3,6 +3,7 @@
 
 pub mod asset;
 pub mod cache;
+pub mod cfpack;
 pub mod curseforge;
 pub mod download;
 pub mod error;
@@ -30,7 +31,8 @@ pub use manifest::{
 };
 pub use mirror::DownloadSource;
 pub use modpack::{
-    ModpackFile, ModpackFileSource, ModpackLoader, ModpackManifest, ResolvedModpackFile,
+    ManualDownloadReason, ManualModpackFile, ModpackFile, ModpackFileSource, ModpackLoader,
+    ModpackManifest, ModpackResolution, ResolvedModpackFile,
 };
 pub use native::{
     DEFAULT_NATIVE_EXCLUDE, NativeArchive, extract_all_natives, extract_native_archive,

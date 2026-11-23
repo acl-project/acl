@@ -17,6 +17,9 @@ use zip::result::ZipError;
 use crate::MinecraftError;
 use crate::ProjectHost;
 use crate::Result;
+use crate::cfpack::CFPACK_MANIFEST_FILE;
+use crate::cfpack::CfpackFile;
+use crate::cfpack::CfpackManifest;
 use crate::download::DownloadTask;
 use crate::mrpack::MRPACK_INDEX_FILE;
 use crate::mrpack::MrpackIndex;
@@ -54,6 +57,90 @@ pub struct ModpackFile {
     pub required: bool,
 }
 
+/// The final download file after parsing the URL
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedModpackFile {
+    /// Path relative to the instance directory (CurseForge is mapped to mods/, resourcepacks/, shaderpacks/, etc. by classId)
+    pub path: String,
+    /// List of candidate download links (in order fallback)
+    pub urls: Vec<String>,
+    pub size: u64,
+    pub sha1: Option<String>,
+    pub sha512: Option<String>,
+}
+
+impl ResolvedModpackFile {
+    pub fn to_download_task(&self, game_dir: &Path) -> Option<DownloadTask> {
+        let rel_path = match normalize_relative_path(&self.path) {
+            Ok(p) => p,
+            Err(err) => {
+                warn!(
+                    "Skipping resolved modpack file with unsafe path '{}': {err}",
+                    self.path
+                );
+                return None;
+            }
+        };
+
+        let Some(url) = self.urls.iter().find(|u| !u.trim().is_empty()) else {
+            warn!("Skipping resolved modpack file '{rel_path}' with no valid download URL");
+            return None;
+        };
+
+        Some(DownloadTask {
+            name: rel_path.clone(),
+            url: url.trim().to_string(),
+            destination: game_dir.join(&rel_path),
+            sha1: self.sha1.clone().unwrap_or_default(),
+            size: self.size,
+        })
+    }
+}
+
+/// Reason why a modpack file requires manual download.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualDownloadReason {
+    /// CurseForge author disabled third-party distribution (`downloadUrl` is null).
+    DistributionDisabled,
+    /// CurseForge API did not return metadata for the requested file ID.
+    MetadataNotFound,
+}
+
+/// A modpack file that cannot be downloaded automatically and must be handled manually.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualModpackFile {
+    pub project_id: u64,
+    pub file_id: u64,
+    pub project_name: Option<String>,
+    pub file_name: Option<String>,
+    /// Target directory relative to the instance root, e.g. "mods" or "resourcepacks".
+    pub target_dir: String,
+    /// Web page URL where the user can download the file manually.
+    pub page_url: String,
+    pub required: bool,
+    pub reason: ManualDownloadReason,
+}
+
+/// Result of resolving all modpack files into downloadable and manual-download entries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModpackResolution {
+    pub files: Vec<ResolvedModpackFile>,
+    pub manual_files: Vec<ManualModpackFile>,
+}
+
+impl ModpackResolution {
+    pub fn download_tasks(&self, game_dir: &Path) -> Vec<DownloadTask> {
+        self.files
+            .iter()
+            .filter_map(|file| file.to_download_task(game_dir))
+            .collect()
+    }
+
+    pub fn has_manual_files(&self) -> bool {
+        !self.manual_files.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModpackManifest {
     pub host: ProjectHost,
@@ -78,18 +165,12 @@ pub struct ModpackManifest {
 }
 
 impl ModpackManifest {
-    pub fn parse_from_zip(path: &Path) -> Result<Self> {
-        let file = File::open(path).map_err(|source| MinecraftError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-        let mut archive = ZipArchive::new(file).map_err(|source| MinecraftError::Zip {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-        match archive.by_name(MRPACK_INDEX_FILE) {
+    fn read_zip_entry_limited(
+        archive: &mut ZipArchive<File>,
+        path: &Path,
+        entry_name: &str,
+    ) -> Result<Option<Vec<u8>>> {
+        match archive.by_name(entry_name) {
             Ok(entry) => {
                 let mut content =
                     Vec::with_capacity(usize::try_from(entry.size().min(1024 * 1024)).unwrap_or(0));
@@ -108,18 +189,45 @@ impl ModpackManifest {
                     });
                 }
 
-                let mrpack: MrpackIndex = serde_json::from_slice(&content)?;
-
-                ModpackManifest::try_from(mrpack)
+                Ok(Some(content))
             }
-            Err(ZipError::FileNotFound) => Err(MinecraftError::ModpackIndexNotFound {
-                path: path.to_path_buf(),
-            }),
+            Err(ZipError::FileNotFound) => Ok(None),
             Err(source) => Err(MinecraftError::Zip {
                 path: path.to_path_buf(),
                 source,
             }),
         }
+    }
+
+    pub fn parse_from_zip(path: &Path) -> Result<Self> {
+        let file = File::open(path).map_err(|source| MinecraftError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        let mut archive = ZipArchive::new(file).map_err(|source| MinecraftError::Zip {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        if let Some(content) = Self::read_zip_entry_limited(&mut archive, path, MRPACK_INDEX_FILE)?
+        {
+            let mrpack: MrpackIndex = serde_json::from_slice(&content)?;
+
+            return ModpackManifest::try_from(mrpack);
+        }
+
+        if let Some(content) =
+            Self::read_zip_entry_limited(&mut archive, path, CFPACK_MANIFEST_FILE)?
+        {
+            let cfpack: CfpackManifest = serde_json::from_slice(&content)?;
+
+            return ModpackManifest::try_from(cfpack);
+        }
+
+        Err(MinecraftError::ModpackIndexNotFound {
+            path: path.to_path_buf(),
+        })
     }
 
     pub fn extract_overrides(&self, path: &Path, target_dir: &Path) -> Result<()> {
@@ -240,18 +348,79 @@ impl ModpackManifest {
 
         tasks
     }
-}
 
-/// The final download file after parsing the URL
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedModpackFile {
-    /// Path relative to the instance directory (CurseForge is mapped to mods/, resourcepacks/, shaderpacks/, etc. by classId)
-    pub path: String,
-    /// List of candidate download links (in order fallback)
-    pub urls: Vec<String>,
-    pub size: u64,
-    pub sha1: Option<String>,
-    pub sha512: Option<String>,
+    pub async fn resolve_files(
+        &self,
+        client: &reqwest::Client,
+        cache_dir: &Path,
+        include_optional: bool,
+    ) -> Result<ModpackResolution> {
+        let mut resolution = ModpackResolution::default();
+        let mut cf_entries = Vec::new();
+
+        for file in &self.files {
+            if !include_optional && !file.required {
+                continue;
+            }
+
+            match &file.source {
+                ModpackFileSource::Direct {
+                    path,
+                    downloads,
+                    size,
+                    sha1,
+                    sha512,
+                } => {
+                    let rel_path = match normalize_relative_path(path) {
+                        Ok(p) => p,
+                        Err(err) => {
+                            warn!("Skipping modpack file with unsafe path '{path}': {err}");
+                            continue;
+                        }
+                    };
+
+                    let urls: Vec<String> = downloads
+                        .iter()
+                        .map(|u| u.trim().to_string())
+                        .filter(|u| !u.is_empty())
+                        .collect();
+
+                    if urls.is_empty() {
+                        warn!("Skipping modpack file '{rel_path}' with no valid download URL");
+                        continue;
+                    }
+
+                    resolution.files.push(ResolvedModpackFile {
+                        path: rel_path,
+                        urls,
+                        size: *size,
+                        sha1: sha1.clone(),
+                        sha512: sha512.clone(),
+                    });
+                }
+
+                ModpackFileSource::CurseForge {
+                    project_id,
+                    file_id,
+                } => {
+                    cf_entries.push(CfpackFile {
+                        project_id: *project_id,
+                        file_id: *file_id,
+                        required: file.required,
+                    });
+                }
+            }
+        }
+
+        if !cf_entries.is_empty() {
+            let cf_resolution =
+                crate::cfpack::resolve_files(&cf_entries, client, cache_dir).await?;
+            resolution.files.extend(cf_resolution.files);
+            resolution.manual_files.extend(cf_resolution.manual_files);
+        }
+
+        Ok(resolution)
+    }
 }
 
 /// Validates and normalizes a relative modpack file path (prevents path traversal).
@@ -639,6 +808,456 @@ mod tests {
                 sha1: String::new(),
                 size: 1024,
             }
+        );
+    }
+
+    fn sample_cfpack_manifest_json(overrides: &str) -> Vec<u8> {
+        format!(
+            r#"{{
+                "minecraft": {{
+                    "version": "1.20.1",
+                    "modLoaders": [
+                        {{ "id": "forge-47.2.0", "primary": true }}
+                    ],
+                    "recommendedRam": 6144
+                }},
+                "manifestType": "minecraftModpack",
+                "manifestVersion": 1,
+                "name": "CF Test Pack",
+                "version": "3.0.0",
+                "author": "CFAuthor",
+                "files": [
+                    {{ "projectID": 238222, "fileID": 5101366, "required": true }},
+                    {{ "projectID": 306612, "fileID": 5200000, "required": false }}
+                ],
+                "overrides": "{overrides}"
+            }}"#
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn test_parse_from_zip_cfpack_and_errors() {
+        let temp = TempDirGuard::new("parse_cfpack_zip");
+
+        let valid_zip = temp.path().join("valid_cf.zip");
+        create_test_zip(
+            &valid_zip,
+            &[(
+                CFPACK_MANIFEST_FILE,
+                &sample_cfpack_manifest_json("overrides"),
+            )],
+        );
+
+        let manifest = ModpackManifest::parse_from_zip(&valid_zip)
+            .expect("valid cfpack zip should parse successfully");
+        assert_eq!(manifest.host, ProjectHost::CurseForge);
+        assert_eq!(manifest.name, "CF Test Pack");
+        assert_eq!(manifest.version, "3.0.0");
+        assert_eq!(manifest.summary, None);
+        assert_eq!(manifest.author.as_deref(), Some("CFAuthor"));
+        assert_eq!(manifest.game_version, "1.20.1");
+        assert_eq!(
+            manifest.loader,
+            Some(ModpackLoader::Forge("47.2.0".to_string()))
+        );
+        assert_eq!(manifest.recommended_ram_mb, Some(6144));
+        assert_eq!(manifest.override_dirs, vec!["overrides".to_string()]);
+        assert_eq!(manifest.files.len(), 2);
+
+        // Invalid JSON inside manifest.json
+        let bad_json_zip = temp.path().join("bad_cf_json.zip");
+        create_test_zip(&bad_json_zip, &[(CFPACK_MANIFEST_FILE, b"{ broken json")]);
+        assert!(matches!(
+            ModpackManifest::parse_from_zip(&bad_json_zip),
+            Err(MinecraftError::Json(_))
+        ));
+    }
+
+    #[test]
+    fn test_extract_overrides_cfpack_custom_dir() {
+        let temp = TempDirGuard::new("extract_cfpack_overrides");
+        let zip_path = temp.path().join("cfpack.zip");
+        let target_dir = temp.path().join("instance");
+        fs::create_dir_all(&target_dir).expect("failed to create target dir");
+
+        create_test_zip(
+            &zip_path,
+            &[
+                (
+                    CFPACK_MANIFEST_FILE,
+                    &sample_cfpack_manifest_json("custom-overrides"),
+                ),
+                ("custom-overrides/config/pack.toml", b"enabled = true"),
+                ("custom-overrides/options.txt", b"gamma:1.0"),
+                ("overrides/ignored.txt", b"should not extract"),
+                ("modlist.html", b"<html>list</html>"),
+            ],
+        );
+
+        let manifest =
+            ModpackManifest::parse_from_zip(&zip_path).expect("failed to parse cfpack zip");
+        manifest
+            .extract_overrides(&zip_path, &target_dir)
+            .expect("failed to extract cfpack overrides");
+
+        assert_eq!(
+            fs::read(target_dir.join("config/pack.toml")).expect("pack.toml should exist"),
+            b"enabled = true"
+        );
+        assert_eq!(
+            fs::read(target_dir.join("options.txt")).expect("options.txt should exist"),
+            b"gamma:1.0"
+        );
+        assert!(!target_dir.join("ignored.txt").exists());
+        assert!(!target_dir.join(CFPACK_MANIFEST_FILE).exists());
+        assert!(!target_dir.join("modlist.html").exists());
+    }
+
+    #[test]
+    fn test_resolved_modpack_file_and_resolution_download_tasks() {
+        let game_dir = Path::new("/tmp/test_resolved_instance");
+
+        let valid_with_sha1 = ResolvedModpackFile {
+            path: "mods\\jei.jar".to_string(),
+            urls: vec![
+                "   ".to_string(),
+                "  https://edge.forgecdn.net/jei.jar  ".to_string(),
+                "https://mirror.example.com/jei.jar".to_string(),
+            ],
+            size: 2048,
+            sha1: Some("deadbeef".to_string()),
+            sha512: None,
+        };
+        assert_eq!(
+            valid_with_sha1.to_download_task(game_dir),
+            Some(DownloadTask {
+                name: "mods/jei.jar".to_string(),
+                url: "https://edge.forgecdn.net/jei.jar".to_string(),
+                destination: game_dir.join("mods/jei.jar"),
+                sha1: "deadbeef".to_string(),
+                size: 2048,
+            })
+        );
+
+        let unsafe_file = ResolvedModpackFile {
+            path: "../escape.jar".to_string(),
+            urls: vec!["https://example.com/escape.jar".to_string()],
+            size: 512,
+            sha1: None,
+            sha512: None,
+        };
+        assert_eq!(unsafe_file.to_download_task(game_dir), None);
+
+        let no_url_file = ResolvedModpackFile {
+            path: "mods/empty_url.jar".to_string(),
+            urls: vec!["".to_string(), "  ".to_string()],
+            size: 256,
+            sha1: None,
+            sha512: None,
+        };
+        assert_eq!(no_url_file.to_download_task(game_dir), None);
+
+        let mut resolution = ModpackResolution {
+            files: vec![valid_with_sha1, unsafe_file, no_url_file],
+            manual_files: Vec::new(),
+        };
+        assert!(!resolution.has_manual_files());
+        assert_eq!(resolution.download_tasks(game_dir).len(), 1);
+
+        resolution.manual_files.push(ManualModpackFile {
+            project_id: 50,
+            file_id: 500,
+            project_name: Some("Manual Mod".to_string()),
+            file_name: Some("manual.jar".to_string()),
+            target_dir: "mods".to_string(),
+            page_url: "https://www.curseforge.com/projects/50/files/500".to_string(),
+            required: true,
+            reason: ManualDownloadReason::DistributionDisabled,
+        });
+        assert!(resolution.has_manual_files());
+    }
+
+    #[tokio::test]
+    async fn test_modpack_manifest_resolve_files_mixed_and_optional() {
+        let _lock = crate::curseforge::tests::ENV_LOCK.lock().await;
+        let temp = TempDirGuard::new("resolve_mixed");
+        let client = reqwest::Client::new();
+        let game_dir = Path::new("/tmp/test_mixed_instance");
+
+        struct EnvGuard {
+            key: &'static str,
+            original: Option<String>,
+        }
+
+        impl EnvGuard {
+            fn set(key: &'static str, val: &str) -> Self {
+                let original = std::env::var(key).ok();
+                // SAFETY: Tests serialize access via curseforge::tests::ENV_LOCK to avoid concurrent env modification.
+                unsafe {
+                    std::env::set_var(key, val);
+                }
+                Self { key, original }
+            }
+
+            fn remove(key: &'static str) -> Self {
+                let original = std::env::var(key).ok();
+                // SAFETY: Tests serialize access via curseforge::tests::ENV_LOCK to avoid concurrent env modification.
+                unsafe {
+                    std::env::remove_var(key);
+                }
+                Self { key, original }
+            }
+        }
+
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                // SAFETY: Tests serialize access via curseforge::tests::ENV_LOCK to avoid concurrent env modification.
+                unsafe {
+                    match &self.original {
+                        Some(val) => std::env::set_var(self.key, val),
+                        None => std::env::remove_var(self.key),
+                    }
+                }
+            }
+        }
+
+        // 1. Direct-only manifest succeeds without CurseForge API key and filters invalid entries
+        let direct_manifest = ModpackManifest {
+            host: ProjectHost::Modrinth,
+            name: "Direct Pack".to_string(),
+            version: "1.0.0".to_string(),
+            summary: None,
+            author: None,
+            game_version: "1.20.1".to_string(),
+            loader: Some(ModpackLoader::Fabric("0.15.11".to_string())),
+            recommended_ram_mb: None,
+            override_dirs: vec!["overrides".to_string()],
+            files: vec![
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "mods\\sodium.jar".to_string(),
+                        downloads: vec![
+                            "  ".to_string(),
+                            " https://cdn.modrinth.com/sodium.jar ".to_string(),
+                        ],
+                        size: 2048,
+                        sha1: Some("sha1_sodium".to_string()),
+                        sha512: Some("sha512_sodium".to_string()),
+                    },
+                    required: true,
+                },
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "mods/iris.jar".to_string(),
+                        downloads: vec!["https://cdn.modrinth.com/iris.jar".to_string()],
+                        size: 1024,
+                        sha1: None,
+                        sha512: None,
+                    },
+                    required: false,
+                },
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "../escape.jar".to_string(),
+                        downloads: vec!["https://cdn.modrinth.com/escape.jar".to_string()],
+                        size: 100,
+                        sha1: None,
+                        sha512: None,
+                    },
+                    required: true,
+                },
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "mods/no_url.jar".to_string(),
+                        downloads: vec!["   ".to_string()],
+                        size: 100,
+                        sha1: None,
+                        sha512: None,
+                    },
+                    required: true,
+                },
+            ],
+        };
+
+        {
+            let _guard = EnvGuard::remove("CURSEFORGE_API_KEY");
+            let req_only = direct_manifest
+                .resolve_files(&client, temp.path(), false)
+                .await
+                .expect("direct-only manifest should resolve without API key");
+            assert!(!req_only.has_manual_files());
+            assert_eq!(req_only.files.len(), 1);
+            assert_eq!(req_only.files[0].path, "mods/sodium.jar");
+            assert_eq!(
+                req_only.files[0].urls,
+                vec!["https://cdn.modrinth.com/sodium.jar".to_string()]
+            );
+
+            let with_opt = direct_manifest
+                .resolve_files(&client, temp.path(), true)
+                .await
+                .expect("direct-only manifest with optional should resolve without API key");
+            assert_eq!(with_opt.files.len(), 2);
+            assert_eq!(with_opt.files[1].path, "mods/iris.jar");
+        }
+
+        // 2. Mixed Direct + CurseForge manifest with include_optional toggling
+        let _guard = EnvGuard::set("CURSEFORGE_API_KEY", "test-mixed-key");
+
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct TestDataResponse<T> {
+            data: T,
+        }
+
+        let write_cache = |endpoint: &str, body: &serde_json::Value, data: serde_json::Value| {
+            let url = format!("{}/{endpoint}", crate::curseforge::CURSEFORGE_API_BASE_URL);
+            let cache_seed = format!("POST:{url}:{body}");
+            let cache_file = temp
+                .path()
+                .join(crate::cache::cache_key_for_url(&cache_seed));
+            let resp = TestDataResponse { data };
+            crate::cache::Cached::new(resp, crate::curseforge::DEFAULT_SEARCH_TTL)
+                .expect("create cache entry")
+                .save_to_file(&cache_file)
+                .expect("save cache entry");
+        };
+
+        let req_mod_file = serde_json::json!({
+            "id": 1001,
+            "modId": 101,
+            "displayName": "JEI",
+            "fileName": "jei.jar",
+            "fileLength": 3072,
+            "downloadUrl": "https://edge.forgecdn.net/files/1001/jei.jar",
+            "hashes": [{ "value": "sha1_jei", "algo": 1 }]
+        });
+        let opt_manual_file = serde_json::json!({
+            "id": 1002,
+            "modId": 102,
+            "displayName": "Manual Resource Pack",
+            "fileName": "manual_pack.zip",
+            "fileLength": 5120,
+            "downloadUrl": null,
+            "hashes": []
+        });
+        let req_mod_info = serde_json::json!({
+            "id": 101,
+            "classId": 6,
+            "name": "JEI"
+        });
+        let opt_mod_info = serde_json::json!({
+            "id": 102,
+            "classId": 12,
+            "name": "Manual Resource Pack"
+        });
+
+        // Cache for include_optional = false (only required CF entry 101/1001)
+        write_cache(
+            "mods/files",
+            &serde_json::json!({ "fileIds": [1001_u64] }),
+            serde_json::json!([req_mod_file]),
+        );
+        write_cache(
+            "mods",
+            &serde_json::json!({ "modIds": [101_u64] }),
+            serde_json::json!([req_mod_info]),
+        );
+
+        // Cache for include_optional = true (both 101/1001 and 102/1002)
+        write_cache(
+            "mods/files",
+            &serde_json::json!({ "fileIds": [1001_u64, 1002] }),
+            serde_json::json!([req_mod_file, opt_manual_file]),
+        );
+        write_cache(
+            "mods",
+            &serde_json::json!({ "modIds": [101_u64, 102] }),
+            serde_json::json!([req_mod_info, opt_mod_info]),
+        );
+
+        let mixed_manifest = ModpackManifest {
+            host: ProjectHost::CurseForge,
+            name: "Mixed Pack".to_string(),
+            version: "1.0.0".to_string(),
+            summary: None,
+            author: Some("Tester".to_string()),
+            game_version: "1.20.1".to_string(),
+            loader: Some(ModpackLoader::Forge("47.2.0".to_string())),
+            recommended_ram_mb: Some(4096),
+            override_dirs: vec!["overrides".to_string()],
+            files: vec![
+                ModpackFile {
+                    source: ModpackFileSource::Direct {
+                        path: "mods/direct.jar".to_string(),
+                        downloads: vec!["https://cdn.modrinth.com/direct.jar".to_string()],
+                        size: 1024,
+                        sha1: Some("sha1_direct".to_string()),
+                        sha512: None,
+                    },
+                    required: true,
+                },
+                ModpackFile {
+                    source: ModpackFileSource::CurseForge {
+                        project_id: 101,
+                        file_id: 1001,
+                    },
+                    required: true,
+                },
+                ModpackFile {
+                    source: ModpackFileSource::CurseForge {
+                        project_id: 102,
+                        file_id: 1002,
+                    },
+                    required: false,
+                },
+            ],
+        };
+
+        let req_res = mixed_manifest
+            .resolve_files(&client, temp.path(), false)
+            .await
+            .expect("required mixed entries should resolve");
+        assert!(!req_res.has_manual_files());
+        assert_eq!(req_res.files.len(), 2);
+        assert_eq!(
+            req_res.download_tasks(game_dir),
+            vec![
+                DownloadTask {
+                    name: "mods/direct.jar".to_string(),
+                    url: "https://cdn.modrinth.com/direct.jar".to_string(),
+                    destination: game_dir.join("mods/direct.jar"),
+                    sha1: "sha1_direct".to_string(),
+                    size: 1024,
+                },
+                DownloadTask {
+                    name: "mods/jei.jar".to_string(),
+                    url: "https://edge.forgecdn.net/files/1001/jei.jar".to_string(),
+                    destination: game_dir.join("mods/jei.jar"),
+                    sha1: "sha1_jei".to_string(),
+                    size: 3072,
+                },
+            ]
+        );
+
+        let all_res = mixed_manifest
+            .resolve_files(&client, temp.path(), true)
+            .await
+            .expect("all mixed entries should resolve");
+        assert_eq!(all_res.files.len(), 2);
+        assert!(all_res.has_manual_files());
+        assert_eq!(
+            all_res.manual_files,
+            vec![ManualModpackFile {
+                project_id: 102,
+                file_id: 1002,
+                project_name: Some("Manual Resource Pack".to_string()),
+                file_name: Some("manual_pack.zip".to_string()),
+                target_dir: "resourcepacks".to_string(),
+                page_url: "https://www.curseforge.com/projects/102/files/1002".to_string(),
+                required: false,
+                reason: ManualDownloadReason::DistributionDisabled,
+            }]
         );
     }
 }
