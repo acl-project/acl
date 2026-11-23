@@ -3,6 +3,7 @@
 
 pub mod asset;
 pub mod cache;
+pub mod curseforge;
 pub mod download;
 pub mod error;
 pub mod fabric;

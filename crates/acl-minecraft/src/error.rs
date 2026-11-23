@@ -90,6 +90,12 @@ pub enum MinecraftError {
 
     #[error("Modpack specifies multiple mod loaders")]
     ModpackMultipleModLoaders,
+
+    #[error("Missing CurseForge api key")]
+    CurseForgeApiKeyMissing,
+
+    #[error("CurseForge project id {id} is invalid")]
+    CurseForgeInvalidId { id: String },
 }
 
 pub type Result<T> = std::result::Result<T, MinecraftError>;

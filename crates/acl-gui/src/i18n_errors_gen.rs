@@ -307,6 +307,15 @@ impl LocalizeError for acl_minecraft::MinecraftError {
                 "minecraft-error-modpack-multiple-mod-loaders",
                 "Modpack specifies multiple mod loaders"
             ),
+            Self::CurseForgeApiKeyMissing => crate::t!(
+                "minecraft-error-curse-forge-api-key-missing",
+                "Missing CurseForge api key"
+            ),
+            Self::CurseForgeInvalidId { id } => crate::t!(
+                "minecraft-error-curse-forge-invalid-id",
+                "CurseForge project id {id} is invalid",
+                id = id
+            ),
         }
     }
 }

@@ -150,9 +150,20 @@ where
     // Store the cache separately for each download source.
     // This ensures that when a download source has not synchronized the latest version, the version list will not show unsupported versions.
     let url = download_source.rewrite_url(url);
-    let file_name = cache_key_for_url(&url);
-    let cache_path = cache_dir.join(file_name);
 
+    fetch_cached_request(client.get(&url), &url, cache_dir, ttl, force_refresh).await
+}
+pub async fn fetch_cached_request<T>(
+    request: reqwest::RequestBuilder,
+    cache_key_seed: &str,
+    cache_dir: &Path,
+    ttl: Duration,
+    force_refresh: bool,
+) -> Result<T>
+where
+    T: Serialize + DeserializeOwned + Clone,
+{
+    let cache_path = cache_dir.join(cache_key_for_url(cache_key_seed));
     let cached = Cached::<T>::load_from_file(&cache_path).ok();
 
     // Only when it is not a forced refresh should a valid fresh cache be returned directly
@@ -167,7 +178,7 @@ where
     }
 
     let fetch_result: Result<T> = async {
-        let response = client.get(&url).send().await?.error_for_status()?;
+        let response = request.send().await?.error_for_status()?;
         Ok(response.json().await?)
     }
     .await;
