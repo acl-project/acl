@@ -49,8 +49,8 @@ add-offline-dialog-body = 请输入 Minecraft 用户名（3 到 16 个字符，�
 add-offline-dialog-cancel = 取消
 # Source: Add Offline Account
 add-offline-dialog-heading = 添加离线账户
-# Source: Unsupported file format. Please drop a .mrpack file.
-app-drop-unsupported-modpack = 不支持的文件格式，请拖入 .mrpack 文件
+# Source: Unsupported file format. Please drop a .mrpack or .zip file.
+app-drop-unsupported-modpack = 不支持的文件格式，请拖入 .mrpack 或者 .zip 文件
 # Source: Failed to load accounts, using defaults: { $err }
 app-init-error-load-accounts = 加载账户失败，使用默认配置：{ $err }
 # Source: Failed to load config, using defaults: { $err }
@@ -197,6 +197,8 @@ install-stage-fetching-asset-index = 获取资源索引...
 install-stage-fetching-metadata = 获取版本元数据...
 # Source: Preparing runtime
 install-stage-preparing-runtime = 准备运行环境...
+# Source: Resolving modpack files
+install-stage-resolving-modpack-files = 解析整合包文件...
 # Source: Alpha
 installer-asset-alpha = 内测版
 # Source: Auto-matched
@@ -219,12 +221,18 @@ installer-asset-dep-optional = 可选
 installer-asset-dep-required = 必需
 # Source: Dependencies
 installer-asset-deps-title = 前置依赖
+# Source: Failed to open browser: { $err }
+installer-asset-error-open-browser = 打开浏览器失败：{ $err }
 # Source: Fetching available versions...
 installer-asset-fetching-versions = 正在获取可用版本...
 # Source: Install Mode
 installer-asset-install-mode = 安装方式
 # Source: Loading versions...
 installer-asset-loading-versions = 正在加载版本...
+# Source: The author disabled third-party downloads for this file. Download it from CurseForge in your browser.
+installer-asset-manual-download-subtitle = 作者已禁用该文件的第三方下载，请在浏览器中前往 CurseForge 手动下载。
+# Source: Manual download required
+installer-asset-manual-download-title = 需要手动下载
 # Source: Manual
 installer-asset-manual-selected = 手动选择
 # Source: Custom Folder
@@ -235,6 +243,8 @@ installer-asset-mode-instance = 安装到实例
 installer-asset-no-compatible-version = 未找到兼容版本
 # Source: Not selected
 installer-asset-no-folder = 未选择
+# Source: Open
+installer-asset-open-curseforge = 打开
 # Source: Release
 installer-asset-release = 正式版
 # Source: Target Instance
@@ -253,6 +263,8 @@ installer-modpack-info-title = 整合包信息
 installer-modpack-version-label = 整合包版本
 # Source: Installer
 installer-toolbar-title = 安装配置
+# Source: Manual download
+installer-version-manual-only = 仅支持手动下载
 # Source: Back
 instance-detail-button-back = 返回
 # Source: Failed to create directory: { $err }

@@ -1,14 +1,12 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::collections::HashMap;
 use std::{path::PathBuf, sync::Arc};
 
 use acl_core::ModLoader;
 use acl_core::{Instance, LauncherConfig, manager::InstanceManager};
 use acl_minecraft::{
-    AssetItemData, AssetVersion, DependencyType, ProjectHost, ProjectType, ReleaseType,
-    match_best_version, modrinth,
+    AssetItemData, AssetVersion, DependencyType, ProjectType, ReleaseType, match_best_version,
 };
 use gtk::prelude::*;
 use libadwaita::prelude::*;
@@ -16,7 +14,6 @@ use relm4::ComponentParts;
 use relm4::{SharedState, prelude::*};
 use tracing::error;
 
-use crate::i18n::LocalizeError;
 use crate::t;
 /// Install target mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -67,6 +64,7 @@ pub enum AssetConfigInput {
     Refresh,
     /// If the instance list is updated, the drop-down box will be automatically updated.
     InstancesUpdated,
+    OpenManualDownload,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +123,12 @@ pub struct AssetConfigPage {
 }
 
 impl AssetConfigPage {
+    fn manual_download_url(&self) -> Option<String> {
+        self.selected_version
+            .as_ref()
+            .and_then(super::manual_download_url)
+    }
+
     fn selected_instance(&self) -> Option<Instance> {
         self.mgr
             .read()
@@ -269,13 +273,6 @@ impl AssetConfigPage {
             return;
         };
 
-        if item.host == ProjectHost::CurseForge {
-            let _ = sender.output(AssetConfigOutput::ShowToast(
-                "CurseForge support is coming soon".to_string(),
-            ));
-            return;
-        }
-
         // Increment request_id to avoid old data affecting new ones
         self.request_id = self.request_id.wrapping_add(1);
         let request_id = self.request_id;
@@ -286,18 +283,15 @@ impl AssetConfigPage {
         let download_source = self.config.read().download_source;
 
         sender.oneshot_command(async move {
-            let result = modrinth::ProjectVersion::fetch_list_with_cache(
+            let result = super::fetch_asset_versions(
                 &client,
+                item.host,
                 &item.project_id,
-                &[],
-                &[],
                 &cache_dir,
                 download_source,
                 false,
             )
-            .await
-            .map(|list| list.into_iter().map(AssetVersion::from).collect())
-            .map_err(|e| e.to_i18n());
+            .await;
 
             AssetConfigCmdOutput::VersionsLoaded { request_id, result }
         });
@@ -419,6 +413,10 @@ impl AssetConfigPage {
             return;
         }
 
+        let Some(host) = self.selected_version.as_ref().map(|v| v.host) else {
+            return;
+        };
+
         let ids: Vec<String> = deps.iter().map(|d| d.project_id.clone()).collect();
 
         let client = self.client.clone();
@@ -426,26 +424,16 @@ impl AssetConfigPage {
         let download_source = self.config.read().download_source;
 
         sender.oneshot_command(async move {
-            let map: Result<HashMap<String, AssetItemData>, String> =
-                modrinth::ProjectDetail::fetch_batch_with_cache(
-                    &client,
-                    &ids,
-                    &cache_dir,
-                    download_source,
-                    false,
-                )
-                .await
-                .map(|m| {
-                    m.into_iter()
-                        .map(|detail| {
-                            let id = detail.id.clone();
-                            (id, AssetItemData::from(detail))
-                        })
-                        .collect()
-                })
-                .map_err(|e| e.to_i18n());
-
-            let map = match map {
+            let map = match super::fetch_project_details(
+                &client,
+                host,
+                &ids,
+                &cache_dir,
+                download_source,
+                false,
+            )
+            .await
+            {
                 Ok(m) => m,
                 Err(e) => {
                     return AssetConfigCmdOutput::DepsLoaded {
@@ -608,7 +596,32 @@ impl Component for AssetConfigPage {
                         set_activatable: !model.is_loading && !model.all_versions.is_empty(),
                         connect_activated => AssetConfigInput::OpenVersionSelect,
                         add_suffix = &gtk::Image::from_icon_name("go-next-symbolic"),
-                    }
+                    },
+
+                    adw::ActionRow {
+                        #[watch]
+                        set_visible: !model.is_loading && model.manual_download_url().is_some(),
+                        #[watch]
+                        set_title: &t!(
+                            "installer-asset-manual-download-title",
+                            "Manual download required"
+                        ),
+                        #[watch]
+                        set_subtitle: &t!(
+                            "installer-asset-manual-download-subtitle",
+                            "The author disabled third-party downloads for this file. Download it from CurseForge in your browser."
+                        ),
+                        add_prefix = &gtk::Image {
+                            set_icon_name: Some("dialog-warning-symbolic"),
+                            add_css_class: "warning",
+                        },
+                        add_suffix = &gtk::Button {
+                            set_valign: gtk::Align::Center,
+                            #[watch]
+                            set_label: &t!("installer-asset-open-curseforge", "Open"),
+                            connect_clicked => AssetConfigInput::OpenManualDownload,
+                        },
+                    },
 
                 },
 
@@ -783,6 +796,22 @@ impl Component for AssetConfigPage {
 
             AssetConfigInput::BackClicked => {
                 let _ = sender.output(AssetConfigOutput::Back);
+            }
+
+            AssetConfigInput::OpenManualDownload => {
+                if let Some(url) = self.manual_download_url()
+                    && let Err(err) = gtk::gio::AppInfo::launch_default_for_uri(
+                        &url,
+                        gtk::gio::AppLaunchContext::NONE,
+                    )
+                {
+                    error!("Failed to open CurseForge download page: {err}");
+                    let _ = sender.output(AssetConfigOutput::ShowToast(t!(
+                        "installer-asset-error-open-browser",
+                        "Failed to open browser: {err}",
+                        err = err
+                    )));
+                }
             }
 
             AssetConfigInput::Refresh => {}

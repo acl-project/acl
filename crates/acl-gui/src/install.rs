@@ -492,7 +492,7 @@ async fn prepare_modpack_source(
                 path: temp_dir.clone(),
             };
 
-            let archive_path = temp_dir.join("pack.mrpack");
+            let archive_path = temp_dir.join("pack.zip");
             let task = DownloadTask {
                 name: file.filename.clone(),
                 url: file.url.clone(),
@@ -618,8 +618,8 @@ pub fn spawn_modpack_install(
     source: ModpackInstallSource,
     ctx: InstallContext,
 ) {
-    let mut stage_labels = Vec::with_capacity(7);
-    let (core_stages, stage_modpack_files, stage_overrides) = {
+    let mut stage_labels = Vec::with_capacity(8);
+    let (core_stages, stage_resolve_modpack, stage_modpack_files, stage_overrides) = {
         let mut add_stage = |label: String| -> usize {
             let idx = stage_labels.len();
             stage_labels.push(label);
@@ -646,6 +646,10 @@ pub fn spawn_modpack_install(
             download,
             runtime,
         };
+        let stage_resolve_modpack = add_stage(t!(
+            "install-stage-resolving-modpack-files",
+            "Resolving modpack files"
+        ));
         let stage_modpack_files = add_stage(t!(
             "install-stage-downloading-modpack-files",
             "Downloading modpack files"
@@ -653,7 +657,12 @@ pub fn spawn_modpack_install(
         let stage_overrides =
             add_stage(t!("install-stage-applying-overrides", "Applying overrides"));
 
-        (core_stages, stage_modpack_files, stage_overrides)
+        (
+            core_stages,
+            stage_resolve_modpack,
+            stage_modpack_files,
+            stage_overrides,
+        )
     };
 
     tasks.submit(
@@ -684,7 +693,7 @@ pub fn spawn_modpack_install(
 
                 let guard = InstallGuard::acquire(&active_install, &instance)?;
 
-                let (mrpack_path, manifest, _temp_guard) =
+                let (modpack_path, manifest, _temp_guard) =
                     prepare_modpack_source(&env, &source, instance.id()).await?;
 
                 let entry =
@@ -693,13 +702,44 @@ pub fn spawn_modpack_install(
 
                 install_game_core(&env, &instance, &entry, core_stages).await?;
 
-                let modpack_tasks = manifest.download_tasks(instance.game_dir(), true);
+                env.task_mgr.start_stage(env.task_id, stage_resolve_modpack);
+
+                let resolution = manifest
+                    .resolve_files(&env.client, env.dirs.cache_dir(), true)
+                    .await
+                    .map_err(|e| e.to_i18n())?;
+
+                if resolution.has_manual_files() {
+                    warn!(
+                        "Modpack '{}' has {} file(s) requiring manual download",
+                        instance.id(),
+                        resolution.manual_files.len(),
+                    );
+
+                    for file in &resolution.manual_files {
+                        let name = file
+                            .file_name
+                            .as_deref()
+                            .or(file.project_name.as_deref())
+                            .unwrap_or("unknown");
+                        warn!(
+                            project_id = file.project_id,
+                            file_id = file.file_id,
+                            target_dir = %file.target_dir,
+                            url = %file.page_url,
+                            "Manual download required for '{name}'",
+                        );
+                    }
+                }
+
+                let modpack_tasks = resolution.download_tasks(instance.game_dir());
+
                 download_tasks_with_progress(&env, modpack_tasks, stage_modpack_files).await?;
 
                 // Apply overrides last so pack customizations take precedence over downloaded files.
                 env.task_mgr.start_stage(env.task_id, stage_overrides);
                 manifest
-                    .extract_overrides(&mrpack_path, instance.game_dir())
+                    .extract_overrides(&modpack_path, instance.game_dir())
                     .map_err(|e| e.to_i18n())?;
 
                 // Ensure cancellation takes effect before persisting config and marking complete.

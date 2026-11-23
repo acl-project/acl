@@ -8,14 +8,18 @@ pub mod modpack_config;
 pub mod version_select;
 
 use std::{
-    path::PathBuf,
+    collections::HashMap,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 use acl_core::{
     CoreError, Instance, InstanceConfig, LauncherConfig, ModLoader, manager::InstanceManager,
 };
-use acl_minecraft::{AssetItemData, AssetVersion, ModpackManifest, ProjectType, VersionEntry};
+use acl_minecraft::{
+    AssetItemData, AssetVersion, DownloadSource, ModpackManifest, ProjectHost, ProjectType,
+    VersionEntry, curseforge, modrinth,
+};
 
 use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, SharedState,
@@ -41,6 +45,104 @@ use crate::{
     },
     t,
 };
+
+async fn fetch_asset_versions(
+    client: &reqwest::Client,
+    host: ProjectHost,
+    project_id: &str,
+    cache_dir: &Path,
+    download_source: DownloadSource,
+    force_refresh: bool,
+) -> Result<Vec<AssetVersion>, String> {
+    match host {
+        ProjectHost::Modrinth => modrinth::ProjectVersion::fetch_list_with_cache(
+            client,
+            project_id,
+            &[],
+            &[],
+            cache_dir,
+            download_source,
+            force_refresh,
+        )
+        .await
+        .map(|list| list.into_iter().map(AssetVersion::from).collect())
+        .map_err(|e| e.to_i18n()),
+        ProjectHost::CurseForge => {
+            let mod_id = curseforge::parse_project_id(project_id).map_err(|e| e.to_i18n())?;
+
+            curseforge::ModFile::fetch_list_with_cache(
+                client,
+                mod_id,
+                None,
+                None,
+                cache_dir,
+                force_refresh,
+            )
+            .await
+            .map(|list| list.into_iter().map(AssetVersion::from).collect())
+            .map_err(|e| e.to_i18n())
+        }
+    }
+}
+
+async fn fetch_project_details(
+    client: &reqwest::Client,
+    host: ProjectHost,
+    ids: &[String],
+    cache_dir: &Path,
+    download_source: DownloadSource,
+    force_refresh: bool,
+) -> Result<HashMap<String, AssetItemData>, String> {
+    match host {
+        ProjectHost::Modrinth => modrinth::ProjectDetail::fetch_batch_with_cache(
+            client,
+            ids,
+            cache_dir,
+            download_source,
+            force_refresh,
+        )
+        .await
+        .map(|list| {
+            list.into_iter()
+                .map(|detail| {
+                    let id = detail.id.clone();
+                    (id, AssetItemData::from(detail))
+                })
+                .collect()
+        })
+        .map_err(|e| e.to_i18n()),
+        ProjectHost::CurseForge => {
+            let mod_ids: Vec<u64> = ids
+                .iter()
+                .map(|id| curseforge::parse_project_id(id))
+                .collect::<acl_minecraft::Result<Vec<_>>>()
+                .map_err(|e| e.to_i18n())?;
+
+            curseforge::fetch_projects_batch_with_cache(client, &mod_ids, cache_dir, force_refresh)
+                .await
+                .map(|list| {
+                    list.into_iter()
+                        .map(|info| (info.id.to_string(), AssetItemData::from(info)))
+                        .collect()
+                })
+                .map_err(|e| e.to_i18n())
+        }
+    }
+}
+
+fn manual_download_url(version: &AssetVersion) -> Option<String> {
+    if version.primary_file.is_some() {
+        return None;
+    }
+
+    match version.host {
+        ProjectHost::CurseForge => Some(format!(
+            "https://www.curseforge.com/projects/{}/files/{}",
+            version.project_id, version.id
+        )),
+        ProjectHost::Modrinth => None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstallerStep {

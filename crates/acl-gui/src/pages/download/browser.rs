@@ -5,7 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use acl_core::LauncherConfig;
 use acl_minecraft::{
-    AssetFilterState, AssetItemData, ProjectHost, ProjectType, SearchIndex, modrinth,
+    AssetFilterState, AssetItemData, ProjectHost, ProjectType, SearchIndex, curseforge, modrinth,
 };
 use gtk::{glib::BoxedAnyObject, pango, prelude::*};
 
@@ -18,7 +18,7 @@ use tracing::error;
 use crate::{i18n::LocalizeError, t};
 
 const PAGE_LIMIT: u32 = 20;
-
+const CURSEFORGE_MAX_RESULTS: u32 = 10_000;
 #[derive(Debug, Clone)]
 pub struct AssetRowItem {
     data: AssetItemData,
@@ -156,9 +156,16 @@ impl RelmListItem for AssetRowItem {
 
     fn bind(&mut self, widgets: &mut Self::Widgets, _root: &mut Self::Root) {
         widgets.title.set_label(&self.data.title);
-        widgets
-            .author
-            .set_label(&format!("by {}", self.data.author));
+        // Hide if there is no author (does this actually happen?)
+        if self.data.author.is_empty() {
+            widgets.author.set_visible(false);
+        } else {
+            widgets.author.set_visible(true);
+            widgets
+                .author
+                .set_label(&format!("by {}", self.data.author));
+        }
+
         widgets.description.set_label(&self.data.description);
 
         if self.data.display_categories.is_empty() {
@@ -227,14 +234,14 @@ pub enum BrowserCmdOutput {
 }
 
 impl BrowserPage {
-    fn spawn_search(&mut self, sender: &ComponentSender<Self>, offset: u32, force_refresh: bool) {
-        if self.filter.host == ProjectHost::CurseForge {
-            let _ = sender.output(BrowserOutput::ShowToast(
-                "CurseForge support is coming soon".to_string(),
-            ));
-            return;
+    fn clamp_total_hits(host: ProjectHost, total_count: u32) -> u32 {
+        match host {
+            ProjectHost::Modrinth => total_count,
+            ProjectHost::CurseForge => total_count.min(CURSEFORGE_MAX_RESULTS),
         }
+    }
 
+    fn spawn_search(&mut self, sender: &ComponentSender<Self>, offset: u32, force_refresh: bool) {
         self.request_id = self.request_id.wrapping_add(1);
         let request_id = self.request_id;
 
@@ -242,24 +249,50 @@ impl BrowserPage {
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let download_source = self.config.read().download_source;
-        let mut params = acl_minecraft::modrinth::SearchParams::from(&self.filter);
-
-        params.offset = offset;
+        let mut filter = self.filter.clone();
+        filter.offset = offset;
 
         sender.oneshot_command(async move {
-            let result = modrinth::SearchResponse::fetch_with_cache(
-                &client,
-                &params,
-                &cache_dir,
-                download_source,
-                force_refresh,
-            )
-            .await
-            .map(|resp| {
-                let items = resp.hits.into_iter().map(AssetItemData::from).collect();
-                (items, resp.total_hits)
-            })
-            .map_err(|e| e.to_i18n());
+            let result = match filter.host {
+                ProjectHost::Modrinth => {
+                    let params = modrinth::SearchParams::from(&filter);
+                    modrinth::SearchResponse::fetch_with_cache(
+                        &client,
+                        &params,
+                        &cache_dir,
+                        download_source,
+                        force_refresh,
+                    )
+                    .await
+                    .map(|resp| {
+                        let items = resp.hits.into_iter().map(AssetItemData::from).collect();
+                        (
+                            items,
+                            Self::clamp_total_hits(ProjectHost::Modrinth, resp.total_hits),
+                        )
+                    })
+                    .map_err(|e| e.to_i18n())
+                }
+                ProjectHost::CurseForge => {
+                    let params = curseforge::SearchParams::from(&filter);
+                    curseforge::SearchResponse::fetch_with_cache(
+                        &client,
+                        &params,
+                        &cache_dir,
+                        force_refresh,
+                    )
+                    .await
+                    .map(|resp| {
+                        let items = resp.data.into_iter().map(AssetItemData::from).collect();
+                        let total_hits = Self::clamp_total_hits(
+                            ProjectHost::CurseForge,
+                            resp.pagination.total_count,
+                        );
+                        (items, total_hits)
+                    })
+                    .map_err(|e| e.to_i18n())
+                }
+            };
 
             BrowserCmdOutput::SearchLoaded {
                 request_id,
@@ -556,15 +589,11 @@ impl Component for BrowserPage {
             // There is no need to update the offset here.
             // Update it after the update cmd confirms that the result is received.
             BrowserInput::HostChanged(host) => {
-                if host == ProjectHost::CurseForge {
-                    let _ = sender.output(BrowserOutput::ShowToast(
-                        "CurseForge support is coming soon".to_string(),
-                    ));
-                    return;
-                }
-
                 if self.filter.host != host {
                     self.filter.host = host;
+                    self.filter.offset = 0;
+                    self.total_hits = 0;
+                    self.list_view.clear();
                     self.spawn_search(&sender, 0, false);
                 }
             }

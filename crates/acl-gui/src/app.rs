@@ -655,15 +655,17 @@ impl SimpleComponent for AppModel {
                 self.current_view = AppView::Main;
             }
             AppMsg::ModpackDropped(path) => {
-                let is_mrpack = path
+                let is_modpack = path
                     .extension()
                     .and_then(|ext| ext.to_str())
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("mrpack"));
+                    .is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("mrpack") || ext.eq_ignore_ascii_case("zip")
+                    });
 
-                if !is_mrpack {
+                if !is_modpack {
                     sender.input(AppMsg::ShowToast(t!(
                         "app-drop-unsupported-modpack",
-                        "Unsupported file format. Please drop a .mrpack file."
+                        "Unsupported file format. Please drop a .mrpack or .zip file."
                     )));
                     return;
                 }
