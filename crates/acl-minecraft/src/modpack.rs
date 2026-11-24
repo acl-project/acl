@@ -10,6 +10,8 @@ use std::io::Write;
 use std::path::Component;
 use std::path::Path;
 
+use serde::Deserialize;
+use serde::Serialize;
 use tracing::warn;
 use zip::ZipArchive;
 use zip::result::ZipError;
@@ -98,7 +100,7 @@ impl ResolvedModpackFile {
 }
 
 /// Reason why a modpack file requires manual download.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ManualDownloadReason {
     /// CurseForge author disabled third-party distribution (`downloadUrl` is null).
     DistributionDisabled,
@@ -107,7 +109,7 @@ pub enum ManualDownloadReason {
 }
 
 /// A modpack file that cannot be downloaded automatically and must be handled manually.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManualModpackFile {
     pub project_id: u64,
     pub file_id: u64,

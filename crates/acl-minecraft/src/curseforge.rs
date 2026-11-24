@@ -376,6 +376,13 @@ impl ModFile {
             .map(|h| h.value.clone())
     }
 
+    pub fn md5(&self) -> Option<String> {
+        self.hashes
+            .iter()
+            .find(|h| h.algo == 2 /* I will eat my hat if anyone remembers what 2 is */ && !h.value.trim().is_empty())
+            .map(|h| h.value.clone())
+    }
+
     pub fn list_url(
         base_url: &str,
         mod_id: u64,
