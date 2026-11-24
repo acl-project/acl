@@ -9,6 +9,10 @@ use tracing::{debug, error, warn};
 
 use crate::{MinecraftError, Result, cache::verify_sha1, mirror::DownloadSource};
 use std::{path::PathBuf, sync::Arc, time::Duration};
+
+/// Files at or above this size (or with unknown size 0) use the HTTP/1.1 bulk client.
+const BULK_CLIENT_THRESHOLD: u64 = 1024 * 1024; // 1 MiB
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadTask {
     /// Label name used for logging.
@@ -132,6 +136,7 @@ pub async fn download_and_verify_file(
 
 pub async fn download_all(
     client: &reqwest::Client,
+    bulk_client: &reqwest::Client,
     tasks: Vec<DownloadTask>,
     download_source: DownloadSource,
     max_concurrent: usize,
@@ -153,12 +158,21 @@ pub async fn download_all(
         return Ok(());
     }
 
+    let mut tasks = tasks;
+    // Prioritize large files first; don't wait for small files
+    tasks.sort_unstable_by_key(|a| std::cmp::Reverse(a.size));
+
     let concurrency = max_concurrent.max(1);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut join_set = JoinSet::new();
 
     for task in tasks {
-        let client = client.clone();
+        let task_client = if task.size == 0 || task.size >= BULK_CLIENT_THRESHOLD {
+            bulk_client.clone()
+        } else {
+            client.clone()
+        };
+
         let semaphore = Arc::clone(&semaphore);
 
         join_set.spawn(async move {
@@ -169,7 +183,7 @@ pub async fn download_all(
                     path: task.destination.clone(),
                     source: std::io::Error::other(err),
                 })?;
-            download_and_verify_file(&client, &task, download_source).await?;
+            download_and_verify_file(&task_client, &task, download_source).await?;
             Ok::<u64, MinecraftError>(task.size)
         });
     }
@@ -366,9 +380,18 @@ mod tests {
     #[tokio::test]
     async fn test_download_all_empty_tasks() {
         let client = reqwest::Client::new();
+        let bulk_client = reqwest::Client::new();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let result = download_all(&client, Vec::new(), DownloadSource::Official, 4, Some(tx)).await;
+        let result = download_all(
+            &client,
+            &bulk_client,
+            Vec::new(),
+            DownloadSource::Official,
+            4,
+            Some(tx),
+        )
+        .await;
         assert!(result.is_ok());
 
         let progress = rx.recv().await.expect("should receive initial progress");
@@ -472,6 +495,7 @@ mod tests {
 
         let (server_url, server_handle) = spawn_mock_server(payload.clone()).await;
         let client = test_client();
+        let bulk_client = test_client();
 
         let tasks = vec![
             DownloadTask {
@@ -498,7 +522,15 @@ mod tests {
         ];
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let res = download_all(&client, tasks, DownloadSource::Official, 2, Some(tx)).await;
+        let res = download_all(
+            &client,
+            &bulk_client,
+            tasks,
+            DownloadSource::Official,
+            2,
+            Some(tx),
+        )
+        .await;
         assert!(res.is_ok());
 
         let mut final_progress = None;
@@ -622,6 +654,219 @@ mod tests {
                 .await;
         assert!(matches!(bad_res, Err(MinecraftError::HashMismatch { .. })));
         assert!(!bad_dest.exists());
+
+        server_handle.abort();
+    }
+
+    async fn spawn_recording_mock_server(
+        payload: Vec<u8>,
+    ) -> (
+        String,
+        Arc<std::sync::Mutex<Vec<(String, String)>>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind recording mock server");
+        let local_addr = listener.local_addr().expect("failed to get local addr");
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded_bg = Arc::clone(&recorded);
+
+        let handle = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let payload = payload.clone();
+                let recorded = Arc::clone(&recorded_bg);
+                tokio::spawn(async move {
+                    let mut req_buf = Vec::new();
+                    let mut tmp = [0u8; 1024];
+                    while !req_buf.windows(4).any(|w| w == b"\r\n\r\n") && req_buf.len() < 8192 {
+                        let Ok(n) = stream.read(&mut tmp).await else {
+                            break;
+                        };
+                        if n == 0 {
+                            break;
+                        }
+                        req_buf.extend_from_slice(&tmp[..n]);
+                    }
+
+                    let req_text = String::from_utf8_lossy(&req_buf);
+                    let path = req_text
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .unwrap_or("")
+                        .to_string();
+                    let user_agent = req_text
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            if name.eq_ignore_ascii_case("user-agent") {
+                                Some(value.trim().to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_default();
+
+                    recorded
+                        .lock()
+                        .expect("recording mutex poisoned")
+                        .push((path, user_agent));
+
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        payload.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes()).await;
+                    let _ = stream.write_all(&payload).await;
+                    let _ = stream.flush().await;
+                });
+            }
+        });
+
+        (format!("http://{local_addr}"), recorded, handle)
+    }
+
+    #[tokio::test]
+    async fn test_download_all_routes_by_size_threshold() {
+        let temp = TempDirGuard::new("route_by_size");
+        let payload = b"routing payload".to_vec();
+        let sha1 = calculate_sha1(&payload);
+
+        let (server_url, recorded, server_handle) =
+            spawn_recording_mock_server(payload.clone()).await;
+
+        let small_client = reqwest::Client::builder()
+            .no_proxy()
+            .user_agent("small-client")
+            .build()
+            .expect("failed to build small client");
+        let bulk_client = reqwest::Client::builder()
+            .no_proxy()
+            .user_agent("bulk-client")
+            .build()
+            .expect("failed to build bulk client");
+
+        let cases = [
+            ("unknown_zero.bin", 0u64, "bulk-client"),
+            ("tiny.bin", 1u64, "small-client"),
+            ("just_below.bin", BULK_CLIENT_THRESHOLD - 1, "small-client"),
+            ("at_threshold.bin", BULK_CLIENT_THRESHOLD, "bulk-client"),
+            (
+                "above_threshold.bin",
+                BULK_CLIENT_THRESHOLD + 512,
+                "bulk-client",
+            ),
+        ];
+
+        let tasks: Vec<DownloadTask> = cases
+            .iter()
+            .map(|(name, size, _)| DownloadTask {
+                name: (*name).to_string(),
+                url: format!("{server_url}/{name}"),
+                destination: temp.path().join(name),
+                sha1: sha1.clone(),
+                size: *size,
+            })
+            .collect();
+
+        let res = download_all(
+            &small_client,
+            &bulk_client,
+            tasks,
+            DownloadSource::Official,
+            4,
+            None,
+        )
+        .await;
+        assert!(res.is_ok());
+
+        let requests = recorded.lock().expect("recording mutex poisoned").clone();
+        assert_eq!(requests.len(), cases.len());
+
+        for (name, _, expected_ua) in cases {
+            let expected_path = format!("/{name}");
+            let matched = requests
+                .iter()
+                .find(|(path, _)| path == &expected_path)
+                .unwrap_or_else(|| panic!("missing recorded request for {expected_path}"));
+            assert_eq!(
+                matched.1, expected_ua,
+                "unexpected client used for {expected_path}"
+            );
+            assert_eq!(
+                std::fs::read(temp.path().join(name)).expect("failed to read downloaded file"),
+                payload
+            );
+        }
+
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_download_all_prioritizes_larger_files_first() {
+        let temp = TempDirGuard::new("priority_order");
+        let payload = b"ordered payload".to_vec();
+        let sha1 = calculate_sha1(&payload);
+
+        let (server_url, recorded, server_handle) =
+            spawn_recording_mock_server(payload.clone()).await;
+
+        let client = test_client();
+        let bulk_client = test_client();
+
+        let tasks = vec![
+            DownloadTask {
+                name: "small.bin".to_string(),
+                url: format!("{server_url}/small.bin"),
+                destination: temp.path().join("small.bin"),
+                sha1: sha1.clone(),
+                size: 128,
+            },
+            DownloadTask {
+                name: "largest.bin".to_string(),
+                url: format!("{server_url}/largest.bin"),
+                destination: temp.path().join("largest.bin"),
+                sha1: sha1.clone(),
+                size: 5 * 1024 * 1024,
+            },
+            DownloadTask {
+                name: "zero.bin".to_string(),
+                url: format!("{server_url}/zero.bin"),
+                destination: temp.path().join("zero.bin"),
+                sha1: sha1.clone(),
+                size: 0,
+            },
+            DownloadTask {
+                name: "medium.bin".to_string(),
+                url: format!("{server_url}/medium.bin"),
+                destination: temp.path().join("medium.bin"),
+                sha1,
+                size: 64 * 1024,
+            },
+        ];
+
+        let res = download_all(
+            &client,
+            &bulk_client,
+            tasks,
+            DownloadSource::Official,
+            1,
+            None,
+        )
+        .await;
+        assert!(res.is_ok());
+
+        let paths: Vec<String> = recorded
+            .lock()
+            .expect("recording mutex poisoned")
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect();
+        assert_eq!(
+            paths,
+            vec!["/largest.bin", "/medium.bin", "/small.bin", "/zero.bin"]
+        );
 
         server_handle.abort();
     }

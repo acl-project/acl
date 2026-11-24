@@ -140,8 +140,10 @@ pub struct AppModel {
     accounts: Arc<SharedState<AccountStore>>,
     #[allow(dead_code)]
     instances: Arc<SharedState<InstanceManager>>,
-    #[allow(dead_code)]
+
     client: reqwest::Client,
+    bulk_client: reqwest::Client,
+
     #[allow(dead_code)]
     tasks: Arc<TaskManager>,
     dirs: LauncherDirs,
@@ -153,6 +155,7 @@ impl AppModel {
         InstallContext {
             mgr: Arc::clone(&self.instances),
             client: self.client.clone(),
+            bulk_client: self.bulk_client.clone(),
             dirs: self.dirs.clone(),
             config: Arc::clone(&self.config),
             active_install: Arc::clone(&self.active_install),
@@ -405,10 +408,36 @@ impl SimpleComponent for AppModel {
         let client = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .connect_timeout(Duration::from_secs(10))
+            // Timeout after 30s of inactivity (read timeout, not total download duration)
+            .read_timeout(Duration::from_secs(30))
+            // Set larger initial window sizes directly
+            .http2_initial_stream_window_size(Some(2 * 1024 * 1024))
+            .http2_initial_connection_window_size(Some(8 * 1024 * 1024))
+            // Send keep-alive pings to prevent idle connection drops and reconnects
+            .http2_keep_alive_interval(Some(Duration::from_secs(20)))
+            .pool_max_idle_per_host(32)
+            // Disable Nagle's algorithm; don't hold back my packets
+            .tcp_nodelay(true)
             .build()
             .unwrap_or_else(|err| {
                 error!("Failed to build custom HTTP client, using default: {err}");
                 reqwest::Client::new()
+            });
+
+        // Dedicated HTTP/1.1 client for large files so concurrent downloads open
+        // independent TCP connections instead of sharing a single HTTP/2 connection.
+        let bulk_client = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .http1_only()
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(30))
+            .pool_max_idle_per_host(32)
+            .tcp_nodelay(true)
+            .no_gzip()
+            .build()
+            .unwrap_or_else(|err| {
+                error!("Failed to build bulk HTTP client, falling back to default client: {err}");
+                client.clone()
             });
 
         let tasks = TaskManager::new();
@@ -444,6 +473,7 @@ impl SimpleComponent for AppModel {
                 accounts: Arc::clone(&accounts_state),
                 config: Arc::clone(&config_state),
                 client: client.clone(),
+                bulk_client: bulk_client.clone(),
                 dirs: dirs.clone(),
             })
             .forward(sender.input_sender(), |msg| match msg {
@@ -548,6 +578,7 @@ impl SimpleComponent for AppModel {
             accounts: accounts_state,
             instances: instances_state,
             client,
+            bulk_client,
             tasks: Arc::clone(&tasks),
             dirs,
             active_install,
@@ -638,12 +669,13 @@ impl SimpleComponent for AppModel {
                 version,
                 target,
             } => {
+                // Use the HTTP/1.1 client directly for standalone mods, resource packs, and shaders
                 spawn_asset_download(
                     &self.tasks,
                     *item,
                     *version,
                     target,
-                    self.client.clone(),
+                    self.bulk_client.clone(),
                     Arc::clone(&self.config),
                 );
                 self.current_page = NavPage::Tasks;

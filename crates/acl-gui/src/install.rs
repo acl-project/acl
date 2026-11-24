@@ -27,6 +27,7 @@ use crate::{i18n::LocalizeError, pages::installer::asset_config::InstallTarget, 
 pub struct InstallContext {
     pub mgr: Arc<SharedState<InstanceManager>>,
     pub client: reqwest::Client,
+    pub bulk_client: reqwest::Client,
     pub dirs: LauncherDirs,
     pub config: Arc<SharedState<LauncherConfig>>,
     pub active_install: Arc<Mutex<Option<String>>>,
@@ -42,6 +43,7 @@ struct CoreInstallStages {
 
 struct CoreInstallEnv {
     client: reqwest::Client,
+    bulk_client: reqwest::Client,
     dirs: LauncherDirs,
     global_config: LauncherConfig,
     task_id: TaskId,
@@ -271,6 +273,7 @@ async fn download_tasks_with_progress(
 
     let result = acl_minecraft::download::download_all(
         &env.client,
+        &env.bulk_client,
         tasks,
         env.global_config.download_source,
         env.global_config.max_concurrent_downloads,
@@ -320,7 +323,7 @@ async fn install_game_core(
         }
         ModLoader::Forge | ModLoader::NeoForge => {
             install_forge(
-                &env.client,
+                &env.bulk_client,
                 instance,
                 &env.dirs,
                 download_source,
@@ -443,6 +446,7 @@ pub fn spawn_install(
             // If the player switches the download source, it can also ensure that the latest download source is used.
             let env = CoreInstallEnv {
                 client: ctx.client.clone(),
+                bulk_client: ctx.bulk_client.clone(),
                 dirs: ctx.dirs.clone(),
                 global_config: ctx.config.read().clone(),
                 task_id,
@@ -502,7 +506,7 @@ async fn prepare_modpack_source(
             };
 
             download_file_with_progress(
-                &env.client,
+                &env.bulk_client,
                 &task,
                 env.global_config.download_source,
                 |done, total| {
@@ -680,6 +684,7 @@ pub fn spawn_modpack_install(
             let active_install = Arc::clone(&ctx.active_install);
             let env = CoreInstallEnv {
                 client: ctx.client.clone(),
+                bulk_client: ctx.bulk_client.clone(),
                 dirs: ctx.dirs.clone(),
                 global_config: ctx.config.read().clone(),
                 task_id,
