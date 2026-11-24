@@ -339,6 +339,24 @@ impl ProjectDetail {
     }
 }
 
+fn modrinth_website_url(project_type: ProjectType, slug: &str, project_id: &str) -> Option<String> {
+    let target = if !slug.trim().is_empty() {
+        slug.trim()
+    } else {
+        project_id.trim()
+    };
+
+    if target.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "https://modrinth.com/{}/{}",
+        project_type.as_modrinth_str(),
+        target
+    ))
+}
+
 impl From<SearchHit> for AssetItemData {
     fn from(hit: SearchHit) -> Self {
         // If display_categories is empty, fallback to categories
@@ -347,6 +365,8 @@ impl From<SearchHit> for AssetItemData {
         } else {
             hit.display_categories
         };
+
+        let website_url = modrinth_website_url(hit.project_type, &hit.slug, &hit.project_id);
 
         Self {
             host: ProjectHost::Modrinth,
@@ -359,6 +379,7 @@ impl From<SearchHit> for AssetItemData {
             downloads: hit.downloads,
             display_categories,
             latest_version: hit.latest_version,
+            website_url,
         }
     }
 }
@@ -421,6 +442,8 @@ impl From<ProjectVersion> for AssetVersion {
 
 impl From<ProjectDetail> for AssetItemData {
     fn from(p: ProjectDetail) -> Self {
+        let website_url = modrinth_website_url(p.project_type, &p.slug, &p.id);
+
         Self {
             host: ProjectHost::Modrinth,
             project_type: p.project_type,
@@ -432,6 +455,7 @@ impl From<ProjectDetail> for AssetItemData {
             downloads: p.downloads,
             display_categories: p.categories,
             latest_version: None,
+            website_url,
         }
     }
 }
@@ -1160,6 +1184,10 @@ mod tests {
         assert_eq!(item.downloads, 80_000_000);
         assert_eq!(item.display_categories, vec!["library"]);
         assert_eq!(item.latest_version, None);
+        assert_eq!(
+            item.website_url.as_deref(),
+            Some("https://modrinth.com/mod/fabric-api")
+        );
 
         let temp = TempDirGuard::new("project_detail_cache");
         let client = reqwest::Client::new();
@@ -1196,5 +1224,27 @@ mod tests {
         .await
         .expect("should load ProjectDetail list from local cache");
         assert_eq!(loaded, details);
+    }
+
+    #[test]
+    fn test_modrinth_website_url() {
+        assert_eq!(
+            modrinth_website_url(ProjectType::Mod, "sodium", "AANobbMI").as_deref(),
+            Some("https://modrinth.com/mod/sodium")
+        );
+        assert_eq!(
+            modrinth_website_url(ProjectType::Modpack, "fabulously-optimized", "1KVo5zza")
+                .as_deref(),
+            Some("https://modrinth.com/modpack/fabulously-optimized")
+        );
+        assert_eq!(
+            modrinth_website_url(ProjectType::ResourcePack, "  ", "pack123").as_deref(),
+            Some("https://modrinth.com/resourcepack/pack123")
+        );
+        assert_eq!(
+            modrinth_website_url(ProjectType::Shader, "bsl-shaders", "shader1").as_deref(),
+            Some("https://modrinth.com/shader/bsl-shaders")
+        );
+        assert_eq!(modrinth_website_url(ProjectType::Mod, "  ", ""), None);
     }
 }

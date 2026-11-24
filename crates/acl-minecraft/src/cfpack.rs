@@ -36,8 +36,12 @@ fn curseforge_target_dir(class_id: Option<u32>) -> &'static str {
     }
 }
 
-fn curseforge_file_page_url(project_id: u64, file_id: u64) -> String {
-    format!("https://www.curseforge.com/projects/{project_id}/files/{file_id}")
+fn curseforge_file_page_url(mod_info: Option<&ModInfo>, project_id: u64, file_id: u64) -> String {
+    if let Some(base) = mod_info.and_then(ModInfo::website_url) {
+        format!("{base}/files/{file_id}")
+    } else {
+        format!("https://www.curseforge.com/projects/{project_id}")
+    }
 }
 
 fn sanitize_curseforge_file_name(raw: &str) -> Result<String> {
@@ -249,7 +253,7 @@ pub async fn resolve_files(
         let mod_info = mods_map.get(&entry.project_id);
         let project_name = mod_info.map(|m| m.name.clone());
         let target_dir = curseforge_target_dir(mod_info.and_then(|m| m.class_id));
-        let page_url = curseforge_file_page_url(entry.project_id, entry.file_id);
+        let page_url = curseforge_file_page_url(mod_info, entry.project_id, entry.file_id);
 
         let Some(mod_file) = files_map.get(&entry.file_id) else {
             warn!(
@@ -420,6 +424,7 @@ mod tests {
             categories: Vec::new(),
             latest_files_indexes: Vec::new(),
             allow_mod_distribution: Some(true),
+            links: None,
         }
     }
 
@@ -910,7 +915,8 @@ mod tests {
                     project_name: Some("Restricted Mod".to_string()),
                     file_name: Some("restricted.jar".to_string()),
                     target_dir: "mods".to_string(),
-                    page_url: "https://www.curseforge.com/projects/50/files/500".to_string(),
+                    page_url: "https://www.curseforge.com/minecraft/mc-mods/restricted-mod/files/500"
+                        .to_string(),
                     required: true,
                     reason: ManualDownloadReason::DistributionDisabled,
                 },
@@ -920,7 +926,9 @@ mod tests {
                     project_name: Some("Blank URL Pack".to_string()),
                     file_name: Some("blank_url.zip".to_string()),
                     target_dir: "resourcepacks".to_string(),
-                    page_url: "https://www.curseforge.com/projects/60/files/600".to_string(),
+                    page_url:
+                        "https://www.curseforge.com/minecraft/texture-packs/blank-url-pack/files/600"
+                            .to_string(),
                     required: false,
                     reason: ManualDownloadReason::DistributionDisabled,
                 },
@@ -930,7 +938,9 @@ mod tests {
                     project_name: Some("Deleted Shader".to_string()),
                     file_name: None,
                     target_dir: "shaderpacks".to_string(),
-                    page_url: "https://www.curseforge.com/projects/70/files/700".to_string(),
+                    page_url:
+                        "https://www.curseforge.com/minecraft/shaders/deleted-shader/files/700"
+                            .to_string(),
                     required: true,
                     reason: ManualDownloadReason::MetadataNotFound,
                 },

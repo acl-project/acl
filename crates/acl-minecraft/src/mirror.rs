@@ -43,16 +43,20 @@ const BMCLAPI_RULES: &[(&str, &str)] = &[
     ),
     // Forge & NeoForge
     (
+        "http://files.minecraftforge.net/maven",
+        "https://bmclapi2.bangbang93.com/maven",
+    ),
+    (
         "https://files.minecraftforge.net/maven",
         "https://bmclapi2.bangbang93.com/maven",
     ),
     (
-        "https://maven.neoforged.net/releases/net/neoforged/forge",
-        "https://bmclapi2.bangbang93.com/maven/net/neoforged/forge",
+        "https://maven.minecraftforge.net",
+        "https://bmclapi2.bangbang93.com/maven",
     ),
     (
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge",
-        "https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge",
+        "https://maven.neoforged.net/releases/",
+        "https://bmclapi2.bangbang93.com/maven/",
     ),
     // Fabric & Quilt
     (

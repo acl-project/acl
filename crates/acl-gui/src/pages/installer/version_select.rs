@@ -75,16 +75,20 @@ impl VersionSelectPage {
                 .build();
 
             for ver in list {
-                let tag = ver.release_type.label();
-                let subtitle = if ver.loaders.is_empty() {
-                    format!("{tag} · {}", ver.version_number)
-                } else {
-                    format!(
-                        "{tag} · {} · {}",
-                        ver.version_number,
-                        ver.loaders.join(", ")
-                    )
-                };
+                let mut parts = vec![
+                    ver.release_type.label().to_string(),
+                    ver.version_number.clone(),
+                ];
+
+                if !ver.loaders.is_empty() {
+                    parts.push(ver.loaders.join(", "));
+                }
+
+                if ver.primary_file.is_none() {
+                    parts.push(t!("installer-version-manual-only", "Manual download"));
+                }
+
+                let subtitle = parts.join(" · ");
 
                 let row = adw::ActionRow::builder()
                     .title(&ver.name)

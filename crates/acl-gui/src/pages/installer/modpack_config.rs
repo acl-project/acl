@@ -3,13 +3,12 @@
 
 use std::{path::PathBuf, sync::Arc};
 
-use crate::i18n::LocalizeError;
 use crate::install::ModpackInstallSource;
 use crate::t;
 use acl_core::{InstanceConfig, LauncherConfig};
 use acl_minecraft::{
-    AssetItemData, AssetVersion, ModpackLoader, ModpackManifest, ProjectHost, ProjectType,
-    ReleaseType, match_best_version, modrinth,
+    AssetItemData, AssetVersion, ModpackLoader, ModpackManifest, ProjectType, ReleaseType,
+    match_best_version,
 };
 use gtk::prelude::*;
 use libadwaita::prelude::*;
@@ -225,14 +224,8 @@ impl ModpackPage {
             return;
         };
 
-        if item.host == ProjectHost::CurseForge {
-            let _ = sender.output(ModpackOutput::ShowToast(
-                "CurseForge support is coming soon".to_string(),
-            ));
-            return;
-        }
-
         let project_id = item.project_id.clone();
+        let host = item.host;
         self.request_id = self.request_id.wrapping_add(1);
         let request_id = self.request_id;
         self.is_loading = true;
@@ -242,18 +235,15 @@ impl ModpackPage {
         let download_source = self.config.read().download_source;
 
         sender.oneshot_command(async move {
-            let result = modrinth::ProjectVersion::fetch_list_with_cache(
+            let result = super::fetch_asset_versions(
                 &client,
+                host,
                 &project_id,
-                &[],
-                &[],
                 &cache_dir,
                 download_source,
                 false,
             )
-            .await
-            .map(|list| list.into_iter().map(AssetVersion::from).collect())
-            .map_err(|e| e.to_i18n());
+            .await;
 
             ModpackCmdOutput::VersionsLoaded { request_id, result }
         });
@@ -513,7 +503,7 @@ impl Component for ModpackPage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acl_minecraft::{AssetFile, ModpackFile, ModpackFileSource};
+    use acl_minecraft::{AssetFile, ModpackFile, ModpackFileSource, ProjectHost};
 
     fn sample_online_item() -> AssetItemData {
         AssetItemData {
@@ -527,6 +517,7 @@ mod tests {
             downloads: 100,
             display_categories: Vec::new(),
             latest_version: Some("1.0.0".to_string()),
+            website_url: None,
         }
     }
 

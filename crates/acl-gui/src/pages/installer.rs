@@ -8,14 +8,18 @@ pub mod modpack_config;
 pub mod version_select;
 
 use std::{
-    path::PathBuf,
+    collections::HashMap,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 use acl_core::{
     CoreError, Instance, InstanceConfig, LauncherConfig, ModLoader, manager::InstanceManager,
 };
-use acl_minecraft::{AssetItemData, AssetVersion, ModpackManifest, ProjectType, VersionEntry};
+use acl_minecraft::{
+    AssetItemData, AssetVersion, DownloadSource, ModpackManifest, ProjectHost, ProjectType,
+    VersionEntry, curseforge, modrinth,
+};
 
 use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, SharedState,
@@ -41,6 +45,119 @@ use crate::{
     },
     t,
 };
+
+async fn fetch_asset_versions(
+    client: &reqwest::Client,
+    host: ProjectHost,
+    project_id: &str,
+    cache_dir: &Path,
+    download_source: DownloadSource,
+    force_refresh: bool,
+) -> Result<Vec<AssetVersion>, String> {
+    match host {
+        ProjectHost::Modrinth => modrinth::ProjectVersion::fetch_list_with_cache(
+            client,
+            project_id,
+            &[],
+            &[],
+            cache_dir,
+            download_source,
+            force_refresh,
+        )
+        .await
+        .map(|list| list.into_iter().map(AssetVersion::from).collect())
+        .map_err(|e| e.to_i18n()),
+        ProjectHost::CurseForge => {
+            let mod_id = curseforge::parse_project_id(project_id).map_err(|e| e.to_i18n())?;
+
+            curseforge::ModFile::fetch_list_with_cache(
+                client,
+                mod_id,
+                None,
+                None,
+                cache_dir,
+                force_refresh,
+            )
+            .await
+            .map(|list| list.into_iter().map(AssetVersion::from).collect())
+            .map_err(|e| e.to_i18n())
+        }
+    }
+}
+
+async fn fetch_project_details(
+    client: &reqwest::Client,
+    host: ProjectHost,
+    ids: &[String],
+    cache_dir: &Path,
+    download_source: DownloadSource,
+    force_refresh: bool,
+) -> Result<HashMap<String, AssetItemData>, String> {
+    match host {
+        ProjectHost::Modrinth => modrinth::ProjectDetail::fetch_batch_with_cache(
+            client,
+            ids,
+            cache_dir,
+            download_source,
+            force_refresh,
+        )
+        .await
+        .map(|list| {
+            list.into_iter()
+                .map(|detail| {
+                    let id = detail.id.clone();
+                    (id, AssetItemData::from(detail))
+                })
+                .collect()
+        })
+        .map_err(|e| e.to_i18n()),
+        ProjectHost::CurseForge => {
+            let mod_ids: Vec<u64> = ids
+                .iter()
+                .map(|id| curseforge::parse_project_id(id))
+                .collect::<acl_minecraft::Result<Vec<_>>>()
+                .map_err(|e| e.to_i18n())?;
+
+            curseforge::fetch_projects_batch_with_cache(client, &mod_ids, cache_dir, force_refresh)
+                .await
+                .map(|list| {
+                    list.into_iter()
+                        .map(|info| (info.id.to_string(), AssetItemData::from(info)))
+                        .collect()
+                })
+                .map_err(|e| e.to_i18n())
+        }
+    }
+}
+
+fn manual_download_url(item: &AssetItemData, version: &AssetVersion) -> Option<String> {
+    if version.primary_file.is_some() {
+        return None;
+    }
+
+    match version.host {
+        ProjectHost::CurseForge => {
+            if let Some(base) = item
+                .website_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+            {
+                Some(format!(
+                    "{}/files/{}",
+                    base.trim_end_matches('/'),
+                    version.id
+                ))
+            } else {
+                Some(format!(
+                    "https://www.curseforge.com/projects/{}",
+                    version.project_id
+                ))
+            }
+        }
+        ProjectHost::Modrinth => None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstallerStep {
@@ -507,6 +624,30 @@ impl Component for InstallerPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acl_minecraft::{AssetFile, ReleaseType};
+
+    fn sample_asset_version(host: ProjectHost, with_file: bool) -> AssetVersion {
+        AssetVersion {
+            host,
+            id: "54321".to_string(),
+            project_id: "12345".to_string(),
+            name: "Sample 1.0.0".to_string(),
+            version_number: "1.0.0".to_string(),
+            release_type: ReleaseType::Release,
+            game_versions: vec!["1.21.1".to_string()],
+            loaders: vec!["fabric".to_string()],
+            date_published: "2026-01-01T00:00:00Z".to_string(),
+            downloads: 42,
+            primary_file: with_file.then(|| AssetFile {
+                url: "https://example.com/sample.jar".to_string(),
+                filename: "sample.jar".to_string(),
+                size: 1024,
+                sha1: None,
+                sha512: None,
+            }),
+            dependencies: Vec::new(),
+        }
+    }
 
     #[test]
     fn test_installer_step_default_and_as_str() {
@@ -516,5 +657,118 @@ mod tests {
         assert_eq!(InstallerStep::AssetConfig.as_str(), "asset_config");
         assert_eq!(InstallerStep::SelectVersion.as_str(), "select_version");
         assert_eq!(InstallerStep::ModpackConfig.as_str(), "modpack_config");
+    }
+
+    fn sample_asset_item(host: ProjectHost, website_url: Option<&str>) -> AssetItemData {
+        AssetItemData {
+            host,
+            project_type: ProjectType::Mod,
+            project_id: "12345".to_string(),
+            title: "Sample Mod".to_string(),
+            author: "Tester".to_string(),
+            description: "Desc".to_string(),
+            icon_url: None,
+            downloads: 100,
+            display_categories: Vec::new(),
+            latest_version: None,
+            website_url: website_url.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn test_manual_download_url() {
+        let cf_manual = sample_asset_version(ProjectHost::CurseForge, false);
+        let cf_item_with_url = sample_asset_item(
+            ProjectHost::CurseForge,
+            Some(
+                "  https://www.curseforge.com/minecraft/mc-mods/mirabilis-vanilla-biome-overhaul/  ",
+            ),
+        );
+        assert_eq!(
+            manual_download_url(&cf_item_with_url, &cf_manual).as_deref(),
+            Some(
+                "https://www.curseforge.com/minecraft/mc-mods/mirabilis-vanilla-biome-overhaul/files/54321"
+            )
+        );
+
+        let cf_item_no_url = sample_asset_item(ProjectHost::CurseForge, None);
+        assert_eq!(
+            manual_download_url(&cf_item_no_url, &cf_manual).as_deref(),
+            Some("https://www.curseforge.com/projects/12345")
+        );
+
+        let cf_item_blank_url = sample_asset_item(ProjectHost::CurseForge, Some("   "));
+        assert_eq!(
+            manual_download_url(&cf_item_blank_url, &cf_manual).as_deref(),
+            Some("https://www.curseforge.com/projects/12345")
+        );
+
+        let cf_auto = sample_asset_version(ProjectHost::CurseForge, true);
+        assert_eq!(manual_download_url(&cf_item_with_url, &cf_auto), None);
+
+        let mr_item = sample_asset_item(
+            ProjectHost::Modrinth,
+            Some("https://modrinth.com/mod/sample"),
+        );
+        let mr_no_file = sample_asset_version(ProjectHost::Modrinth, false);
+        assert_eq!(manual_download_url(&mr_item, &mr_no_file), None);
+
+        let mr_with_file = sample_asset_version(ProjectHost::Modrinth, true);
+        assert_eq!(manual_download_url(&mr_item, &mr_with_file), None);
+    }
+
+    #[test]
+    fn test_fetch_helpers_hermetic_paths() {
+        let rt = relm4::tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("failed to build current-thread tokio runtime");
+        let client = reqwest::Client::new();
+        let cache_dir = Path::new("/tmp/acl-unused-cache");
+
+        rt.block_on(async {
+            // Invalid CurseForge project IDs fail during ID parsing before any I/O.
+            for invalid_id in ["", "   ", "not-a-number", "-1"] {
+                let err = fetch_asset_versions(
+                    &client,
+                    ProjectHost::CurseForge,
+                    invalid_id,
+                    cache_dir,
+                    DownloadSource::Official,
+                    false,
+                )
+                .await
+                .expect_err("invalid CurseForge project ID should fail");
+                assert!(!err.is_empty());
+            }
+
+            // Empty ID batches return an empty map without network or API key access.
+            for host in [ProjectHost::Modrinth, ProjectHost::CurseForge] {
+                let details = fetch_project_details(
+                    &client,
+                    host,
+                    &[],
+                    cache_dir,
+                    DownloadSource::Official,
+                    false,
+                )
+                .await
+                .expect("empty project ID batch should succeed");
+                assert!(details.is_empty());
+            }
+
+            // Invalid CurseForge ID inside a batch fails before any network call.
+            let batch_ids = vec!["12345".to_string(), "bad-id".to_string()];
+            let err = fetch_project_details(
+                &client,
+                ProjectHost::CurseForge,
+                &batch_ids,
+                cache_dir,
+                DownloadSource::Official,
+                false,
+            )
+            .await
+            .expect_err("batch with invalid CurseForge ID should fail");
+            assert!(!err.is_empty());
+        });
     }
 }
