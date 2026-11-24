@@ -142,6 +142,7 @@ pub struct HomePage {
     accounts: Arc<SharedState<AccountStore>>,
     config: Arc<SharedState<LauncherConfig>>,
     client: reqwest::Client,
+    bulk_client: reqwest::Client,
     dirs: LauncherDirs,
     stage: LaunchStage,
 
@@ -156,6 +157,7 @@ pub struct HomeInit {
     pub accounts: Arc<SharedState<AccountStore>>,
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
+    pub bulk_client: reqwest::Client,
     pub dirs: LauncherDirs,
 }
 
@@ -282,6 +284,7 @@ impl HomePage {
         };
 
         let client = self.client.clone();
+        let bulk_client = self.bulk_client.clone();
         let dirs = self.dirs.clone();
         let global_config = self.config.read().clone();
 
@@ -339,6 +342,7 @@ impl HomePage {
                         let tasks = instance.check_integrity(tasks);
                         download::download_all(
                             &client,
+                            &bulk_client,
                             tasks,
                             global_config.download_source,
                             global_config.max_concurrent_downloads,
@@ -767,6 +771,7 @@ impl Component for HomePage {
             accounts: init.accounts,
             config: init.config,
             client: init.client,
+            bulk_client: init.bulk_client,
             dirs: init.dirs,
             stage: LaunchStage::Idle,
             instance_model: instance_model.clone(),
@@ -1276,6 +1281,7 @@ mod tests {
             accounts: accounts_state,
             config: Arc::new(SharedState::new()),
             client: reqwest::Client::new(),
+            bulk_client: reqwest::Client::new(),
             dirs,
             stage: LaunchStage::Idle,
             instance_model: gtk::StringList::new(&[]),
