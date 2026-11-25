@@ -207,10 +207,12 @@ impl ManualPage {
 
             let open_btn = gtk::Button::builder()
                 .valign(gtk::Align::Center)
-                .icon_name("external-link-symbolic")
-                .tooltip_text(t!("installer-manual-open-page", "Open download page"))
+                .label(t!("installer-manual-open-page", "Open"))
+                .tooltip_text(t!(
+                    "installer-manual-open-page-tooltip",
+                    "Open download page in browser"
+                ))
                 .build();
-            open_btn.add_css_class("flat");
 
             let sender_open = sender.clone();
             let project_id = file.project_id;
@@ -230,6 +232,7 @@ impl ManualPage {
                 .label(t!("installer-manual-skip", "Skip"))
                 .build();
             skip_btn.add_css_class("flat");
+            skip_btn.add_css_class("dim-label");
 
             let sender_skip = sender.clone();
             skip_btn.connect_clicked(move |_| {
@@ -421,7 +424,19 @@ impl Component for ManualPage {
                     #[watch]
                     set_label: &model.finish_label(),
                     connect_clicked => ManualInput::Finish,
-                }
+                },
+
+                pack_end = &gtk::Button {
+                    add_css_class: "flat",
+                    set_icon_name: "view-refresh-symbolic",
+                    #[watch]
+                    set_visible: !model.files.is_empty(),
+                    #[watch]
+                    set_sensitive: !model.is_busy,
+                    #[watch]
+                    set_tooltip_text: Some(&t!("installer-manual-recheck", "Recheck")),
+                    connect_clicked => ManualInput::Recheck,
+                },
 
             },
 
@@ -487,11 +502,34 @@ impl Component for ManualPage {
 
                     adw::ActionRow {
                         #[watch]
-                        set_title: &t!("installer-manual-import-title", "Import Downloaded Files"),
+                        set_title: &t!(
+                            "installer-manual-import-folder-title",
+                            "Import from Download Folder"
+                        ),
                         #[watch]
                         set_subtitle: &t!(
-                            "installer-manual-import-subtitle",
-                            "Files are matched by checksum and copied to the right folder automatically"
+                            "installer-manual-import-folder-subtitle",
+                            "Choose your browser download folder (e.g. Downloads) to auto-match and import all files"
+                        ),
+
+                        add_suffix = &gtk::Button {
+                            set_valign: gtk::Align::Center,
+                            #[watch]
+                            set_sensitive: !model.is_busy,
+                            #[watch]
+                            set_label: &t!("installer-manual-pick-folder", "Select Folder"),
+                            connect_clicked => ManualInput::PickFolder,
+                        },
+
+                    },
+
+                    adw::ActionRow {
+                        #[watch]
+                        set_title: &t!("installer-manual-import-files-title", "Select Downloaded Files"),
+                        #[watch]
+                        set_subtitle: &t!(
+                            "installer-manual-import-files-subtitle",
+                            "Pick one or more downloaded files, or drag and drop them onto this page"
                         ),
 
                         add_suffix = &gtk::Button {
@@ -501,26 +539,6 @@ impl Component for ManualPage {
                             #[watch]
                             set_label: &t!("installer-manual-pick-files", "Select Files"),
                             connect_clicked => ManualInput::PickFiles,
-                        },
-
-                        add_suffix = &gtk::Button {
-                            set_valign: gtk::Align::Center,
-                            #[watch]
-                            set_sensitive: !model.is_busy,
-                            #[watch]
-                            set_label: &t!("installer-manual-pick-folder", "Scan Folder"),
-                            connect_clicked => ManualInput::PickFolder,
-                        },
-
-                        add_suffix = &gtk::Button {
-                            set_valign: gtk::Align::Center,
-                            add_css_class: "flat",
-                            set_icon_name: "view-refresh-symbolic",
-                            #[watch]
-                            set_sensitive: !model.is_busy,
-                            #[watch]
-                            set_tooltip_text: Some(&t!("installer-manual-recheck", "Recheck")),
-                            connect_clicked => ManualInput::Recheck,
                         },
 
                     },

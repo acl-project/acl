@@ -297,10 +297,14 @@ installer-manual-ignore-all-subtitle = 清空手动下载列表，不再对此�
 installer-manual-ignore-all-title = 忽略剩余文件
 # Source: Ignore all remaining files? Launching without required mods may fail.
 installer-manual-ignore-confirm-text = 确定忽略所有剩余文件吗？缺少必需模组可能会导致启动失败。
-# Source: Files are matched by checksum and copied to the right folder automatically
-installer-manual-import-subtitle = 文件将按校验和自动匹配并复制到对应目录
-# Source: Import Downloaded Files
-installer-manual-import-title = 导入已下载的文件
+# Source: Pick one or more downloaded files, or drag and drop them onto this page
+installer-manual-import-files-subtitle = 手动选择一个或多个已下载的文件，也可直接拖放到此页面
+# Source: Select Downloaded Files
+installer-manual-import-files-title = 手动选择文件
+# Source: Choose your browser download folder (e.g. Downloads) to auto-match and import all files
+installer-manual-import-folder-subtitle = 选择浏览器下载目录（如 Downloads），自动校验并导入匹配的模组
+# Source: Import from Download Folder
+installer-manual-import-folder-title = 从下载文件夹批量导入
 # Source: Imported { $count } file(s)
 installer-manual-imported-count = 已导入 { $count } 个文件
 # Source: No matching files found
@@ -315,16 +319,18 @@ installer-manual-launch-anyway-title = 仍然启动
 installer-manual-open-folder = 打开实例文件夹
 # Source: Open Next Batch
 installer-manual-open-next-batch = 打开下一批
-# Source: Open download page
-installer-manual-open-page = 打开下载页面
+# Source: Open
+installer-manual-open-page = 打开
+# Source: Open download page in browser
+installer-manual-open-page-tooltip = 在浏览器中打开下载页面
 # Source: Optional ({ $count })
 installer-manual-optional-title = 可选（{ $count }）
 # Source: Select Files
 installer-manual-pick-files = 选择文件
 # Source: Select Downloaded Files
 installer-manual-pick-files-title = 选择已下载的文件
-# Source: Scan Folder
-installer-manual-pick-folder = 扫描文件夹
+# Source: Select Folder
+installer-manual-pick-folder = 选择文件夹
 # Source: Select Folder to Scan
 installer-manual-pick-folder-title = 选择要扫描的文件夹
 # Source: Metadata unavailable (place manually and skip)

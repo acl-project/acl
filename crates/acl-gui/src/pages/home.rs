@@ -838,10 +838,10 @@ impl Component for HomePage {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             HomeInput::LaunchClicked => {
-                self.launch(sender, true);
+                self.launch(sender, false);
             }
             HomeInput::LaunchBypass => {
-                self.launch(sender, false);
+                self.launch(sender, true);
             }
             HomeInput::Refresh => {
                 self.refresh_models();
