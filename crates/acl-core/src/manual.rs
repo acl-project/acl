@@ -184,7 +184,7 @@ pub fn save(instance_dir: &Path, files: &[ManualModpackFile]) -> Result<()> {
         source,
     })?;
 
-    info!("Save {} success", path.display());
+    info!("Saved {} successfully", path.display());
 
     Ok(())
 }
@@ -200,13 +200,13 @@ pub fn clear(instance_dir: &Path) -> Result<()> {
         source,
     })?;
 
-    info!("Remove {} success", path.display());
+    info!("Removed {} successfully", path.display());
 
     Ok(())
 }
 
 /// Scans the instance directory (mods / resourcepacks / shaderpacks),
-/// and filters out incomplete downloads based on size and SHA-1/MD5 checksums.
+/// and filters out complete downloads based on size and SHA-1/MD5 checksums.
 pub fn find_missing(
     instance_dir: &Path,
     files: &[ManualModpackFile],
@@ -244,8 +244,8 @@ pub fn import_files(
 
     let mut imported: u32 = 0;
     for entry in pending {
-        for source in sources {
-            let Ok(meta) = fs::metadata(source) else {
+        for src in sources {
+            let Ok(meta) = fs::metadata(src) else {
                 continue;
             };
 
@@ -253,7 +253,7 @@ pub fn import_files(
                 continue;
             }
 
-            if file_cache.matches(entry, source, meta.len()) {
+            if file_cache.matches(entry, src, meta.len()) {
                 let rel_path = acl_minecraft::modpack::normalize_relative_path(&entry.target_dir)?;
                 let target_dir = instance_dir.join(rel_path);
                 fs::create_dir_all(&target_dir).map_err(|source| CoreError::Io {
@@ -271,9 +271,18 @@ pub fn import_files(
                 }
                 let dest = target_dir.join(clean_name);
 
-                if *source != dest {
-                    fs::copy(source, &dest)
-                        .map_err(|source| CoreError::Io { path: dest, source })?;
+                // Resolve symlinks to avoid interference
+
+                let canon_src = fs::canonicalize(src).map_err(|source| CoreError::Io {
+                    path: src.to_path_buf(),
+                    source,
+                })?;
+
+                let same_file =
+                    fs::canonicalize(&dest).is_ok_and(|canon_dest| canon_dest == canon_src);
+
+                if !same_file {
+                    fs::copy(src, &dest).map_err(|source| CoreError::Io { path: dest, source })?;
                 }
                 imported = imported.saturating_add(1);
                 break;

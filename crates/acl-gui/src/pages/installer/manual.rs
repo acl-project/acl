@@ -725,6 +725,8 @@ impl Component for ManualPage {
                 instance_id,
                 launch_after,
             } => {
+                self.request_id = self.request_id.wrapping_add(1);
+
                 let instance_info = {
                     let mgr = self.mgr.read();
                     mgr.instance(&instance_id)
@@ -905,6 +907,10 @@ impl Component for ManualPage {
                 project_id,
                 file_id,
             } => {
+                if self.is_busy {
+                    return;
+                }
+
                 self.files
                     .retain(|f| !(f.project_id == project_id && f.file_id == file_id));
 

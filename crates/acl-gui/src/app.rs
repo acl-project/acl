@@ -772,10 +772,10 @@ impl SimpleComponent for AppModel {
 
                 self.current_view = AppView::Installer;
             }
-            AppMsg::LaunchBypass(_) => {
+            AppMsg::LaunchBypass(id) => {
                 self.current_view = AppView::Main;
                 self.current_page = NavPage::Home;
-                self.home_page.emit(HomeInput::LaunchBypass);
+                self.home_page.emit(HomeInput::LaunchBypass(id));
             }
         }
     }

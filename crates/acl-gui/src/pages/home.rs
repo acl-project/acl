@@ -127,7 +127,7 @@ pub enum HomeInput {
     OpenInstanceSettings,
     SelectInstance(usize),
     SelectAccount(usize),
-    LaunchBypass,
+    LaunchBypass(String),
 }
 
 #[derive(Debug)]
@@ -840,8 +840,17 @@ impl Component for HomePage {
             HomeInput::LaunchClicked => {
                 self.launch(sender, false);
             }
-            HomeInput::LaunchBypass => {
-                self.launch(sender, true);
+            HomeInput::LaunchBypass(id) => {
+                if self
+                    .mgr
+                    .read()
+                    .active_instance()
+                    .is_some_and(|i| i.id() == id.as_str())
+                {
+                    self.launch(sender, true);
+                } else {
+                    self.launch(sender, false);
+                }
             }
             HomeInput::Refresh => {
                 self.refresh_models();

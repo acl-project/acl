@@ -757,11 +757,13 @@ pub fn spawn_modpack_install(
 
                 // Scan first to check whether `overrides` already includes files that need manual download
                 let remaining_manual = if resolution.has_manual_files() {
-                    let missing = acl_core::manual::find_missing(
-                        instance.game_dir(),
-                        &resolution.manual_files,
-                    )
-                    .map_err(|e| e.to_i18n())?;
+                    let game_dir = instance.game_dir().to_path_buf();
+                    let missing = relm4::tokio::task::spawn_blocking(move || {
+                        acl_core::manual::find_missing(&game_dir, &resolution.manual_files)
+                            .map_err(|e| e.to_i18n())
+                    })
+                    .await
+                    .map_err(|e| e.to_string())??;
 
                     if !missing.is_empty() {
                         acl_core::manual::save(instance.game_dir(), &missing)
