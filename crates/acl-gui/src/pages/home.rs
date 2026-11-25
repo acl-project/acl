@@ -1181,6 +1181,9 @@ mod tests {
             format!("{:?}", HomeInput::OpenInstanceSettings),
             "OpenInstanceSettings"
         );
+
+        let input_bypass = HomeInput::LaunchBypass("inst_1".to_string());
+        assert_eq!(format!("{input_bypass:?}"), "LaunchBypass(\"inst_1\")");
     }
 
     #[test]
@@ -1196,6 +1199,15 @@ mod tests {
 
         let close = HomeOutput::RequestClose;
         assert_eq!(format!("{close:?}"), "RequestClose");
+
+        let manual = HomeOutput::OpenManualDownloads {
+            instance_id: "inst_1".to_string(),
+            launch_after: true,
+        };
+        assert_eq!(
+            format!("{manual:?}"),
+            "OpenManualDownloads { instance_id: \"inst_1\", launch_after: true }"
+        );
     }
 
     #[test]

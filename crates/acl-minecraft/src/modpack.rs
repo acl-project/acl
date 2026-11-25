@@ -1120,10 +1120,67 @@ mod tests {
                 page_url: "https://www.curseforge.com/projects/102".to_string(),
                 required: false,
                 reason: ManualDownloadReason::DistributionDisabled,
-                file_length: None,
+                file_length: Some(5120),
                 sha1: None,
                 md5: None,
             }]
         );
+    }
+
+    #[test]
+    fn test_manual_modpack_file_serde_roundtrip_and_defaults() {
+        let entries = vec![
+            ManualModpackFile {
+                project_id: 101,
+                file_id: 1001,
+                project_name: Some("Restricted Mod".to_string()),
+                file_name: Some("restricted.jar".to_string()),
+                target_dir: "mods".to_string(),
+                page_url: "https://www.curseforge.com/projects/101/files/1001".to_string(),
+                required: true,
+                reason: ManualDownloadReason::DistributionDisabled,
+                file_length: Some(8192),
+                sha1: Some("0123456789abcdef0123456789abcdef01234567".to_string()),
+                md5: Some("0123456789abcdef0123456789abcdef".to_string()),
+            },
+            ManualModpackFile {
+                project_id: 202,
+                file_id: 2002,
+                project_name: None,
+                file_name: None,
+                target_dir: "shaderpacks".to_string(),
+                page_url: "https://www.curseforge.com/projects/202".to_string(),
+                required: false,
+                reason: ManualDownloadReason::MetadataNotFound,
+                file_length: None,
+                sha1: None,
+                md5: None,
+            },
+        ];
+
+        let json = serde_json::to_string(&entries).expect("serialize ManualModpackFile list");
+        let parsed: Vec<ManualModpackFile> =
+            serde_json::from_str(&json).expect("deserialize ManualModpackFile list");
+        assert_eq!(parsed, entries);
+
+        // Legacy JSON missing file_length, sha1, and md5 defaults them to None
+        let legacy_json = r#"{
+            "project_id": 303,
+            "file_id": 3003,
+            "project_name": "Legacy Pack Mod",
+            "file_name": "legacy.jar",
+            "target_dir": "mods",
+            "page_url": "https://www.curseforge.com/projects/303",
+            "required": true,
+            "reason": "DistributionDisabled"
+        }"#;
+        let legacy: ManualModpackFile =
+            serde_json::from_str(legacy_json).expect("deserialize legacy ManualModpackFile");
+        assert_eq!(legacy.project_id, 303);
+        assert_eq!(legacy.file_id, 3003);
+        assert_eq!(legacy.reason, ManualDownloadReason::DistributionDisabled);
+        assert_eq!(legacy.file_length, None);
+        assert_eq!(legacy.sha1, None);
+        assert_eq!(legacy.md5, None);
     }
 }

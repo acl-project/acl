@@ -925,9 +925,9 @@ mod tests {
                         .to_string(),
                     required: true,
                     reason: ManualDownloadReason::DistributionDisabled,
-                    file_length: None,
-                    sha1: None,
-                    md5: None,
+                    file_length: Some(4096),
+                    sha1: Some("sha1_res".to_string()),
+                    md5: Some("md5ignored".to_string()),
                 },
                 ManualModpackFile {
                     project_id: 60,
@@ -940,7 +940,7 @@ mod tests {
                             .to_string(),
                     required: false,
                     reason: ManualDownloadReason::DistributionDisabled,
-                       file_length: None,
+                    file_length: Some(4096),
                     sha1: None,
                     md5: None,
                 },
@@ -961,6 +961,39 @@ mod tests {
                 },
             ]
         );
+
+        // Zero file_length from CurseForge metadata maps to file_length: None
+        {
+            let zero_temp = TempDirGuard::new("resolve_zero_len");
+            let zero_entries = vec![CfpackFile {
+                project_id: 88,
+                file_id: 888,
+                required: true,
+            }];
+            let mut zero_file = sample_mod_file(888, 88, "zero.jar", None, Some("sha1_zero"));
+            zero_file.file_length = 0;
+
+            write_batch_cache(
+                zero_temp.path(),
+                "mods/files",
+                &serde_json::json!({ "fileIds": [888_u64] }),
+                vec![zero_file],
+            );
+            write_batch_cache(
+                zero_temp.path(),
+                "mods",
+                &serde_json::json!({ "modIds": [88_u64] }),
+                vec![sample_mod_info(88, Some(6), "Zero Length Mod")],
+            );
+
+            let zero_res = resolve_files(&zero_entries, &client, zero_temp.path())
+                .await
+                .expect("zero-length restricted file should resolve as manual");
+            assert_eq!(zero_res.manual_files.len(), 1);
+            assert_eq!(zero_res.manual_files[0].file_length, None);
+            assert_eq!(zero_res.manual_files[0].sha1.as_deref(), Some("sha1_zero"));
+            assert_eq!(zero_res.manual_files[0].md5.as_deref(), Some("md5ignored"));
+        }
 
         // Unsafe file_name returned by API (containing path traversal or subdirectory) is rejected
         for unsafe_name in ["../evil.jar", "sub/nested.jar"] {

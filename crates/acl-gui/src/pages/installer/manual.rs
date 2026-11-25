@@ -1081,3 +1081,155 @@ impl Component for ManualPage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acl_minecraft::ManualDownloadReason;
+
+    fn sample_manual_file(project_id: u64, file_id: u64, required: bool) -> ManualModpackFile {
+        ManualModpackFile {
+            project_id,
+            file_id,
+            project_name: Some(format!("Mod {project_id}")),
+            file_name: Some(format!("mod-{project_id}.jar")),
+            target_dir: "mods".to_string(),
+            page_url: format!("https://www.curseforge.com/projects/{project_id}/files/{file_id}"),
+            required,
+            reason: ManualDownloadReason::DistributionDisabled,
+            file_length: Some(1024),
+            sha1: Some("deadbeef".to_string()),
+            md5: None,
+        }
+    }
+
+    #[test]
+    fn test_manual_message_types_debug_and_clone() {
+        let input = ManualInput::Open {
+            instance_id: "inst_1".to_string(),
+            launch_after: true,
+        };
+        assert!(format!("{input:?}").contains("inst_1"));
+
+        let output = ManualOutput::LaunchBypass("inst_1".to_string());
+        assert_eq!(format!("{output:?}"), format!("{:?}", output.clone()));
+
+        let cmd = ManualCmdOutput::Imported {
+            request_id: 3,
+            imported: 2,
+            missing: Ok(Vec::new()),
+        };
+        assert!(format!("{cmd:?}").contains("imported: 2"));
+    }
+
+    #[test]
+    fn test_manual_page_helpers_if_gtk_available() {
+        if std::env::var_os("ACL_MANUAL_GTK_TEST_CHILD").is_none() {
+            let exe = std::env::current_exe().expect("failed to resolve current test executable");
+            let output = std::process::Command::new(exe)
+                .env("ACL_MANUAL_GTK_TEST_CHILD", "1")
+                .args([
+                    "--exact",
+                    "pages::installer::manual::tests::test_manual_page_helpers_if_gtk_available",
+                    "--nocapture",
+                ])
+                .output()
+                .expect("failed to spawn isolated GTK test subprocess");
+
+            assert!(
+                output.status.success(),
+                "isolated GTK test subprocess failed (status: {:?}):\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            return;
+        }
+
+        if adw::init().is_err() {
+            return;
+        }
+
+        let mut page = ManualPage {
+            mgr: Arc::new(SharedState::new()),
+            instance_id: "pack-1".to_string(),
+            instance_name: "Test Pack".to_string(),
+            instance_dir: PathBuf::from("/mock/instances/pack-1"),
+            launch_after: false,
+            files: Vec::new(),
+            opened: HashSet::new(),
+            is_busy: false,
+            confirm_ignore_all: false,
+            request_id: 0,
+            required_group: adw::PreferencesGroup::new(),
+            required_rows: Vec::new(),
+            optional_group: adw::PreferencesGroup::new(),
+            optional_rows: Vec::new(),
+        };
+
+        // Empty list: ready state and finish label without launch
+        assert_eq!(page.required_count(), 0);
+        assert_eq!(page.optional_count(), 0);
+        assert!(!page.has_missing_required());
+        assert_eq!(
+            page.subtitle(),
+            t!(
+                "installer-manual-subtitle-ready",
+                "{name} · Ready",
+                name = "Test Pack"
+            )
+        );
+        assert_eq!(page.finish_label(), t!("installer-manual-finish", "Finish"));
+
+        // Launch after toggles finish label
+        page.launch_after = true;
+        assert_eq!(
+            page.finish_label(),
+            t!("installer-manual-finish-and-launch", "Finish & Launch")
+        );
+
+        // Optional files only
+        page.files = vec![
+            sample_manual_file(1, 10, false),
+            sample_manual_file(2, 20, false),
+        ];
+        assert_eq!(page.required_count(), 0);
+        assert_eq!(page.optional_count(), 2);
+        assert!(!page.has_missing_required());
+        assert_eq!(
+            page.subtitle(),
+            t!(
+                "installer-manual-subtitle-optional",
+                "{name} · {count} optional remaining",
+                name = "Test Pack",
+                count = 2
+            )
+        );
+
+        // Required + optional files: required subtitle takes precedence
+        page.files.push(sample_manual_file(3, 30, true));
+        assert_eq!(page.required_count(), 1);
+        assert_eq!(page.optional_count(), 2);
+        assert!(page.has_missing_required());
+        assert_eq!(
+            page.subtitle(),
+            t!(
+                "installer-manual-subtitle-required",
+                "{name} · {count} required remaining",
+                name = "Test Pack",
+                count = 1
+            )
+        );
+
+        // Busy state takes precedence over remaining counts
+        page.is_busy = true;
+        assert_eq!(
+            page.subtitle(),
+            t!(
+                "installer-manual-subtitle-checking",
+                "{name} · Checking files...",
+                name = "Test Pack"
+            )
+        );
+    }
+}

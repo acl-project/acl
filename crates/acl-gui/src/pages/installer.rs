@@ -699,6 +699,7 @@ mod tests {
         assert_eq!(InstallerStep::AssetConfig.as_str(), "asset_config");
         assert_eq!(InstallerStep::SelectVersion.as_str(), "select_version");
         assert_eq!(InstallerStep::ModpackConfig.as_str(), "modpack_config");
+        assert_eq!(InstallerStep::ManualDownloads.as_str(), "manual_downloads");
     }
 
     fn sample_asset_item(host: ProjectHost, website_url: Option<&str>) -> AssetItemData {

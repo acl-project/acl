@@ -1553,4 +1553,49 @@ pub(crate) mod tests {
         info.slug = "   ".to_string();
         assert_eq!(info.website_url(), None);
     }
+
+    #[test]
+    fn test_mod_file_md5() {
+        let with_both: ModFile = serde_json::from_str(
+            r#"{
+                "id": 1,
+                "modId": 10,
+                "displayName": "Mod 1",
+                "fileName": "mod1.jar",
+                "hashes": [
+                    { "value": "sha1hash", "algo": 1 },
+                    { "value": "   ", "algo": 2 },
+                    { "value": "md5hashvalue", "algo": 2 }
+                ]
+            }"#,
+        )
+        .expect("deserialize ModFile with md5");
+        assert_eq!(with_both.md5().as_deref(), Some("md5hashvalue"));
+
+        let without_md5: ModFile = serde_json::from_str(
+            r#"{
+                "id": 2,
+                "modId": 10,
+                "displayName": "Mod 2",
+                "fileName": "mod2.jar",
+                "hashes": [
+                    { "value": "sha1only", "algo": 1 },
+                    { "value": "  \t ", "algo": 2 }
+                ]
+            }"#,
+        )
+        .expect("deserialize ModFile without valid md5");
+        assert_eq!(without_md5.md5(), None);
+
+        let empty_hashes: ModFile = serde_json::from_str(
+            r#"{
+                "id": 3,
+                "modId": 10,
+                "displayName": "Mod 3",
+                "fileName": "mod3.jar"
+            }"#,
+        )
+        .expect("deserialize ModFile with empty hashes");
+        assert_eq!(empty_hashes.md5(), None);
+    }
 }
