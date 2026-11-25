@@ -17,7 +17,7 @@ use crate::{
     pages::{
         accounts::{AccountsInit, AccountsOutput, AccountsPage},
         download::{DownloadInit, DownloadOutput, DownloadPage},
-        home::{HomeInit, HomeOutput, HomePage},
+        home::{HomeInit, HomeInput, HomeOutput, HomePage},
         installer::{
             InstallerInit, InstallerInput, InstallerOutput, InstallerPage,
             asset_config::InstallTarget,
@@ -193,6 +193,11 @@ pub enum AppMsg {
         path: PathBuf,
         result: Result<Box<ModpackManifest>, String>,
     },
+    OpenManualDownloads {
+        instance_id: String,
+        launch_after: bool,
+    },
+    LaunchBypass(String),
     Refresh,
     Quit,
 }
@@ -481,6 +486,13 @@ impl SimpleComponent for AppModel {
                 HomeOutput::RequestClose => AppMsg::Quit,
                 HomeOutput::PromptReauth(username) => AppMsg::PromptReauth(username),
                 HomeOutput::OpenInstanceDetail(id) => AppMsg::OpenInstanceDetail(id),
+                HomeOutput::OpenManualDownloads {
+                    instance_id,
+                    launch_after,
+                } => AppMsg::OpenManualDownloads {
+                    instance_id,
+                    launch_after,
+                },
             });
         let instances_page = InstancesPage::builder()
             .launch(InstancesInit {
@@ -554,6 +566,7 @@ impl SimpleComponent for AppModel {
                 InstallerOutput::InstallModpack { name, source } => {
                     AppMsg::InstallModpack { name, source }
                 }
+                InstallerOutput::LaunchBypass(id) => AppMsg::LaunchBypass(id),
             });
 
         config_state.subscribe(sender.input_sender(), |_| AppMsg::Refresh);
@@ -682,7 +695,13 @@ impl SimpleComponent for AppModel {
                 self.current_view = AppView::Main;
             }
             AppMsg::InstallModpack { name, source } => {
-                spawn_modpack_install(&self.tasks, name, source, self.install_context());
+                spawn_modpack_install(
+                    &self.tasks,
+                    name,
+                    source,
+                    self.install_context(),
+                    sender.input_sender().clone(),
+                );
                 self.current_page = NavPage::Tasks;
                 self.current_view = AppView::Main;
             }
@@ -726,6 +745,38 @@ impl SimpleComponent for AppModel {
                     sender.input(AppMsg::ShowToast(err));
                 }
             },
+            AppMsg::OpenManualDownloads {
+                instance_id,
+                launch_after,
+            } => {
+                // When triggered in the background upon installation completion,
+                // show a toast instead of forcefully switching views
+                // if the user is configuring other items in the Installer.
+                if !launch_after && self.current_view == AppView::Installer {
+                    sender.input(AppMsg::ShowToast(t!(
+                        "app-manual-downloads-required-toast",
+                        "Some modpack files require manual download before launching"
+                    )));
+                    return;
+                }
+
+                if self.current_view != AppView::Installer {
+                    self.installer_return_to = self.current_view;
+                }
+
+                self.installer_page
+                    .emit(InstallerInput::OpenManualDownloads {
+                        instance_id,
+                        launch_after,
+                    });
+
+                self.current_view = AppView::Installer;
+            }
+            AppMsg::LaunchBypass(_) => {
+                self.current_view = AppView::Main;
+                self.current_page = NavPage::Home;
+                self.home_page.emit(HomeInput::LaunchBypass);
+            }
         }
     }
 }
