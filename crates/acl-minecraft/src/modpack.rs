@@ -121,6 +121,12 @@ pub struct ManualModpackFile {
     pub page_url: String,
     pub required: bool,
     pub reason: ManualDownloadReason,
+    #[serde(default)]
+    pub file_length: Option<u64>,
+    #[serde(default)]
+    pub sha1: Option<String>,
+    #[serde(default)]
+    pub md5: Option<String>,
 }
 
 /// Result of resolving all modpack files into downloadable and manual-download entries.
@@ -828,6 +834,9 @@ mod tests {
             page_url: "https://www.curseforge.com/projects/50/files/500".to_string(),
             required: true,
             reason: ManualDownloadReason::DistributionDisabled,
+            file_length: None,
+            sha1: None,
+            md5: None,
         });
         assert!(resolution.has_manual_files());
     }
@@ -1111,6 +1120,9 @@ mod tests {
                 page_url: "https://www.curseforge.com/projects/102".to_string(),
                 required: false,
                 reason: ManualDownloadReason::DistributionDisabled,
+                file_length: None,
+                sha1: None,
+                md5: None,
             }]
         );
     }

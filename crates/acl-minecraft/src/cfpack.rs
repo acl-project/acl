@@ -270,6 +270,9 @@ pub async fn resolve_files(
                 page_url,
                 required: entry.required,
                 reason: ManualDownloadReason::MetadataNotFound,
+                file_length: None,
+                sha1: None,
+                md5: None,
             });
             continue;
         };
@@ -293,6 +296,9 @@ pub async fn resolve_files(
                 page_url,
                 required: entry.required,
                 reason: ManualDownloadReason::DistributionDisabled,
+                file_length: (mod_file.file_length > 0).then_some(mod_file.file_length),
+                sha1: mod_file.sha1(),
+                md5: mod_file.md5(),
             });
             continue;
         };
@@ -919,6 +925,9 @@ mod tests {
                         .to_string(),
                     required: true,
                     reason: ManualDownloadReason::DistributionDisabled,
+                    file_length: None,
+                    sha1: None,
+                    md5: None,
                 },
                 ManualModpackFile {
                     project_id: 60,
@@ -931,6 +940,9 @@ mod tests {
                             .to_string(),
                     required: false,
                     reason: ManualDownloadReason::DistributionDisabled,
+                       file_length: None,
+                    sha1: None,
+                    md5: None,
                 },
                 ManualModpackFile {
                     project_id: 70,
@@ -943,6 +955,9 @@ mod tests {
                             .to_string(),
                     required: true,
                     reason: ManualDownloadReason::MetadataNotFound,
+                    file_length: None,
+                    sha1: None,
+                    md5: None,
                 },
             ]
         );
