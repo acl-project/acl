@@ -417,7 +417,7 @@ impl Component for ManualPage {
                 pack_end = &gtk::Button {
                     add_css_class: "suggested-action",
                     #[watch]
-                    set_sensitive: !model.is_busy && model.has_missing_required(),
+                    set_sensitive: !model.is_busy && !model.has_missing_required(),
                     #[watch]
                     set_label: &model.finish_label(),
                     connect_clicked => ManualInput::Finish,
