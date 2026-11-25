@@ -95,9 +95,11 @@ impl FileHashCache {
             return false;
         }
 
-        if let Some(expected_len) = entry.file_length
-            && len != expected_len
-        {
+        // Check the length first to avoid unnecessary hashing
+        let Some(expected_len) = entry.file_length else {
+            return false;
+        };
+        if len != expected_len {
             return false;
         }
 
