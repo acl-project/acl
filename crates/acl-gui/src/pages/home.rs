@@ -113,6 +113,10 @@ pub enum HomeOutput {
     RequestClose,
     PromptReauth(String),
     OpenInstanceDetail(String),
+    OpenManualDownloads {
+        instance_id: String,
+        launch_after: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -123,6 +127,7 @@ pub enum HomeInput {
     OpenInstanceSettings,
     SelectInstance(usize),
     SelectAccount(usize),
+    LaunchBypass(String),
 }
 
 #[derive(Debug)]
@@ -135,6 +140,8 @@ pub enum HomeCmdOutput {
         name: String,
         status: std::io::Result<std::process::ExitStatus>,
     },
+    ManualDownloadsRequired(String),
+    ManualCheckPassed,
 }
 
 pub struct HomePage {
@@ -258,7 +265,7 @@ impl HomePage {
         }
     }
 
-    fn launch(&mut self, sender: ComponentSender<Self>) {
+    fn launch(&mut self, sender: ComponentSender<Self>, bypass_manual: bool) {
         // Check whether an account is selected.
         let mut account = match self.accounts.read().active_account().cloned() {
             Some(acc) => acc,
@@ -282,6 +289,49 @@ impl HomePage {
                 return;
             }
         };
+
+        if !bypass_manual && acl_core::manual::exists(instance.game_dir()) {
+            if self.stage.is_launching() {
+                return;
+            }
+            self.stage = LaunchStage::CheckingIntegrity;
+
+            let dir = instance.game_dir().to_path_buf();
+            let instance_id = instance.id().to_owned();
+
+            sender.oneshot_command(async move {
+                let check_res = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+                    let files = acl_core::manual::load(&dir).map_err(|e| e.to_i18n())?;
+                    let missing =
+                        acl_core::manual::find_missing(&dir, &files).map_err(|e| e.to_i18n())?;
+                    let has_required = missing.iter().any(|f| f.required);
+
+                    if !has_required {
+                        if let Err(err) = acl_core::manual::clear(&dir) {
+                            warn!("Failed to clear manual downloads list: {err}");
+                        }
+                    } else if missing.len() < files.len()
+                        && let Err(err) = acl_core::manual::save(&dir, &missing)
+                    {
+                        warn!("Failed to update manual downloads list: {err}");
+                    }
+
+                    Ok(has_required)
+                })
+                .await;
+
+                match check_res {
+                    Ok(Ok(true)) => HomeCmdOutput::ManualDownloadsRequired(instance_id),
+                    Ok(Ok(false)) => HomeCmdOutput::ManualCheckPassed,
+                    Ok(Err(err)) => HomeCmdOutput::LaunchFinished(Err(LaunchError::Other(err))),
+                    Err(err) => {
+                        HomeCmdOutput::LaunchFinished(Err(LaunchError::Other(err.to_string())))
+                    }
+                }
+            });
+
+            return;
+        }
 
         let client = self.client.clone();
         let bulk_client = self.bulk_client.clone();
@@ -788,7 +838,19 @@ impl Component for HomePage {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             HomeInput::LaunchClicked => {
-                self.launch(sender);
+                self.launch(sender, false);
+            }
+            HomeInput::LaunchBypass(id) => {
+                if self
+                    .mgr
+                    .read()
+                    .active_instance()
+                    .is_some_and(|i| i.id() == id.as_str())
+                {
+                    self.launch(sender, true);
+                } else {
+                    self.launch(sender, false);
+                }
             }
             HomeInput::Refresh => {
                 self.refresh_models();
@@ -977,6 +1039,17 @@ impl Component for HomePage {
                     }
                 }
             }
+            HomeCmdOutput::ManualCheckPassed => {
+                self.stage = LaunchStage::Idle;
+                self.launch(sender, true);
+            }
+            HomeCmdOutput::ManualDownloadsRequired(id) => {
+                self.stage = LaunchStage::Idle;
+                let _ = sender.output(HomeOutput::OpenManualDownloads {
+                    instance_id: id,
+                    launch_after: true,
+                });
+            }
         }
     }
 }
@@ -1108,6 +1181,9 @@ mod tests {
             format!("{:?}", HomeInput::OpenInstanceSettings),
             "OpenInstanceSettings"
         );
+
+        let input_bypass = HomeInput::LaunchBypass("inst_1".to_string());
+        assert_eq!(format!("{input_bypass:?}"), "LaunchBypass(\"inst_1\")");
     }
 
     #[test]
@@ -1123,6 +1199,15 @@ mod tests {
 
         let close = HomeOutput::RequestClose;
         assert_eq!(format!("{close:?}"), "RequestClose");
+
+        let manual = HomeOutput::OpenManualDownloads {
+            instance_id: "inst_1".to_string(),
+            launch_after: true,
+        };
+        assert_eq!(
+            format!("{manual:?}"),
+            "OpenManualDownloads { instance_id: \"inst_1\", launch_after: true }"
+        );
     }
 
     #[test]

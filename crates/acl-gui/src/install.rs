@@ -22,7 +22,7 @@ use acl_minecraft::{
 use relm4::{SharedState, tokio};
 use tracing::warn;
 
-use crate::{i18n::LocalizeError, pages::installer::asset_config::InstallTarget, t};
+use crate::{app::AppMsg, i18n::LocalizeError, pages::installer::asset_config::InstallTarget, t};
 
 pub struct InstallContext {
     pub mgr: Arc<SharedState<InstanceManager>>,
@@ -621,6 +621,7 @@ pub fn spawn_modpack_install(
     instance_name: String,
     source: ModpackInstallSource,
     ctx: InstallContext,
+    sender: relm4::Sender<AppMsg>,
 ) {
     let mut stage_labels = Vec::with_capacity(8);
     let (core_stages, stage_resolve_modpack, stage_modpack_files, stage_overrides) = {
@@ -682,6 +683,7 @@ pub fn spawn_modpack_install(
             let source = source.clone();
             let instance_mgr = Arc::clone(&ctx.mgr);
             let active_install = Arc::clone(&ctx.active_install);
+            let sender = sender.clone();
             let env = CoreInstallEnv {
                 client: ctx.client.clone(),
                 bulk_client: ctx.bulk_client.clone(),
@@ -753,7 +755,35 @@ pub fn spawn_modpack_install(
                 // Ensure cancellation takes effect before persisting config and marking complete.
                 tokio::task::yield_now().await;
 
-                finalize_install(guard, &instance, &instance_mgr)
+                // Scan first to check whether `overrides` already includes files that need manual download
+                let remaining_manual = if resolution.has_manual_files() {
+                    let game_dir = instance.game_dir().to_path_buf();
+                    let missing = relm4::tokio::task::spawn_blocking(move || {
+                        acl_core::manual::find_missing(&game_dir, &resolution.manual_files)
+                            .map_err(|e| e.to_i18n())
+                    })
+                    .await
+                    .map_err(|e| e.to_string())??;
+
+                    if !missing.is_empty() {
+                        acl_core::manual::save(instance.game_dir(), &missing)
+                            .map_err(|e| e.to_i18n())?;
+                    }
+                    missing
+                } else {
+                    Vec::new()
+                };
+
+                finalize_install(guard, &instance, &instance_mgr)?;
+
+                if !remaining_manual.is_empty() {
+                    let _ = sender.send(AppMsg::OpenManualDownloads {
+                        instance_id: instance.id().to_string(),
+                        launch_after: false,
+                    });
+                }
+
+                Ok(())
             }
         },
     );

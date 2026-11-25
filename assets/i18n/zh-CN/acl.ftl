@@ -57,6 +57,8 @@ app-init-error-load-accounts = 加载账户失败，使用默认配置：{ $err 
 app-init-error-load-config = 加载配置失败，使用默认配置：{ $err }
 # Source: Failed to load instances, using defaults: { $err }
 app-init-error-load-instances = 加载实例失败，使用默认配置：{ $err }
+# Source: Some modpack files require manual download before launching
+app-manual-downloads-required-toast = 部分整合包文件需要在启动前手动下载
 # Source: The account with UUID '{ $uuid }' does not exist
 auth-error-account-not-found = UUID 为 '{ $uuid }' 的账户不存在
 # Source: Username cannot be empty
@@ -255,6 +257,104 @@ installer-asset-target-title = 安装位置
 installer-asset-vanilla-unsupported = 原版实例不支持安装模组
 # Source: Version
 installer-asset-version-title = 版本
+# Source: CurseForge disabled automatic downloads for these files. Download them in your browser, then drag them here or import below.
+installer-manual-actions-description = CurseForge 禁用了这些文件的自动下载。请在浏览器中下载后拖放到此处，或在下方导入。
+# Source: Import & Actions
+installer-manual-actions-title = 导入与操作
+# Source: All download pages have already been opened
+installer-manual-all-pages-opened = 所有下载页面均已打开
+# Source: You can finish and launch the instance now
+installer-manual-all-ready-subtitle = 现在可以完成并启动该实例
+# Source: All files are ready
+installer-manual-all-ready-title = 所有文件已就绪
+# Source: Opens up to 5 unopened CurseForge pages in your browser
+installer-manual-batch-open-subtitle = 在浏览器中打开最多 5 个尚未打开的 CurseForge 页面
+# Source: Open Download Pages
+installer-manual-batch-open-title = 批量打开下载页面
+# Source: Bypass
+installer-manual-bypass-title = 绕过
+# Source: Cancel
+installer-manual-cancel = 取消
+# Source: Confirm Ignore
+installer-manual-confirm-ignore = 确认忽略
+# Source: Instance not found
+installer-manual-error-instance-not-found = 找不到实例
+# Source: Failed to open instance folder: { $err }
+installer-manual-error-open-folder = 打开实例文件夹失败：{ $err }
+# Source: Failed to open one or more download pages
+installer-manual-error-open-some-urls = 打开部分下载页面失败
+# Source: Failed to open browser: { $err }
+installer-manual-error-open-url = 打开浏览器失败：{ $err }
+# Source: Finish
+installer-manual-finish = 完成
+# Source: Finish & Launch
+installer-manual-finish-and-launch = 完成并启动
+# Source: Ignore All
+installer-manual-ignore-all-button = 全部忽略
+# Source: Clear the manual download list and stop prompting for this instance
+installer-manual-ignore-all-subtitle = 清空手动下载列表，不再对此实例发出提示
+# Source: Ignore Remaining Files
+installer-manual-ignore-all-title = 忽略剩余文件
+# Source: Ignore all remaining files? Launching without required mods may fail.
+installer-manual-ignore-confirm-text = 确定忽略所有剩余文件吗？缺少必需模组可能会导致启动失败。
+# Source: Pick one or more downloaded files, or drag and drop them onto this page
+installer-manual-import-files-subtitle = 手动选择一个或多个已下载的文件，也可直接拖放到此页面
+# Source: Select Downloaded Files
+installer-manual-import-files-title = 手动选择文件
+# Source: Choose your browser download folder (e.g. Downloads) to auto-match and import all files
+installer-manual-import-folder-subtitle = 选择浏览器下载目录（如 Downloads），自动校验并导入匹配的模组
+# Source: Import from Download Folder
+installer-manual-import-folder-title = 从下载文件夹批量导入
+# Source: Imported { $count } file(s)
+installer-manual-imported-count = 已导入 { $count } 个文件
+# Source: No matching files found
+installer-manual-imported-none = 未找到匹配的文件
+# Source: Launch Anyway
+installer-manual-launch-anyway-button = 仍然启动
+# Source: Skip this check once without clearing the remaining list
+installer-manual-launch-anyway-subtitle = 仅本次跳过检查，不清空剩余列表
+# Source: Launch Anyway
+installer-manual-launch-anyway-title = 仍然启动
+# Source: Open Instance Folder
+installer-manual-open-folder = 打开实例文件夹
+# Source: Open Next Batch
+installer-manual-open-next-batch = 打开下一批
+# Source: Open
+installer-manual-open-page = 打开
+# Source: Open download page in browser
+installer-manual-open-page-tooltip = 在浏览器中打开下载页面
+# Source: Optional ({ $count })
+installer-manual-optional-title = 可选（{ $count }）
+# Source: Select Files
+installer-manual-pick-files = 选择文件
+# Source: Select Downloaded Files
+installer-manual-pick-files-title = 选择已下载的文件
+# Source: Select Folder
+installer-manual-pick-folder = 选择文件夹
+# Source: Select Folder to Scan
+installer-manual-pick-folder-title = 选择要扫描的文件夹
+# Source: Metadata unavailable (place manually and skip)
+installer-manual-reason-no-metadata = 元数据不可用（请手动放入后跳过）
+# Source: Recheck
+installer-manual-recheck = 重新检测
+# Source: Required ({ $count })
+installer-manual-required-title = 必需（{ $count }）
+# Source: Skip
+installer-manual-skip = 跳过
+# Source: Skip Optional
+installer-manual-skip-optional = 跳过可选项
+# Source: Opened
+installer-manual-status-opened = 已打开
+# Source: { $name } · Checking files...
+installer-manual-subtitle-checking = { $name } · 正在检测文件...
+# Source: { $name } · { $count } optional remaining
+installer-manual-subtitle-optional = { $name } · 剩余 { $count } 个可选文件
+# Source: { $name } · Ready
+installer-manual-subtitle-ready = { $name } · 已就绪
+# Source: { $name } · { $count } required remaining
+installer-manual-subtitle-required = { $name } · 剩余 { $count } 个必需文件
+# Source: Manual Downloads
+installer-manual-title = 手动下载
 # Source: Modpack Files
 installer-modpack-files-label = 整合包文件
 # Source: Modpack Information

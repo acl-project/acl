@@ -4,6 +4,7 @@
 pub mod asset_config;
 pub mod configure;
 pub mod loader_select;
+pub mod manual;
 pub mod modpack_config;
 pub mod version_select;
 
@@ -38,6 +39,7 @@ use crate::{
         loader_select::{
             LoaderSelectInit, LoaderSelectInput, LoaderSelectOutput, LoaderSelectPage,
         },
+        manual::{ManualInit, ManualInput, ManualOutput, ManualPage},
         modpack_config::{ModpackInit, ModpackInput, ModpackOutput, ModpackPage, ModpackSource},
         version_select::{
             VersionSelectInit, VersionSelectInput, VersionSelectOutput, VersionSelectPage,
@@ -167,6 +169,7 @@ pub enum InstallerStep {
     AssetConfig,
     SelectVersion,
     ModpackConfig,
+    ManualDownloads,
 }
 
 impl InstallerStep {
@@ -177,6 +180,7 @@ impl InstallerStep {
             Self::AssetConfig => "asset_config",
             Self::SelectVersion => "select_version",
             Self::ModpackConfig => "modpack_config",
+            Self::ManualDownloads => "manual_downloads",
         }
     }
 }
@@ -229,6 +233,12 @@ pub enum InstallerInput {
         name: String,
         source: ModpackInstallSource,
     },
+
+    OpenManualDownloads {
+        instance_id: String,
+        launch_after: bool,
+    },
+    LaunchBypass(String),
 }
 
 #[derive(Debug, Clone)]
@@ -246,6 +256,7 @@ pub enum InstallerOutput {
         name: String,
         source: ModpackInstallSource,
     },
+    LaunchBypass(String),
 }
 
 pub struct InstallerPage {
@@ -259,6 +270,8 @@ pub struct InstallerPage {
     modpack_config: Controller<ModpackPage>,
     version_select: Controller<VersionSelectPage>,
     version_select_return_to: InstallerStep,
+    manual: Controller<ManualPage>,
+
     active_install: Arc<Mutex<Option<String>>>,
 }
 
@@ -317,6 +330,7 @@ impl Component for InstallerPage {
             add_named[Some(InstallerStep::AssetConfig.as_str())] = model.asset_config.widget(),
             add_named[Some(InstallerStep::SelectVersion.as_str())] = model.version_select.widget(),
             add_named[Some(InstallerStep::ModpackConfig.as_str())] = model.modpack_config.widget(),
+            add_named[Some(InstallerStep::ManualDownloads.as_str())] = model.manual.widget(),
 
             #[watch]
             set_visible_child_name: model.step.as_str(),
@@ -424,6 +438,17 @@ impl Component for InstallerPage {
                 VersionSelectOutput::Selected(ver) => InstallerInput::VersionSelectFinish(ver),
             });
 
+        let manual = ManualPage::builder()
+            .launch(ManualInit {
+                mgr: Arc::clone(&init.mgr),
+                config: Arc::clone(&init.config),
+            })
+            .forward(sender.input_sender(), |msg| match msg {
+                ManualOutput::Back => InstallerInput::CancelClicked,
+                ManualOutput::LaunchBypass(id) => InstallerInput::LaunchBypass(id),
+                ManualOutput::ShowToast(m) => InstallerInput::ShowToast(m),
+            });
+
         init.config
             .subscribe(sender.input_sender(), |_| InstallerInput::Refresh);
 
@@ -438,6 +463,8 @@ impl Component for InstallerPage {
             modpack_config,
             version_select,
             version_select_return_to: InstallerStep::AssetConfig,
+            manual,
+
             active_install: init.active_install,
         };
 
@@ -617,6 +644,21 @@ impl Component for InstallerPage {
                     })));
                 self.step = InstallerStep::ModpackConfig;
             }
+
+            InstallerInput::OpenManualDownloads {
+                instance_id,
+                launch_after,
+            } => {
+                self.manual.emit(ManualInput::Open {
+                    instance_id,
+                    launch_after,
+                });
+                self.step = InstallerStep::ManualDownloads;
+            }
+
+            InstallerInput::LaunchBypass(id) => {
+                let _ = sender.output(InstallerOutput::LaunchBypass(id));
+            }
         }
     }
 }
@@ -657,6 +699,7 @@ mod tests {
         assert_eq!(InstallerStep::AssetConfig.as_str(), "asset_config");
         assert_eq!(InstallerStep::SelectVersion.as_str(), "select_version");
         assert_eq!(InstallerStep::ModpackConfig.as_str(), "modpack_config");
+        assert_eq!(InstallerStep::ManualDownloads.as_str(), "manual_downloads");
     }
 
     fn sample_asset_item(host: ProjectHost, website_url: Option<&str>) -> AssetItemData {
