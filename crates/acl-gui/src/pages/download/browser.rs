@@ -683,6 +683,7 @@ impl Component for BrowserPage {
                 }
             }
             BrowserInput::QueryChanged(query) => {
+                let query = query.trim().to_string();
                 if self.filter.query != query {
                     self.filter.query = query;
                     self.spawn_search(&sender, 0, false);
