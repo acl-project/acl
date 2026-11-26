@@ -15,7 +15,7 @@ use relm4::{
 };
 use tracing::error;
 
-use crate::{i18n::LocalizeError, t};
+use crate::{i18n::LocalizeError, pages::LoadState, t};
 
 const PAGE_LIMIT: u32 = 20;
 const CURSEFORGE_MAX_RESULTS: u32 = 10_000;
@@ -194,7 +194,7 @@ pub struct BrowserPage {
     filter: AssetFilterState,
     total_hits: u32,
     list_view: TypedListView<AssetRowItem, gtk::SingleSelection>,
-    is_loading: bool,
+    state: LoadState,
     request_id: u64,
 }
 
@@ -215,6 +215,7 @@ pub enum BrowserInput {
     NextPage,
     RefreshForce,
     SelectItem(AssetItemData),
+    EnsureLoaded,
     Refresh,
 }
 
@@ -234,6 +235,31 @@ pub enum BrowserCmdOutput {
 }
 
 impl BrowserPage {
+    fn is_loading(&self) -> bool {
+        matches!(self.state, LoadState::Loading)
+    }
+
+    fn content_page(&self) -> &'static str {
+        match &self.state {
+            LoadState::Idle | LoadState::Loading => "loading",
+            LoadState::Error(_) => "error",
+            LoadState::Ready => {
+                if self.list_view.is_empty() {
+                    "empty"
+                } else {
+                    "list"
+                }
+            }
+        }
+    }
+
+    fn error_message(&self) -> &str {
+        match &self.state {
+            LoadState::Error(e) => e,
+            _ => "",
+        }
+    }
+
     fn clamp_total_hits(host: ProjectHost, total_count: u32) -> u32 {
         match host {
             ProjectHost::Modrinth => total_count,
@@ -245,7 +271,7 @@ impl BrowserPage {
         self.request_id = self.request_id.wrapping_add(1);
         let request_id = self.request_id;
 
-        self.is_loading = true;
+        self.state = LoadState::Loading;
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let download_source = self.config.read().download_source;
@@ -312,11 +338,11 @@ impl BrowserPage {
     }
 
     fn can_go_prev(&self) -> bool {
-        !self.is_loading && self.filter.offset > 0
+        !self.is_loading() && self.filter.offset > 0
     }
 
     fn can_go_next(&self) -> bool {
-        !self.is_loading && self.filter.offset.saturating_add(self.filter.limit) < self.total_hits
+        !self.is_loading() && self.filter.offset.saturating_add(self.filter.limit) < self.total_hits
     }
 }
 
@@ -350,10 +376,13 @@ impl Component for BrowserPage {
 
                         gtk::SearchEntry {
                             set_hexpand: true,
-                            set_search_delay: 400,
+                            set_search_delay: 800,
                             #[watch]
                             set_placeholder_text: Some(&t!("download-browser-search-projects","Search projects...")),
                             connect_search_changed[sender] => move |entry| {
+                                sender.input(BrowserInput::QueryChanged(entry.text().to_string()));
+                            },
+                            connect_activate[sender] => move |entry| {
                                 sender.input(BrowserInput::QueryChanged(entry.text().to_string()));
                             },
                         },
@@ -388,7 +417,7 @@ impl Component for BrowserPage {
                             #[watch]
                             set_tooltip_text: Some(&t!("download-browser-refresh-list","Refresh list")),
                             #[watch]
-                            set_sensitive: !model.is_loading,
+                            set_sensitive: !model.is_loading(),
                             connect_clicked => BrowserInput::RefreshForce,
                         },
 
@@ -472,27 +501,86 @@ impl Component for BrowserPage {
 
             },
 
-            // Middle: Virtualized project list
-            gtk::ScrolledWindow {
+            // Middle: Content area (loading / empty / error / virtualized project list)
+            gtk::Stack {
                 set_vexpand: true,
-                set_hscrollbar_policy: gtk::PolicyType::Never,
-                set_margin_top: 12,
-                set_margin_bottom: 12,
+                set_transition_type: gtk::StackTransitionType::Crossfade,
+                set_transition_duration: 150,
 
-                #[name = "list_clamp"]
-                adw::ClampScrollable {
-                    set_maximum_size: 720,
-                    set_margin_start: 12,
-                    set_margin_end: 12,
+                add_named[Some("loading")] = &gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_halign: gtk::Align::Center,
+                    set_valign: gtk::Align::Center,
+                    set_spacing: 12,
+
+                    adw::Spinner {
+                        set_width_request: 32,
+                        set_height_request: 32,
+                    },
+
+                    gtk::Label {
+                        add_css_class: "dim-label",
+                        #[watch]
+                        set_label: &t!("download-browser-loading", "Searching projects..."),
+                    },
                 },
-            },
 
+                add_named[Some("empty")] = &adw::StatusPage {
+                    add_css_class: "compact",
+                    set_icon_name: Some("edit-find-symbolic"),
+                    #[watch]
+                    set_title: &t!("download-browser-empty-title", "No Results Found"),
+                    #[watch]
+                    set_description: Some(&t!(
+                        "download-browser-empty-description",
+                        "Try a different search term or filter"
+                    )),
+                },
+
+                add_named[Some("error")] = &adw::StatusPage {
+                    add_css_class: "compact",
+                    set_icon_name: Some("network-error-symbolic"),
+                    #[watch]
+                    set_title: &t!("download-browser-error-title", "Failed to Load Projects"),
+                    #[watch]
+                    set_description: Some(model.error_message()),
+
+                    #[wrap(Some)]
+                    set_child = &gtk::Button {
+                    set_halign: gtk::Align::Center,
+                    add_css_class: "pill",
+                    add_css_class: "suggested-action",
+                    #[watch]
+                    set_label: &t!("download-button-retry", "Retry"),
+                        connect_clicked => BrowserInput::RefreshForce,
+                    },
+                },
+
+                add_named[Some("list")] = &gtk::ScrolledWindow {
+                    set_vexpand: true,
+                    set_hscrollbar_policy: gtk::PolicyType::Never,
+                    set_margin_top: 12,
+                    set_margin_bottom: 12,
+
+                    #[name = "list_clamp"]
+                    adw::ClampScrollable {
+                        set_maximum_size: 720,
+                        set_margin_start: 12,
+                        set_margin_end: 12,
+                    },
+                },
+
+                #[watch]
+                set_visible_child_name: model.content_page(),
+            },
             // Bottom: Pagination bar
             gtk::Box {
                 set_orientation: gtk::Orientation::Horizontal,
                 set_halign: gtk::Align::Center,
                 set_spacing: 12,
                 set_margin_bottom: 16,
+                #[watch]
+                set_visible: model.content_page() == "list",
 
                 gtk::Button {
                     set_icon_name: "go-previous-symbolic",
@@ -562,19 +650,16 @@ impl Component for BrowserPage {
             limit: PAGE_LIMIT,
         };
 
-        let mut model = Self {
+        let model = Self {
             config: init.config,
             client: init.client,
             cache_dir: init.cache_dir,
             filter,
             total_hits: 0,
             list_view,
-            is_loading: false,
+            state: LoadState::Idle,
             request_id: 0,
         };
-
-        //  Trigger initial fetch
-        model.spawn_search(&sender, 0, false);
 
         let widgets = view_output!();
 
@@ -636,6 +721,11 @@ impl Component for BrowserPage {
                     .set_selected(gtk::INVALID_LIST_POSITION);
                 let _ = sender.output(BrowserOutput::Selected(data));
             }
+            BrowserInput::EnsureLoaded => {
+                if matches!(self.state, LoadState::Idle | LoadState::Error(_)) {
+                    self.spawn_search(&sender, 0, false);
+                }
+            }
             BrowserInput::Refresh => {}
         }
     }
@@ -657,22 +747,28 @@ impl Component for BrowserPage {
                     return;
                 }
 
-                self.is_loading = false;
                 match result {
                     Ok((items, total_hits)) => {
+                        self.state = LoadState::Ready;
                         self.filter.offset = offset;
                         self.total_hits = total_hits;
                         self.list_view.clear();
                         self.list_view
                             .extend_from_iter(items.into_iter().map(|data| AssetRowItem { data }));
+                        // Scroll the list back to the top
+                        if let Some(adj) = self.list_view.view.vadjustment() {
+                            adj.set_value(0.0);
+                        }
                     }
                     Err(err) => {
                         error!("Failed to search projects: {err}");
-                        let _ = sender.output(BrowserOutput::ShowToast(t!(
+                        let msg = t!(
                             "download-browser-error-search-projects",
                             "Failed to search projects: {err}",
                             err = err
-                        )));
+                        );
+                        self.state = LoadState::Error(msg.clone());
+                        let _ = sender.output(BrowserOutput::ShowToast(msg));
                     }
                 }
             }

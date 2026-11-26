@@ -16,7 +16,7 @@ use crate::{
     },
     pages::{
         accounts::{AccountsInit, AccountsOutput, AccountsPage},
-        download::{DownloadInit, DownloadOutput, DownloadPage},
+        download::{DownloadInit, DownloadInput, DownloadOutput, DownloadPage},
         home::{HomeInit, HomeInput, HomeOutput, HomePage},
         installer::{
             InstallerInit, InstallerInput, InstallerOutput, InstallerPage,
@@ -658,7 +658,10 @@ impl SimpleComponent for AppModel {
                 self.current_view = AppView::InstanceDetail;
             }
             AppMsg::CloseInstanceDetail => self.current_view = AppView::Main,
-            AppMsg::OpenDownload => self.current_view = AppView::Download,
+            AppMsg::OpenDownload => {
+                self.current_view = AppView::Download;
+                self.download_page.emit(DownloadInput::Activate);
+            }
 
             AppMsg::CloseDownload => self.current_view = AppView::Main,
             AppMsg::CloseInstaller => self.current_view = self.installer_return_to,
