@@ -143,31 +143,34 @@ pub struct LoaderSelectPage {
     request_id: u64,
     loading_abort: Option<AbortHandle>,
     query: Rc<RefCell<String>>,
+    search_entry: gtk::SearchEntry,
 }
 
 impl LoaderSelectPage {
     fn is_loading(&self) -> bool {
-        matches!(self.state, LoadState::Loading)
+        self.state.is_loading()
     }
 
     fn content_page(&self) -> &'static str {
-        match &self.state {
-            LoadState::Idle | LoadState::Loading => "loading",
-            LoadState::Error(_) => "error",
-            LoadState::Ready => {
-                if self.version_list.selection_model.n_items() == 0 {
-                    "empty"
-                } else {
-                    "list"
-                }
-            }
-        }
+        let is_empty = self.version_list.selection_model.n_items() == 0;
+        self.state.content_page(is_empty)
     }
 
     fn error_message(&self) -> &str {
-        match &self.state {
-            LoadState::Error(e) => e,
-            _ => "",
+        self.state.error_message()
+    }
+
+    fn empty_description(&self) -> String {
+        if self.version_list.is_empty() {
+            t!(
+                "instances-create-loader-empty-description",
+                "No compatible versions available for this Minecraft version"
+            )
+        } else {
+            t!(
+                "instances-create-loader-search-empty-description",
+                "Try a different search term"
+            )
         }
     }
 
@@ -411,7 +414,8 @@ impl Component for LoaderSelectPage {
 
                         gtk::Box {
                             set_spacing: 8,
-                            gtk::SearchEntry {
+                            #[local_ref]
+                            search_entry -> gtk::SearchEntry {
                                 set_hexpand: true,
                                 #[watch]
                                 set_placeholder_text: Some(&t!("instances-create-search-versions","Search versions...")),
@@ -465,10 +469,7 @@ impl Component for LoaderSelectPage {
                         #[watch]
                         set_title: &t!("instances-create-loader-empty-title", "No Versions Found"),
                         #[watch]
-                        set_description: Some(&t!(
-                            "instances-create-loader-empty-description",
-                            "No compatible versions available for this Minecraft version"
-                        )),
+                        set_description: Some(&model.empty_description()),
                     },
 
                     add_named[Some("error")] = &adw::StatusPage {
@@ -569,7 +570,10 @@ impl Component for LoaderSelectPage {
             request_id: 0,
             loading_abort: None,
             query,
+            search_entry: gtk::SearchEntry::new(),
         };
+
+        let search_entry = &model.search_entry;
 
         let widgets = view_output!();
 
@@ -613,6 +617,12 @@ impl Component for LoaderSelectPage {
                 loader,
                 game_version,
             } => {
+                if let Ok(mut query) = self.query.try_borrow_mut() {
+                    query.clear();
+                }
+                self.search_entry.set_text("");
+                self.version_list.notify_filter_changed(0);
+
                 self.current_loader = loader;
                 self.current_game_version = game_version;
                 // Cancel ongoing tasks to prevent contamination between different versions and different mod loaders.

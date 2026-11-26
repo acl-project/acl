@@ -451,6 +451,8 @@ instances-create-loader-error-title = 加载版本失败
 instances-create-loader-incompatible = { $candidate } 与 { $selected } 不兼容
 # Source: Loading loader versions...
 instances-create-loader-loading = 正在加载模组加载器版本...
+# Source: Try a different search term
+instances-create-loader-search-empty-description = 请尝试使用其他搜索词
 # Source: None
 instances-create-none = 无
 # Source: Refresh version list

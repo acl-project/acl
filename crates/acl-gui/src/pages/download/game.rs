@@ -13,7 +13,7 @@ use relm4::{
 };
 use tracing::error;
 
-use crate::{pages::LoadState, t};
+use crate::{i18n::LocalizeError, pages::LoadState, t};
 
 /// A single Minecraft version shown in the virtualized version list.
 #[derive(Debug, Clone)]
@@ -169,28 +169,17 @@ pub enum GameCmdOutput {
 
 impl GamePage {
     fn is_loading(&self) -> bool {
-        matches!(self.state, LoadState::Loading)
+        self.state.is_loading()
     }
 
     fn content_page(&self) -> &'static str {
-        match &self.state {
-            LoadState::Idle | LoadState::Loading => "loading",
-            LoadState::Error(_) => "error",
-            LoadState::Ready => {
-                if self.version_list.selection_model.n_items() == 0 {
-                    "empty"
-                } else {
-                    "list"
-                }
-            }
-        }
+        let is_empty = self.version_list.selection_model.n_items() == 0;
+
+        self.state.content_page(is_empty)
     }
 
     fn error_message(&self) -> &str {
-        match &self.state {
-            LoadState::Error(e) => e,
-            _ => "",
-        }
+        self.state.error_message()
     }
 
     fn spawn_fetch_manifest(&mut self, sender: &ComponentSender<Self>, force_refresh: bool) {
@@ -208,7 +197,7 @@ impl GamePage {
                 force_refresh,
             )
             .await
-            .map_err(|err| err.to_string());
+            .map_err(|err| err.to_i18n());
 
             GameCmdOutput::ManifestLoaded(result)
         });
@@ -342,11 +331,13 @@ impl Component for GamePage {
 
                     #[wrap(Some)]
                     set_child = &gtk::Button {
-                    set_halign: gtk::Align::Center,
-                    add_css_class: "pill",
-                    add_css_class: "suggested-action",
-                    #[watch]
-                    set_label: &t!("download-button-retry", "Retry"),
+                        set_halign: gtk::Align::Center,
+                        add_css_class: "pill",
+                        add_css_class: "suggested-action",
+                        #[watch]
+                        set_sensitive: !model.is_loading(),
+                        #[watch]
+                        set_label: &t!("download-button-retry", "Retry"),
                         connect_clicked => GameInput::RefreshVersions,
                     },
                 },

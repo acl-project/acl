@@ -226,6 +226,7 @@ instances-create-loader-empty-title = No Versions Found
 instances-create-loader-error-title = Failed to Load Versions
 instances-create-loader-incompatible = { $candidate } is incompatible with { $selected }
 instances-create-loader-loading = Loading loader versions...
+instances-create-loader-search-empty-description = Try a different search term
 instances-create-none = None
 instances-create-refresh-version = Refresh version list
 instances-create-search-versions = Search versions...

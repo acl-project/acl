@@ -22,3 +22,30 @@ enum LoadState {
     /// Failed to load (retains localized error message for display and retry)
     Error(String),
 }
+
+impl LoadState {
+    fn is_loading(&self) -> bool {
+        matches!(self, LoadState::Loading)
+    }
+
+    fn content_page(&self, is_empty: bool) -> &'static str {
+        match &self {
+            LoadState::Idle | LoadState::Loading => "loading",
+            LoadState::Error(_) => "error",
+            LoadState::Ready => {
+                if is_empty {
+                    "empty"
+                } else {
+                    "list"
+                }
+            }
+        }
+    }
+
+    fn error_message(&self) -> &str {
+        match &self {
+            LoadState::Error(e) => e,
+            _ => "",
+        }
+    }
+}

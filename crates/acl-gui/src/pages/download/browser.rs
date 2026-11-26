@@ -229,35 +229,22 @@ pub enum BrowserOutput {
 pub enum BrowserCmdOutput {
     SearchLoaded {
         request_id: u64,
-        offset: u32,
         result: Result<(Vec<AssetItemData>, u32), String>,
     },
 }
 
 impl BrowserPage {
     fn is_loading(&self) -> bool {
-        matches!(self.state, LoadState::Loading)
+        self.state.is_loading()
     }
 
     fn content_page(&self) -> &'static str {
-        match &self.state {
-            LoadState::Idle | LoadState::Loading => "loading",
-            LoadState::Error(_) => "error",
-            LoadState::Ready => {
-                if self.list_view.is_empty() {
-                    "empty"
-                } else {
-                    "list"
-                }
-            }
-        }
+        let is_empty = self.list_view.is_empty();
+        self.state.content_page(is_empty)
     }
 
     fn error_message(&self) -> &str {
-        match &self.state {
-            LoadState::Error(e) => e,
-            _ => "",
-        }
+        self.state.error_message()
     }
 
     fn clamp_total_hits(host: ProjectHost, total_count: u32) -> u32 {
@@ -272,11 +259,13 @@ impl BrowserPage {
         let request_id = self.request_id;
 
         self.state = LoadState::Loading;
+        // Since the bottom navigation bar is hidden during loading and error states,
+        // incorrect page numbers won't be displayed, so there's no need to wait until completion to update.
+        self.filter.offset = offset;
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let download_source = self.config.read().download_source;
-        let mut filter = self.filter.clone();
-        filter.offset = offset;
+        let filter = self.filter.clone();
 
         sender.oneshot_command(async move {
             let result = match filter.host {
@@ -320,11 +309,7 @@ impl BrowserPage {
                 }
             };
 
-            BrowserCmdOutput::SearchLoaded {
-                request_id,
-                offset,
-                result,
-            }
+            BrowserCmdOutput::SearchLoaded { request_id, result }
         });
     }
 
@@ -547,11 +532,11 @@ impl Component for BrowserPage {
 
                     #[wrap(Some)]
                     set_child = &gtk::Button {
-                    set_halign: gtk::Align::Center,
-                    add_css_class: "pill",
-                    add_css_class: "suggested-action",
-                    #[watch]
-                    set_label: &t!("download-button-retry", "Retry"),
+                        set_halign: gtk::Align::Center,
+                        add_css_class: "pill",
+                        add_css_class: "suggested-action",
+                        #[watch]
+                        set_label: &t!("download-button-retry", "Retry"),
                         connect_clicked => BrowserInput::RefreshForce,
                     },
                 },
@@ -671,12 +656,9 @@ impl Component for BrowserPage {
 
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
-            // There is no need to update the offset here.
-            // Update it after the update cmd confirms that the result is received.
             BrowserInput::HostChanged(host) => {
                 if self.filter.host != host {
                     self.filter.host = host;
-                    self.filter.offset = 0;
                     self.total_hits = 0;
                     self.list_view.clear();
                     self.spawn_search(&sender, 0, false);
@@ -724,7 +706,7 @@ impl Component for BrowserPage {
             }
             BrowserInput::EnsureLoaded => {
                 if matches!(self.state, LoadState::Idle | LoadState::Error(_)) {
-                    self.spawn_search(&sender, 0, false);
+                    self.spawn_search(&sender, self.filter.offset, false);
                 }
             }
             BrowserInput::Refresh => {}
@@ -738,12 +720,8 @@ impl Component for BrowserPage {
         _root: &Self::Root,
     ) {
         match msg {
-            BrowserCmdOutput::SearchLoaded {
-                request_id,
-                offset,
-                result,
-            } => {
-                // Ignore the expired old request results, keep is_loading as true and wait for the latest request to return
+            BrowserCmdOutput::SearchLoaded { request_id, result } => {
+                // Ignore the expired old request results, keep state as loading and wait for the latest request to return
                 if request_id != self.request_id {
                     return;
                 }
@@ -751,7 +729,6 @@ impl Component for BrowserPage {
                 match result {
                     Ok((items, total_hits)) => {
                         self.state = LoadState::Ready;
-                        self.filter.offset = offset;
                         self.total_hits = total_hits;
                         self.list_view.clear();
                         self.list_view
