@@ -13,7 +13,7 @@ use relm4::{
 };
 use tracing::error;
 
-use crate::t;
+use crate::{i18n::LocalizeError, pages::LoadState, t};
 
 /// A single Minecraft version shown in the virtualized version list.
 #[derive(Debug, Clone)]
@@ -137,7 +137,7 @@ pub struct GamePage {
     cache_dir: PathBuf,
     filter_state: Rc<RefCell<FilterState>>,
     version_list: TypedListView<VersionItem, gtk::SingleSelection>,
-    is_loading: bool,
+    state: LoadState,
 }
 
 pub struct GameInit {
@@ -152,6 +152,7 @@ pub enum GameInput {
     FilterChanged(VersionFilter),
     SelectVersion(VersionEntry),
     RefreshVersions,
+    EnsureLoaded,
     Refresh,
 }
 
@@ -167,8 +168,22 @@ pub enum GameCmdOutput {
 }
 
 impl GamePage {
+    fn is_loading(&self) -> bool {
+        self.state.is_loading()
+    }
+
+    fn content_page(&self) -> &'static str {
+        let is_empty = self.version_list.selection_model.n_items() == 0;
+
+        self.state.content_page(is_empty)
+    }
+
+    fn error_message(&self) -> &str {
+        self.state.error_message()
+    }
+
     fn spawn_fetch_manifest(&mut self, sender: &ComponentSender<Self>, force_refresh: bool) {
-        self.is_loading = true;
+        self.state = LoadState::Loading;
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let download_source = self.config.read().download_source;
@@ -182,7 +197,7 @@ impl GamePage {
                 force_refresh,
             )
             .await
-            .map_err(|err| err.to_string());
+            .map_err(|err| err.to_i18n());
 
             GameCmdOutput::ManifestLoaded(result)
         });
@@ -262,7 +277,7 @@ impl Component for GamePage {
                             #[watch]
                             set_tooltip_text: Some(&t!("download-game-refresh-version","Refresh version list")),
                             #[watch]
-                            set_sensitive: !model.is_loading,
+                            set_sensitive: !model.is_loading(),
                             connect_clicked => GameInput::RefreshVersions,
                         },
                     },
@@ -270,21 +285,85 @@ impl Component for GamePage {
                 },
 
             },
-            // Virtualized version list: only visible rows are instantiated
-            gtk::ScrolledWindow {
-                set_vexpand: true,
-                set_hscrollbar_policy: gtk::PolicyType::Never,
-                set_margin_top: 12,
-                set_margin_bottom: 24,
 
-                #[name = "list_clamp"]
-                adw::ClampScrollable {
-                    set_maximum_size: 720,
-                    set_margin_start: 12,
-                    set_margin_end: 12,
+            gtk::Stack {
+                set_vexpand: true,
+                set_transition_type: gtk::StackTransitionType::Crossfade,
+                set_transition_duration: 150,
+
+                add_named[Some("loading")] = &gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_halign: gtk::Align::Center,
+                    set_valign: gtk::Align::Center,
+                    set_spacing: 12,
+
+                    adw::Spinner {
+                        set_width_request: 32,
+                        set_height_request: 32,
+                    },
+
+                    gtk::Label {
+                        add_css_class: "dim-label",
+                        #[watch]
+                        set_label: &t!("download-game-loading", "Loading versions..."),
+                    },
                 },
 
-            }
+                add_named[Some("empty")] = &adw::StatusPage {
+                    add_css_class: "compact",
+                    set_icon_name: Some("edit-find-symbolic"),
+                    #[watch]
+                    set_title: &t!("download-game-empty-title", "No Versions Found"),
+                    #[watch]
+                    set_description: Some(&t!(
+                        "download-game-empty-description",
+                        "Try adjusting your search or version filter"
+                    )),
+                },
+
+                add_named[Some("error")] = &adw::StatusPage {
+                    add_css_class: "compact",
+                    set_icon_name: Some("network-error-symbolic"),
+                    #[watch]
+                    set_title: &t!("download-game-error-title", "Failed to Load Versions"),
+                    #[watch]
+                    set_description: Some(model.error_message()),
+
+                    #[wrap(Some)]
+                    set_child = &gtk::Button {
+                        set_halign: gtk::Align::Center,
+                        add_css_class: "pill",
+                        add_css_class: "suggested-action",
+                        #[watch]
+                        set_sensitive: !model.is_loading(),
+                        #[watch]
+                        set_label: &t!("download-button-retry", "Retry"),
+                        connect_clicked => GameInput::RefreshVersions,
+                    },
+                },
+
+
+                // Virtualized version list: only visible rows are instantiated
+                add_named[Some("list")] = &gtk::ScrolledWindow {
+                    set_vexpand: true,
+                    set_hscrollbar_policy: gtk::PolicyType::Never,
+                    set_margin_top: 12,
+                    set_margin_bottom: 24,
+
+                    #[name = "list_clamp"]
+                    adw::ClampScrollable {
+                        set_maximum_size: 720,
+                        set_margin_start: 12,
+                        set_margin_end: 12,
+                    },
+                },
+
+                #[watch]
+                set_visible_child_name: model.content_page(),
+
+            },
+
+
         },
 
 
@@ -335,16 +414,14 @@ impl Component for GamePage {
         init.config
             .subscribe(sender.input_sender(), |_| GameInput::Refresh);
 
-        let mut model = GamePage {
+        let model = GamePage {
             config: init.config,
             client: init.client,
             cache_dir: init.cache_dir,
             filter_state,
             version_list,
-            is_loading: false,
+            state: LoadState::Idle,
         };
-
-        model.spawn_fetch_manifest(&sender, false);
 
         let widgets = view_output!();
 
@@ -378,7 +455,11 @@ impl Component for GamePage {
             GameInput::RefreshVersions => {
                 self.spawn_fetch_manifest(&sender, true);
             }
-
+            GameInput::EnsureLoaded => {
+                if matches!(self.state, LoadState::Idle | LoadState::Error(_)) {
+                    self.spawn_fetch_manifest(&sender, false);
+                }
+            }
             GameInput::Refresh => {}
         }
     }
@@ -390,30 +471,29 @@ impl Component for GamePage {
         _root: &Self::Root,
     ) {
         match msg {
-            GameCmdOutput::ManifestLoaded(result) => {
-                self.is_loading = false;
-                match result {
-                    Ok(manifest) => {
-                        self.version_list.clear();
-                        self.version_list.extend_from_iter(
-                            manifest
-                                .versions
-                                .into_iter()
-                                .map(|entry| VersionItem { entry }),
-                        );
-                    }
-
-                    Err(err) => {
-                        error!("Failed to load version manifest: {err}");
-                        let msg = t!(
-                            "download-game-error-load-version-manifest",
-                            "Failed to load version manifest: {err}",
-                            err = err
-                        );
-                        let _ = sender.output(GameOutput::ShowToast(msg));
-                    }
+            GameCmdOutput::ManifestLoaded(result) => match result {
+                Ok(manifest) => {
+                    self.state = LoadState::Ready;
+                    self.version_list.clear();
+                    self.version_list.extend_from_iter(
+                        manifest
+                            .versions
+                            .into_iter()
+                            .map(|entry| VersionItem { entry }),
+                    );
                 }
-            }
+
+                Err(err) => {
+                    error!("Failed to load version manifest: {err}");
+                    let msg = t!(
+                        "download-game-error-load-version-manifest",
+                        "Failed to load version manifest: {err}",
+                        err = err
+                    );
+                    self.state = LoadState::Error(msg.clone());
+                    let _ = sender.output(GameOutput::ShowToast(msg));
+                }
+            },
         }
     }
 }

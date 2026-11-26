@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::pages::download::browser::{BrowserInit, BrowserOutput, BrowserPage};
-use crate::pages::download::game::{GameInit, GameOutput, GamePage};
+use crate::pages::download::browser::{BrowserInit, BrowserInput, BrowserOutput, BrowserPage};
+use crate::pages::download::game::{GameInit, GameInput, GameOutput, GamePage};
 use crate::t;
 use acl_core::LauncherConfig;
 use acl_minecraft::{AssetItemData, ProjectType, VersionEntry};
@@ -75,6 +75,18 @@ pub struct DownloadPage {
     shader_page: Controller<BrowserPage>,
 }
 
+impl DownloadPage {
+    fn activate_current_page(&self) {
+        match self.current_page {
+            NavPage::Game => self.game_page.emit(GameInput::EnsureLoaded),
+            NavPage::Mod => self.mod_page.emit(BrowserInput::EnsureLoaded),
+            NavPage::Modpack => self.modpack_page.emit(BrowserInput::EnsureLoaded),
+            NavPage::ResourcePack => self.resource_pack_page.emit(BrowserInput::EnsureLoaded),
+            NavPage::Shader => self.shader_page.emit(BrowserInput::EnsureLoaded),
+        }
+    }
+}
+
 pub struct DownloadInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
@@ -88,6 +100,7 @@ pub enum DownloadInput {
     SelectGameVersion(VersionEntry),
     ShowToast(String),
     SelectAsset(AssetItemData),
+    Activate,
 }
 
 #[derive(Debug)]
@@ -261,6 +274,10 @@ impl SimpleComponent for DownloadPage {
             }
             DownloadInput::Navigate(nav) => {
                 self.current_page = nav;
+                self.activate_current_page();
+            }
+            DownloadInput::Activate => {
+                self.activate_current_page();
             }
         }
     }

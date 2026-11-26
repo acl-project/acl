@@ -20,6 +20,7 @@ use relm4::{
 use tracing::error;
 
 use crate::i18n::LocalizeError;
+use crate::pages::LoadState;
 use crate::t;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +126,10 @@ pub enum LoaderSelectOutput {
 
 #[derive(Debug, Clone)]
 pub enum LoaderSelectCmdOutput {
-    Finish(Result<Vec<LoaderVersionItem>, String>),
+    Finish {
+        request_id: u64,
+        result: Result<Vec<LoaderVersionItem>, String>,
+    },
 }
 
 pub struct LoaderSelectPage {
@@ -135,14 +139,46 @@ pub struct LoaderSelectPage {
     current_loader: ModLoader,
     current_game_version: String,
     version_list: TypedListView<LoaderVersionItem, gtk::SingleSelection>,
-    is_loading: bool,
+    state: LoadState,
+    request_id: u64,
     loading_abort: Option<AbortHandle>,
     query: Rc<RefCell<String>>,
+    search_entry: gtk::SearchEntry,
 }
 
 impl LoaderSelectPage {
+    fn is_loading(&self) -> bool {
+        self.state.is_loading()
+    }
+
+    fn content_page(&self) -> &'static str {
+        let is_empty = self.version_list.selection_model.n_items() == 0;
+        self.state.content_page(is_empty)
+    }
+
+    fn error_message(&self) -> &str {
+        self.state.error_message()
+    }
+
+    fn empty_description(&self) -> String {
+        if self.version_list.is_empty() {
+            t!(
+                "instances-create-loader-empty-description",
+                "No compatible versions available for this Minecraft version"
+            )
+        } else {
+            t!(
+                "instances-create-loader-search-empty-description",
+                "Try a different search term"
+            )
+        }
+    }
+
     fn spawn_fetch_loader(&mut self, sender: &ComponentSender<Self>, force_refresh: bool) {
-        self.is_loading = true;
+        self.request_id = self.request_id.wrapping_add(1);
+        let request_id = self.request_id;
+
+        self.state = LoadState::Loading;
         let loader = self.current_loader;
         let game_version = self.current_game_version.clone();
         let client = self.client.clone();
@@ -212,14 +248,9 @@ impl LoaderSelectPage {
                         .await
                         .map_err(|err| err.to_i18n())?;
 
-                        let loader_versions =
-                            list.mc_to_forge.get(&game_version).ok_or_else(|| {
-                                t!(
-                                    "instances-create-error-forge-version",
-                                    "Failed to get {game} forge manifest",
-                                    game = game_version,
-                                )
-                            })?;
+                        let Some(loader_versions) = list.mc_to_forge.get(&game_version) else {
+                            return Ok(Vec::new());
+                        };
 
                         let stable_loader = promos.stable(&game_version);
 
@@ -310,7 +341,7 @@ impl LoaderSelectPage {
             }
             .await;
 
-            let _ = out.send(LoaderSelectCmdOutput::Finish(result));
+            let _ = out.send(LoaderSelectCmdOutput::Finish { request_id, result });
         });
 
         self.loading_abort = Some(join_handle.abort_handle());
@@ -320,7 +351,8 @@ impl LoaderSelectPage {
         if let Some(handle) = self.loading_abort.take() {
             handle.abort();
         }
-        self.is_loading = false;
+        self.request_id = self.request_id.wrapping_add(1);
+        self.state = LoadState::Idle;
     }
 }
 pub struct LoaderSelectInit {
@@ -382,7 +414,8 @@ impl Component for LoaderSelectPage {
 
                         gtk::Box {
                             set_spacing: 8,
-                            gtk::SearchEntry {
+                            #[local_ref]
+                            search_entry -> gtk::SearchEntry {
                                 set_hexpand: true,
                                 #[watch]
                                 set_placeholder_text: Some(&t!("instances-create-search-versions","Search versions...")),
@@ -397,7 +430,7 @@ impl Component for LoaderSelectPage {
                                 #[watch]
                                 set_tooltip_text: Some(&t!("instances-create-refresh-version","Refresh version list")),
                                 #[watch]
-                                set_sensitive: !model.is_loading,
+                                set_sensitive: !model.is_loading(),
                                 connect_clicked => LoaderSelectInput::RefreshVersions,
                             },
                         },
@@ -406,21 +439,78 @@ impl Component for LoaderSelectPage {
 
 
                 },
-                // Virtualized version list: only visible rows are instantiated
-                gtk::ScrolledWindow {
-                    set_vexpand: true,
-                    set_hscrollbar_policy: gtk::PolicyType::Never,
-                    set_margin_top: 12,
-                    set_margin_bottom: 24,
 
-                    #[name = "list_clamp"]
-                    adw::ClampScrollable {
-                        set_maximum_size: 720,
-                        set_margin_start: 12,
-                        set_margin_end: 12,
+                gtk::Stack {
+                    set_vexpand: true,
+                    set_transition_type: gtk::StackTransitionType::Crossfade,
+                    set_transition_duration: 150,
+
+                    add_named[Some("loading")] = &gtk::Box {
+                        set_orientation: gtk::Orientation::Vertical,
+                        set_halign: gtk::Align::Center,
+                        set_valign: gtk::Align::Center,
+                        set_spacing: 12,
+
+                        adw::Spinner {
+                            set_width_request: 32,
+                            set_height_request: 32,
+                        },
+
+                        gtk::Label {
+                            add_css_class: "dim-label",
+                            #[watch]
+                            set_label: &t!("instances-create-loader-loading", "Loading loader versions..."),
+                        },
                     },
 
-                }
+                    add_named[Some("empty")] = &adw::StatusPage {
+                        add_css_class: "compact",
+                        set_icon_name: Some("edit-find-symbolic"),
+                        #[watch]
+                        set_title: &t!("instances-create-loader-empty-title", "No Versions Found"),
+                        #[watch]
+                        set_description: Some(&model.empty_description()),
+                    },
+
+                    add_named[Some("error")] = &adw::StatusPage {
+                        add_css_class: "compact",
+                        set_icon_name: Some("network-error-symbolic"),
+                        #[watch]
+                        set_title: &t!("instances-create-loader-error-title", "Failed to Load Versions"),
+                        #[watch]
+                        set_description: Some(model.error_message()),
+
+                        #[wrap(Some)]
+                        set_child = &gtk::Button {
+                            set_halign: gtk::Align::Center,
+                            add_css_class: "pill",
+                            add_css_class: "suggested-action",
+                            #[watch]
+                            set_label: &t!("download-button-retry", "Retry"),
+                            connect_clicked => LoaderSelectInput::RefreshVersions,
+                        },
+                    },
+                    // Virtualized version list: only visible rows are instantiated
+                    add_named[Some("list")] = &gtk::ScrolledWindow {
+                        set_vexpand: true,
+                        set_hscrollbar_policy: gtk::PolicyType::Never,
+                        set_margin_top: 12,
+                        set_margin_bottom: 24,
+
+                        #[name = "list_clamp"]
+                        adw::ClampScrollable {
+                            set_maximum_size: 720,
+                            set_margin_start: 12,
+                            set_margin_end: 12,
+                        },
+
+                    },
+
+                    #[watch]
+                    set_visible_child_name: model.content_page(),
+
+                },
+
             },
 
         },
@@ -476,10 +566,14 @@ impl Component for LoaderSelectPage {
             current_loader: ModLoader::Vanilla,
             current_game_version: String::new(),
             version_list,
-            is_loading: false,
+            state: LoadState::Idle,
+            request_id: 0,
             loading_abort: None,
             query,
+            search_entry: gtk::SearchEntry::new(),
         };
+
+        let search_entry = &model.search_entry;
 
         let widgets = view_output!();
 
@@ -523,6 +617,12 @@ impl Component for LoaderSelectPage {
                 loader,
                 game_version,
             } => {
+                if let Ok(mut query) = self.query.try_borrow_mut() {
+                    query.clear();
+                }
+                self.search_entry.set_text("");
+                self.version_list.notify_filter_changed(0);
+
                 self.current_loader = loader;
                 self.current_game_version = game_version;
                 // Cancel ongoing tasks to prevent contamination between different versions and different mod loaders.
@@ -544,15 +644,20 @@ impl Component for LoaderSelectPage {
         _root: &Self::Root,
     ) {
         match msg {
-            LoaderSelectCmdOutput::Finish(result) => {
-                self.is_loading = false;
+            LoaderSelectCmdOutput::Finish { request_id, result } => {
+                if request_id != self.request_id {
+                    return;
+                }
+
                 match result {
                     Ok(items) => {
+                        self.state = LoadState::Ready;
                         self.version_list.clear();
                         self.version_list.extend_from_iter(items);
                     }
                     Err(err) => {
                         error!("Failed to fetch loader entries: {err}");
+                        self.state = LoadState::Error(err.clone());
                         let _ = sender.output(LoaderSelectOutput::ShowToast(err));
                     }
                 }

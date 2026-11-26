@@ -133,10 +133,18 @@ delete-dialog-cancel = 取消
 delete-dialog-delete = 删除
 # Source: Delete Instance
 delete-dialog-heading = 删除实例
+# Source: Try a different search term or filter
+download-browser-empty-description = 尝试更换搜索关键词或筛选条件
+# Source: No Results Found
+download-browser-empty-title = 未找到结果
 # Source: Failed to search projects: { $err }
 download-browser-error-search-projects = 搜索项目失败：{ $err }
+# Source: Failed to Load Projects
+download-browser-error-title = 加载项目失败
 # Source: All Loaders
 download-browser-loader-all = 全部加载器
+# Source: Searching projects...
+download-browser-loading = 正在搜索项目...
 # Source: Refresh list
 download-browser-refresh-list = 刷新列表
 # Source: Search projects...
@@ -151,8 +159,18 @@ download-browser-sort-newest = 最新发布
 download-browser-sort-relevance = 相关度
 # Source: Updated
 download-browser-sort-updated = 最近更新
+# Source: Retry
+download-button-retry = 重试
+# Source: Try adjusting your search or version filter
+download-game-empty-description = 尝试调整搜索关键词或版本筛选条件
+# Source: No Versions Found
+download-game-empty-title = 未找到版本
 # Source: Failed to load version manifest: { $err }
 download-game-error-load-version-manifest = 加载版本清单失败：{ $err }
+# Source: Failed to Load Versions
+download-game-error-title = 加载版本失败
+# Source: Loading versions...
+download-game-loading = 正在加载版本...
 # Source: Refresh version list
 download-game-refresh-version = 刷新版本列表
 # Source: Search versions...
@@ -421,12 +439,20 @@ instances-create-error-active-install = 已有另一个安装任务正在进行�
 instances-create-error-create-instance = 创建实例失败：{ $err }
 # Source: Please select a Minecraft version
 instances-create-error-empty-version = 请选择 Minecraft 版本
-# Source: Failed to get { $game } forge manifest
-instances-create-error-forge-version = 获取 { $game } 的 Forge 清单失败
 # Source: Not implemented or unsupported loader
 instances-create-error-unsupported-loader = 未实现或不支持的模组加载器
+# Source: No compatible versions available for this Minecraft version
+instances-create-loader-empty-description = 当前 Minecraft 版本暂无可用的兼容版本
+# Source: No Versions Found
+instances-create-loader-empty-title = 未找到版本
+# Source: Failed to Load Versions
+instances-create-loader-error-title = 加载版本失败
 # Source: { $candidate } is incompatible with { $selected }
 instances-create-loader-incompatible = { $candidate } 与 { $selected } 不兼容
+# Source: Loading loader versions...
+instances-create-loader-loading = 正在加载模组加载器版本...
+# Source: Try a different search term
+instances-create-loader-search-empty-description = 请尝试使用其他搜索词
 # Source: None
 instances-create-none = 无
 # Source: Refresh version list
