@@ -15,7 +15,7 @@ use crate::{
 };
 
 pub const MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
-pub const DEFAULT_SEARCH_TTL: Duration = Duration::from_secs(300);
+pub const DEFAULT_SEARCH_TTL: Duration = Duration::from_secs(900);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchParams {

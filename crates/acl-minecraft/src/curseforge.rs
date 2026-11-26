@@ -13,7 +13,7 @@ use crate::{
 
 pub const CURSEFORGE_API_BASE_URL: &str = "https://api.curseforge.com/v1";
 pub const MINECRAFT_GAME_ID: u32 = 432;
-pub const DEFAULT_SEARCH_TTL: Duration = Duration::from_secs(300);
+pub const DEFAULT_SEARCH_TTL: Duration = Duration::from_secs(900);
 pub const CURSEFORGE_API_KEY: Option<&'static str> = option_env!("CURSEFORGE_API_KEY");
 
 /// Retrieves the value directly from the environment variable if set.
