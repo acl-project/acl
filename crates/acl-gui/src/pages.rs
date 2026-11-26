@@ -49,3 +49,48 @@ impl LoadState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_state_default_and_is_loading() {
+        assert_eq!(LoadState::default(), LoadState::Idle);
+        assert!(!LoadState::Idle.is_loading());
+        assert!(LoadState::Loading.is_loading());
+        assert!(!LoadState::Ready.is_loading());
+        assert!(!LoadState::Error("network error".to_string()).is_loading());
+    }
+
+    #[test]
+    fn test_load_state_content_page() {
+        for is_empty in [true, false] {
+            assert_eq!(LoadState::Idle.content_page(is_empty), "loading");
+            assert_eq!(LoadState::Loading.content_page(is_empty), "loading");
+            assert_eq!(
+                LoadState::Error("failed".to_string()).content_page(is_empty),
+                "error"
+            );
+            assert_eq!(
+                LoadState::Error(String::new()).content_page(is_empty),
+                "error"
+            );
+        }
+
+        assert_eq!(LoadState::Ready.content_page(true), "empty");
+        assert_eq!(LoadState::Ready.content_page(false), "list");
+    }
+
+    #[test]
+    fn test_load_state_error_message() {
+        assert_eq!(LoadState::Idle.error_message(), "");
+        assert_eq!(LoadState::Loading.error_message(), "");
+        assert_eq!(LoadState::Ready.error_message(), "");
+        assert_eq!(
+            LoadState::Error("Network timeout".to_string()).error_message(),
+            "Network timeout"
+        );
+        assert_eq!(LoadState::Error(String::new()).error_message(), "");
+    }
+}

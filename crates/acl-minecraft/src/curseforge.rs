@@ -1598,4 +1598,9 @@ pub(crate) mod tests {
         .expect("deserialize ModFile with empty hashes");
         assert_eq!(empty_hashes.md5(), None);
     }
+
+    #[test]
+    fn test_default_search_ttl() {
+        assert_eq!(DEFAULT_SEARCH_TTL, Duration::from_secs(900));
+    }
 }

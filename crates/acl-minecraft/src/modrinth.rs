@@ -1247,4 +1247,9 @@ mod tests {
         );
         assert_eq!(modrinth_website_url(ProjectType::Mod, "  ", ""), None);
     }
+
+    #[test]
+    fn test_default_search_ttl() {
+        assert_eq!(DEFAULT_SEARCH_TTL, Duration::from_secs(900));
+    }
 }
