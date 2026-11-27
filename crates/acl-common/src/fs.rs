@@ -89,8 +89,53 @@ mod tests {
         let content = fs::read(&file_path).expect("failed to read written file");
         assert_eq!(content, b"hello atomic");
 
-        let tmp_path = format!("{}.tmp.{}", file_path.display(), std::process::id());
-        assert!(!Path::new(&tmp_path).exists());
+        let leftover_tmp: Vec<_> = fs::read_dir(temp.path())
+            .expect("failed to read temp dir")
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(
+            leftover_tmp.is_empty(),
+            "unexpected leftover temp files: {leftover_tmp:?}"
+        );
+    }
+
+    #[test]
+    fn test_write_atomic_concurrent_same_path() {
+        let temp = TempDirGuard::new("concurrent");
+        let file_path = temp.path().join("shared.bin");
+
+        let payloads: Vec<String> = (0..8)
+            .map(|t| format!("worker-{t}-{}", "a".repeat(2048)))
+            .collect();
+
+        std::thread::scope(|scope| {
+            for payload in &payloads {
+                let path = file_path.clone();
+                scope.spawn(move || {
+                    for _ in 0..10 {
+                        write_atomic(&path, payload.as_bytes())
+                            .expect("concurrent write_atomic should succeed");
+                    }
+                });
+            }
+        });
+
+        let final_content = fs::read_to_string(&file_path).expect("failed to read final file");
+        assert!(
+            payloads.contains(&final_content),
+            "final content should match one complete payload without corruption"
+        );
+
+        let leftover_tmp: Vec<_> = fs::read_dir(temp.path())
+            .expect("failed to read temp dir")
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(
+            leftover_tmp.is_empty(),
+            "unexpected leftover temp files after concurrent writes: {leftover_tmp:?}"
+        );
     }
 
     #[test]
