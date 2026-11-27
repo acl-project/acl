@@ -25,6 +25,15 @@ use uuid::Uuid;
 use crate::i18n::LocalizeError;
 use crate::t;
 
+struct LaunchContext {
+    account: Account,
+    instance: acl_core::Instance,
+    global_config: LauncherConfig,
+    dirs: LauncherDirs,
+    client: reqwest::Client,
+    bulk_client: reqwest::Client,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LaunchStage {
     #[default]
@@ -128,6 +137,7 @@ pub enum HomeInput {
     SelectInstance(usize),
     SelectAccount(usize),
     LaunchBypass(String),
+    ShowToast(String),
 }
 
 #[derive(Debug)]
@@ -141,6 +151,7 @@ pub enum HomeCmdOutput {
         status: std::io::Result<std::process::ExitStatus>,
     },
     ManualDownloadsRequired(String),
+    ShowToast(String),
     ManualCheckPassed,
 }
 
@@ -265,9 +276,191 @@ impl HomePage {
         }
     }
 
+    async fn run_launch(
+        ctx: LaunchContext,
+        out: &relm4::Sender<HomeCmdOutput>,
+    ) -> Result<String, LaunchError> {
+        let mut account = ctx.account;
+        let client = ctx.client;
+        let bulk_client = ctx.bulk_client;
+        let instance = ctx.instance;
+        let dirs = ctx.dirs;
+        let global_config = ctx.global_config;
+
+        // Log in to obtain an access token.
+        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Authenticating));
+        let old_username = account.username.clone();
+        let access_token = Self::access_token(&mut account, &client, MICROSOFT_CLIENT_ID).await?;
+
+        if old_username != account.username {
+            let _ = out.send(HomeCmdOutput::UpdateUsername(
+                account.uuid,
+                account.username.clone(),
+            ));
+        }
+
+        // Load version metadata, updating the local copy if Mojang's version has changed
+        // falls back to local cache when offline
+        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::LoadingMetadata));
+        let metadata = instance
+            .refresh_and_load_metadata(&client, &dirs, global_config.download_source)
+            .await
+            .map_err(|e| {
+                t!(
+                    "launch-error-metadata",
+                    "Failed to load version metadata: {e}",
+                    e = e
+                )
+            })?;
+
+        // Check whether this version is vulnerable to Minecraft2Shell
+        if let Some(version) = metadata.vulnerable_freetype_version() {
+            warn!(
+                "Instance '{}' uses unpatched org.lwjgl:lwjgl-freetype ({version}); avoid untrusted server resource packs",
+                instance.id()
+            );
+            let _ = out.send(HomeCmdOutput::ShowToast(t!(
+                "launch-warning-vulnerable-freetype",
+                "This version uses an unpatched FreeType library; avoid untrusted server resource packs"
+            )));
+        }
+
+        // Validate and select a matching Java runtime.
+        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::CheckingJava));
+        let java = launch::select_java(&instance, &global_config, &metadata)
+            .map_err(|e| t!("launch-error-java", "Java error: {e}", e = e))?;
+
+        // Validate and concurrently compare all files (client.jar, libraries, assets).
+        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::CheckingIntegrity));
+        let asset_index = AssetIndex::fetch_and_verify(
+            &client,
+            &metadata.asset_index,
+            &dirs.assets_dir(),
+            global_config.download_source,
+        )
+        .await
+        .map_err(|e| {
+            t!(
+                "launch-error-asset-index",
+                "Failed to verify asset index: {e}",
+                e = e
+            )
+        })?;
+
+        let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
+        let tasks = instance.check_integrity(tasks);
+        download::download_all(
+            &client,
+            &bulk_client,
+            tasks,
+            global_config.download_source,
+            global_config.max_concurrent_downloads,
+            None,
+        )
+        .await
+        .map_err(|e| {
+            t!(
+                "launch-error-resources",
+                "Failed to verify resources: {e}",
+                e = e
+            )
+        })?;
+
+        // Extract native libraries and prepare legacy asset mappings.
+        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::PreparingRuntime));
+        let inst_clone = instance.clone();
+        let dirs_clone = dirs.clone();
+        let metadata_clone = metadata.clone();
+        let language = global_config.language;
+
+        let auto_lang = if instance.config.custom_settings {
+            instance
+                .config
+                .auto_game_language
+                .unwrap_or(global_config.auto_game_language)
+        } else {
+            global_config.auto_game_language
+        };
+
+        tokio::task::spawn_blocking(move || -> acl_core::Result<()> {
+            inst_clone.prepare_runtime(&metadata_clone, &asset_index, &dirs_clone)?;
+            if auto_lang {
+                inst_clone.ensure_language(language, &asset_index);
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| {
+            t!(
+                "launch-error-runtime-execution",
+                "Runtime task execution error: {e}",
+                e = e
+            )
+        })?
+        .map_err(|e| {
+            t!(
+                "launch-error-prepare-runtime",
+                "Failed to prepare runtime: {e}",
+                e = e
+            )
+        })?;
+
+        // Assemble the launch command and start the game process.
+        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Launching));
+        let cmd = LaunchCommand::build(
+            &instance,
+            &global_config,
+            &dirs,
+            &metadata,
+            &account,
+            &access_token,
+            &java,
+        )
+        .map_err(|e| {
+            t!(
+                "launch-error-build-command",
+                "Failed to build launch command: {e}",
+                e = e
+            )
+        })?;
+
+        let spawn_time = SystemTime::now();
+
+        let process = cmd.spawn().await.map_err(|e| {
+            t!(
+                "launch-error-spawn-process",
+                "Failed to spawn game process: {e}",
+                e = e
+            )
+        })?;
+
+        // A background standalone task monitors the process exit.
+        let inst_name = instance.config.name.clone();
+        let inst_id = instance.id().to_owned();
+        let out_bg = out.clone();
+
+        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            let status = process.wait().await;
+            let _ = exit_tx.send(());
+            let _ = out_bg.send(HomeCmdOutput::GameExited {
+                id: inst_id,
+                name: inst_name,
+                status,
+            });
+        });
+
+        // Wait for the game window to appear.
+        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::WaitingWindow));
+        Self::wait_window(instance.game_dir(), spawn_time, exit_rx).await;
+
+        Ok(instance.id().to_string())
+    }
+
     fn launch(&mut self, sender: ComponentSender<Self>, bypass_manual: bool) {
         // Check whether an account is selected.
-        let mut account = match self.accounts.read().active_account().cloned() {
+        let account = match self.accounts.read().active_account().cloned() {
             Some(acc) => acc,
             None => {
                 let _ = sender.output(HomeOutput::ShowToast(t!(
@@ -339,181 +532,19 @@ impl HomePage {
         let dirs = self.dirs.clone();
         let global_config = self.config.read().clone();
 
+        let ctx = LaunchContext {
+            account,
+            instance,
+            global_config,
+            dirs,
+            client,
+            bulk_client,
+        };
+
         sender.command(move |out, shutdown| {
             shutdown
                 .register(async move {
-                    let result: Result<String, LaunchError> = async {
-                        // Log in to obtain an access token.
-                        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Authenticating));
-                        let old_username = account.username.clone();
-                        let access_token =
-                            Self::access_token(&mut account, &client, MICROSOFT_CLIENT_ID).await?;
-
-                        if old_username != account.username {
-                            let _ = out.send(HomeCmdOutput::UpdateUsername(
-                                account.uuid,
-                                account.username.clone(),
-                            ));
-                        }
-
-                        // Load version metadata, updating the local copy if Mojang's version has changed
-                        // falls back to local cache when offline
-                        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::LoadingMetadata));
-                        let metadata = instance
-                            .refresh_and_load_metadata(
-                                &client,
-                                &dirs,
-                                global_config.download_source,
-                            )
-                            .await
-                            .map_err(|e| {
-                                t!(
-                                    "launch-error-metadata",
-                                    "Failed to load version metadata: {e}",
-                                    e = e
-                                )
-                            })?;
-
-                        // Validate and select a matching Java runtime.
-                        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::CheckingJava));
-                        let java = launch::select_java(&instance, &global_config, &metadata)
-                            .map_err(|e| t!("launch-error-java", "Java error: {e}", e = e))?;
-
-                        // Validate and concurrently compare all files (client.jar, libraries, assets).
-                        let _ =
-                            out.send(HomeCmdOutput::StageChanged(LaunchStage::CheckingIntegrity));
-                        let asset_index = AssetIndex::fetch_and_verify(
-                            &client,
-                            &metadata.asset_index,
-                            &dirs.assets_dir(),
-                            global_config.download_source,
-                        )
-                        .await
-                        .map_err(|e| {
-                            t!(
-                                "launch-error-asset-index",
-                                "Failed to verify asset index: {e}",
-                                e = e
-                            )
-                        })?;
-
-                        let tasks = instance.download_tasks(&metadata, &asset_index, &dirs);
-                        let tasks = instance.check_integrity(tasks);
-                        download::download_all(
-                            &client,
-                            &bulk_client,
-                            tasks,
-                            global_config.download_source,
-                            global_config.max_concurrent_downloads,
-                            None,
-                        )
-                        .await
-                        .map_err(|e| {
-                            t!(
-                                "launch-error-resources",
-                                "Failed to verify resources: {e}",
-                                e = e
-                            )
-                        })?;
-
-                        // Extract native libraries and prepare legacy asset mappings.
-                        let _ =
-                            out.send(HomeCmdOutput::StageChanged(LaunchStage::PreparingRuntime));
-                        let inst_clone = instance.clone();
-                        let dirs_clone = dirs.clone();
-                        let metadata_clone = metadata.clone();
-                        let language = global_config.language;
-
-                        let auto_lang = if instance.config.custom_settings {
-                            instance
-                                .config
-                                .auto_game_language
-                                .unwrap_or(global_config.auto_game_language)
-                        } else {
-                            global_config.auto_game_language
-                        };
-
-                        tokio::task::spawn_blocking(move || -> acl_core::Result<()> {
-                            inst_clone.prepare_runtime(
-                                &metadata_clone,
-                                &asset_index,
-                                &dirs_clone,
-                            )?;
-                            if auto_lang {
-                                inst_clone.ensure_language(language, &asset_index);
-                            }
-                            Ok(())
-                        })
-                        .await
-                        .map_err(|e| {
-                            t!(
-                                "launch-error-runtime-execution",
-                                "Runtime task execution error: {e}",
-                                e = e
-                            )
-                        })?
-                        .map_err(|e| {
-                            t!(
-                                "launch-error-prepare-runtime",
-                                "Failed to prepare runtime: {e}",
-                                e = e
-                            )
-                        })?;
-
-                        // Assemble the launch command and start the game process.
-                        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Launching));
-                        let cmd = LaunchCommand::build(
-                            &instance,
-                            &global_config,
-                            &dirs,
-                            &metadata,
-                            &account,
-                            &access_token,
-                            &java,
-                        )
-                        .map_err(|e| {
-                            t!(
-                                "launch-error-build-command",
-                                "Failed to build launch command: {e}",
-                                e = e
-                            )
-                        })?;
-
-                        let spawn_time = SystemTime::now();
-
-                        let process = cmd.spawn().await.map_err(|e| {
-                            t!(
-                                "launch-error-spawn-process",
-                                "Failed to spawn game process: {e}",
-                                e = e
-                            )
-                        })?;
-
-                        // A background standalone task monitors the process exit.
-                        let inst_name = instance.config.name.clone();
-                        let inst_id = instance.id().to_owned();
-                        let out_bg = out.clone();
-
-                        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<()>();
-
-                        tokio::spawn(async move {
-                            let status = process.wait().await;
-                            let _ = exit_tx.send(());
-                            let _ = out_bg.send(HomeCmdOutput::GameExited {
-                                id: inst_id,
-                                name: inst_name,
-                                status,
-                            });
-                        });
-
-                        // Wait for the game window to appear.
-                        let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::WaitingWindow));
-                        Self::wait_window(instance.game_dir(), spawn_time, exit_rx).await;
-
-                        Ok(instance.id().to_string())
-                    }
-                    .await;
-
+                    let result: Result<String, LaunchError> = Self::run_launch(ctx, &out).await;
                     let _ = out.send(HomeCmdOutput::LaunchFinished(result));
                 })
                 .drop_on_shutdown()
@@ -920,6 +951,9 @@ impl Component for HomePage {
                     error!("Failed to save accounts: {err}");
                 }
             }
+            HomeInput::ShowToast(m) => {
+                let _ = sender.output(HomeOutput::ShowToast(m));
+            }
         }
     }
 
@@ -1058,6 +1092,9 @@ impl Component for HomePage {
                     instance_id: id,
                     launch_after: true,
                 });
+            }
+            HomeCmdOutput::ShowToast(m) => {
+                let _ = sender.output(HomeOutput::ShowToast(m));
             }
         }
     }

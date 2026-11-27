@@ -15,6 +15,9 @@ use crate::{
     native::NativeArchive,
 };
 
+const LAST_VULNERABLE_LWJGL_VERSION: &str = "3.4.3";
+const MIN_PATCHED_FREETYPE_VERSION: &str = "2.15.0";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadFile {
     pub sha1: String,
@@ -538,6 +541,31 @@ impl VersionMetadata {
         }
 
         self.libraries.extend(patch.libraries);
+    }
+
+    fn is_patched_lwjgl_freetype(version: &str) -> bool {
+        if let Some((_, ft_ver)) = version.split_once("-mojang-") {
+            ft_ver == MIN_PATCHED_FREETYPE_VERSION
+                || is_newer_version(ft_ver, MIN_PATCHED_FREETYPE_VERSION)
+        } else {
+            is_newer_version(version, LAST_VULNERABLE_LWJGL_VERSION)
+        }
+    }
+
+    /// Returns the vulnerable `org.lwjgl:lwjgl-freetype` version if this metadata
+    /// resolves to an unpatched FreeType native library.
+    pub fn vulnerable_freetype_version(&self) -> Option<String> {
+        self.native_archives(Path::new(""))
+            .into_iter()
+            .find_map(|archive| {
+                let version = archive
+                    .name
+                    .strip_prefix("org.lwjgl:lwjgl-freetype:")?
+                    .split(':')
+                    .next()?;
+
+                (!Self::is_patched_lwjgl_freetype(version)).then(|| version.to_string())
+            })
     }
 }
 
