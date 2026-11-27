@@ -25,6 +25,8 @@ pub struct Account {
     pub uuid: Uuid,
     pub username: String,
     pub account_type: AccountType,
+    #[serde(default)]
+    pub skin_url: Option<String>,
 }
 
 impl Account {
@@ -42,14 +44,20 @@ impl Account {
             uuid,
             username,
             account_type: AccountType::Offline,
+            skin_url: None,
         })
     }
 
-    pub fn new_microsoft(username: impl Into<String>, uuid: impl Into<String>) -> Result<Self> {
+    pub fn new_microsoft(
+        username: impl Into<String>,
+        uuid: impl Into<String>,
+        skin_url: Option<String>,
+    ) -> Result<Self> {
         Ok(Self {
             uuid: Uuid::from_str(&uuid.into())?,
             username: username.into(),
             account_type: AccountType::Microsoft,
+            skin_url,
         })
     }
 
@@ -180,7 +188,7 @@ mod tests {
     #[test]
     fn test_new_microsoft_valid_hyphenated_uuid() {
         let uuid_str = "550e8400-e29b-41d4-a716-446655440000";
-        let account = Account::new_microsoft("Steve", uuid_str).unwrap();
+        let account = Account::new_microsoft("Steve", uuid_str, None).unwrap();
         assert_eq!(account.username, "Steve");
         assert_eq!(account.account_type, AccountType::Microsoft);
         assert_eq!(account.uuid.to_string(), uuid_str);
@@ -189,7 +197,7 @@ mod tests {
     #[test]
     fn test_new_microsoft_valid_simple_hex_uuid() {
         let hex_str = "4566e69fc90748ee8d71d7ba5aaafced";
-        let account = Account::new_microsoft("Alex", hex_str).unwrap();
+        let account = Account::new_microsoft("Alex", hex_str, None).unwrap();
         assert_eq!(account.username, "Alex");
         assert_eq!(account.account_type, AccountType::Microsoft);
         assert_eq!(account.uuid.simple().to_string(), hex_str);
@@ -197,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_new_microsoft_invalid_uuid() {
-        let err = Account::new_microsoft("Steve", "not-a-valid-uuid").unwrap_err();
+        let err = Account::new_microsoft("Steve", "not-a-valid-uuid", None).unwrap_err();
         assert!(matches!(err, AuthError::Uuid(_)));
     }
 }

@@ -137,6 +137,8 @@ impl MetaLoaderEntry {
 
 #[cfg(test)]
 mod tests {
+    use acl_common::hash::url_sha1;
+
     use super::*;
     use std::fs;
     use std::path::PathBuf;
@@ -443,7 +445,7 @@ mod tests {
         );
 
         let upstream_url = MetaLoaderEntry::list_url(QUILT_META_BASE_URL, "1.21.1");
-        let cache_key = crate::cache::cache_key_for_url(&upstream_url);
+        let cache_key = url_sha1(&upstream_url);
         let cache_file = temp.path().join(cache_key);
 
         let sample_entry = MetaLoaderEntry {
@@ -488,7 +490,7 @@ mod tests {
     async fn test_fetch_list_with_cache_from_local_cache() {
         let temp = TempDirGuard::new("fabric_list_cached");
         let upstream_url = MetaLoaderEntry::list_url(FABRIC_META_BASE_URL, "1.20.1");
-        let cache_key = crate::cache::cache_key_for_url(&upstream_url);
+        let cache_key = url_sha1(&upstream_url);
         let cache_file = temp.path().join(cache_key);
 
         let sample_entry = MetaLoaderEntry {

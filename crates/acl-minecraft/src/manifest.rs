@@ -4,10 +4,11 @@
 use std::{path::Path, time::Duration};
 
 use crate::{
-    cache::{Cached, DEFAULT_MANIFEST_TTL, cache_key_for_url, fetch_cached_json},
+    cache::{Cached, DEFAULT_MANIFEST_TTL, fetch_cached_json},
     error::Result,
     mirror::DownloadSource,
 };
+use acl_common::hash::url_sha1;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 pub const VERSION_MANIFEST_URL: &str =
@@ -97,7 +98,7 @@ impl VersionManifest {
 
     /// Manually cache the manifest.
     pub fn save_cache(&self, cache_dir: &Path, url: &str, ttl: Duration) {
-        let file_name = cache_key_for_url(url);
+        let file_name = url_sha1(url);
         let cache_path = cache_dir.join(file_name);
         if let Err(err) =
             Cached::new(self.clone(), ttl).and_then(|entry| entry.save_to_file(&cache_path))
@@ -274,7 +275,7 @@ mod tests {
         let manifest = sample_manifest();
         let dummy_url = "https://example.com/mock_manifest.json";
 
-        let cache_key = cache_key_for_url(dummy_url);
+        let cache_key = url_sha1(dummy_url);
         let cache_path = temp.path().join(cache_key);
 
         let cached = Cached::new(manifest.clone(), Duration::from_secs(3600))
@@ -309,7 +310,7 @@ mod tests {
         let official_url = VERSION_MANIFEST_URL;
         let bmclapi_url = DownloadSource::Bmclapi.rewrite_url(official_url);
 
-        let official_cache_key = cache_key_for_url(official_url);
+        let official_cache_key = url_sha1(official_url);
         let official_cache_path = temp.path().join(official_cache_key);
         let cached_official = Cached::new(manifest_official.clone(), Duration::from_secs(3600))
             .expect("failed to create official cached");
@@ -317,7 +318,7 @@ mod tests {
             .save_to_file(&official_cache_path)
             .expect("failed to save official cache");
 
-        let bmclapi_cache_key = cache_key_for_url(&bmclapi_url);
+        let bmclapi_cache_key = url_sha1(&bmclapi_url);
         let bmclapi_cache_path = temp.path().join(bmclapi_cache_key);
         let cached_bmclapi = Cached::new(manifest_bmclapi.clone(), Duration::from_secs(3600))
             .expect("failed to create bmclapi cached");
@@ -365,7 +366,7 @@ mod tests {
         let manifest = sample_manifest();
         let dummy_url = "https://example.com/custom_manifest.json";
 
-        let custom_cache_key = cache_key_for_url(dummy_url);
+        let custom_cache_key = url_sha1(dummy_url);
         let custom_cache_path = temp.path().join(custom_cache_key);
         assert!(!custom_cache_path.exists());
 
@@ -376,7 +377,7 @@ mod tests {
             .expect("should load saved cache");
         assert_eq!(cached.data, manifest);
 
-        let default_cache_key = cache_key_for_url(VERSION_MANIFEST_URL);
+        let default_cache_key = url_sha1(VERSION_MANIFEST_URL);
         let default_cache_path = temp.path().join(default_cache_key);
         assert!(!default_cache_path.exists());
 

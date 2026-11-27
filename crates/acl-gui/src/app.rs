@@ -25,6 +25,7 @@ use crate::{
         settings::{SettingsOutput, SettingsPage},
         tasks::{TasksInit, TasksPage},
     },
+    skin::SkinCache,
     t,
     widgets::ms_login::{MsLoginDialog, MsLoginInit, MsLoginInput, MsLoginOutput},
 };
@@ -447,6 +448,7 @@ impl SimpleComponent for AppModel {
         let active_install: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         let icon_cache = Arc::new(IconCache::new(client.clone(), dirs.cache_dir()));
+        let skin_cache = Arc::new(SkinCache::new(client.clone(), dirs.cache_dir()));
 
         // Initialize ui widgets
 
@@ -509,6 +511,7 @@ impl SimpleComponent for AppModel {
                 config: Arc::clone(&config_state),
                 accounts_path,
                 client: client.clone(),
+                skin_cache,
             })
             .forward(sender.input_sender(), |msg| match msg {
                 AccountsOutput::ShowToast(message) => AppMsg::ShowToast(message),

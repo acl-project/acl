@@ -20,7 +20,7 @@ pub mod rule;
 pub mod version;
 
 pub use asset::{AssetIndex, AssetObject, RESOURCES_BASE_URL};
-pub use cache::{Cached, DEFAULT_MANIFEST_TTL, cache_key_for_url};
+pub use cache::{Cached, DEFAULT_MANIFEST_TTL};
 pub use error::{MinecraftError, Result};
 pub use fabric::{
     FABRIC_META_BASE_URL, MetaIntermediaryInfo, MetaLoader, MetaLoaderEntry, MetaLoaderInfo,

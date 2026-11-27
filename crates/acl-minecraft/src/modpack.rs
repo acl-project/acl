@@ -426,6 +426,7 @@ pub fn normalize_relative_path(raw: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acl_common::hash::url_sha1;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use zip::ZipWriter;
@@ -976,9 +977,7 @@ mod tests {
         let write_cache = |endpoint: &str, body: &serde_json::Value, data: serde_json::Value| {
             let url = format!("{}/{endpoint}", crate::curseforge::CURSEFORGE_API_BASE_URL);
             let cache_seed = format!("POST:{url}:{body}");
-            let cache_file = temp
-                .path()
-                .join(crate::cache::cache_key_for_url(&cache_seed));
+            let cache_file = temp.path().join(url_sha1(&cache_seed));
             let resp = TestDataResponse { data };
             crate::cache::Cached::new(resp, crate::curseforge::DEFAULT_SEARCH_TTL)
                 .expect("create cache entry")

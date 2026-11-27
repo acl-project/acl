@@ -462,6 +462,8 @@ impl From<ProjectDetail> for AssetItemData {
 
 #[cfg(test)]
 mod tests {
+    use acl_common::hash::url_sha1;
+
     use super::*;
     use std::fs;
     use std::path::PathBuf;
@@ -747,9 +749,7 @@ mod tests {
             limit: 20,
         };
         let upstream_url = params.build_url(MODRINTH_API_BASE_URL);
-        let cache_file = temp
-            .path()
-            .join(crate::cache::cache_key_for_url(&upstream_url));
+        let cache_file = temp.path().join(url_sha1(&upstream_url));
         let cached =
             crate::cache::Cached::new(response.clone(), DEFAULT_SEARCH_TTL).expect("create cache");
         cached.save_to_file(&cache_file).expect("save search cache");
@@ -951,9 +951,7 @@ mod tests {
         let temp = TempDirGuard::new("version_list_cache");
         let upstream_url =
             ProjectVersion::list_url(MODRINTH_API_BASE_URL, "AANobbMI", &["fabric"], &["1.20.1"]);
-        let cache_file = temp
-            .path()
-            .join(crate::cache::cache_key_for_url(&upstream_url));
+        let cache_file = temp.path().join(url_sha1(&upstream_url));
         let cached =
             crate::cache::Cached::new(versions.clone(), DEFAULT_SEARCH_TTL).expect("create cache");
         cached
@@ -1205,9 +1203,7 @@ mod tests {
         assert!(empty.is_empty());
 
         let upstream_url = ProjectDetail::batch_url(MODRINTH_API_BASE_URL, &ids);
-        let cache_file = temp
-            .path()
-            .join(crate::cache::cache_key_for_url(&upstream_url));
+        let cache_file = temp.path().join(url_sha1(&upstream_url));
         let cached =
             crate::cache::Cached::new(details.clone(), DEFAULT_SEARCH_TTL).expect("create cache");
         cached

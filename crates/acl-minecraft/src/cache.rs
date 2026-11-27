@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::error::{MinecraftError, Result};
+use acl_common::hash::url_sha1;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha1::{Digest, Sha1};
 use std::{
@@ -12,11 +13,6 @@ use std::{
 use tracing::{debug, warn};
 pub const DEFAULT_MANIFEST_TTL: Duration = Duration::from_secs(3600);
 
-pub fn cache_key_for_url(url: &str) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(url.as_bytes());
-    format!("{}.json", hex::encode(hasher.finalize()))
-}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Cached<T> {
     /// The date the cache was created.
@@ -165,7 +161,7 @@ pub async fn fetch_cached_request<T>(
 where
     T: Serialize + DeserializeOwned + Clone,
 {
-    let cache_path = cache_dir.join(cache_key_for_url(cache_key_seed));
+    let cache_path = cache_dir.join(url_sha1(cache_key_seed));
     let cached = Cached::<T>::load_from_file(&cache_path).ok();
 
     // Only when it is not a forced refresh should a valid fresh cache be returned directly
@@ -243,21 +239,6 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
-    }
-
-    #[test]
-    fn test_cache_key_for_url() {
-        let key1 =
-            cache_key_for_url("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
-        let key2 =
-            cache_key_for_url("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
-        let key3 = cache_key_for_url("https://example.com/other.json");
-
-        assert_eq!(key1, key2);
-        assert_ne!(key1, key3);
-        assert!(key1.ends_with(".json"));
-        // SHA1 is 40 hex chars + 5 for ".json"
-        assert_eq!(key1.len(), 45);
     }
 
     #[test]
@@ -379,7 +360,7 @@ mod tests {
     async fn test_fetch_cached_json_from_fresh_local_cache() {
         let temp = TempDirGuard::new("fetch_cached_valid");
         let dummy_url = "https://example.com/test_data.json";
-        let cache_key = cache_key_for_url(dummy_url);
+        let cache_key = url_sha1(dummy_url);
         let cache_path = temp.path().join(cache_key);
 
         let data = vec!["entry1".to_string(), "entry2".to_string()];
@@ -417,7 +398,7 @@ mod tests {
             .expect("bind mock server");
         let local_addr = listener.local_addr().expect("get local addr");
         let url = format!("http://{local_addr}/new_data.json");
-        let cache_key = cache_key_for_url(&url);
+        let cache_key = url_sha1(&url);
         let cache_path = temp.path().join(cache_key);
 
         // 2. Pre-seed local cache with old data (still fresh!)
@@ -471,7 +452,7 @@ mod tests {
     async fn test_fetch_cached_request_from_fresh_local_cache() {
         let temp = TempDirGuard::new("fetch_cached_request_fresh");
         let cache_seed = r#"POST:https://api.example.com/v1/mods:{"modIds":[1,2]}"#;
-        let cache_path = temp.path().join(cache_key_for_url(cache_seed));
+        let cache_path = temp.path().join(url_sha1(cache_seed));
 
         let data = vec!["cached_mod_1".to_string(), "cached_mod_2".to_string()];
         Cached::new(data.clone(), Duration::from_secs(3600))
@@ -509,7 +490,7 @@ mod tests {
         let url = format!("http://{local_addr}/batch");
         let request_body = serde_json::json!({ "modIds": [1, 2] });
         let cache_seed = format!("POST:{url}:{request_body}");
-        let cache_path = temp.path().join(cache_key_for_url(&cache_seed));
+        let cache_path = temp.path().join(url_sha1(&cache_seed));
 
         // Pre-seed fresh old cache to verify force_refresh bypasses it
         Cached::new(vec!["stale_data".to_string()], Duration::from_secs(3600))
@@ -635,7 +616,7 @@ mod tests {
 
         // 1. Expired cache exists -> fall back to expired cache on HTTP error
         let expired_seed = "fallback-seed";
-        let expired_path = temp.path().join(cache_key_for_url(expired_seed));
+        let expired_path = temp.path().join(url_sha1(expired_seed));
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time")

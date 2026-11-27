@@ -196,10 +196,52 @@ pub struct MinecraftErrorResponse {
     pub error_message: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum SkinState {
+    Active,
+    Inactive,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum SkinVariant {
+    Classic,
+    Slim,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MinecraftSkin {
+    pub id: String,
+    #[serde(default)]
+    pub state: SkinState,
+    pub url: String,
+    #[serde(default)]
+    pub variant: SkinVariant,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct MinecraftProfileResponse {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub skins: Vec<MinecraftSkin>,
+}
+
+impl MinecraftProfileResponse {
+    pub fn active_skin_url(&self) -> Option<String> {
+        self.skins
+            .iter()
+            .find(|s| s.state == SkinState::Active)
+            .or_else(|| self.skins.first())
+            .map(|s| s.url.clone())
+    }
 }
 
 /// Authentication credentials
@@ -247,6 +289,7 @@ pub struct MicrosoftRefreshResult {
     pub tokens: MicrosoftTokenBundle,
     pub username: String,
     pub uuid: String,
+    pub skin_url: Option<String>,
 }
 
 #[cfg(test)]
@@ -377,6 +420,7 @@ mod tests {
             tokens,
             username: "Steve".to_string(),
             uuid: "4566e69fc90748ee8d71d7ba5aaafced".to_string(),
+            skin_url: None,
         };
         let refresh_clone = refresh_res.clone();
         assert_eq!(refresh_clone.username, "Steve");

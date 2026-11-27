@@ -19,3 +19,7 @@ popover.folder-menu label {
 image.project-icon {
     border-radius: 12px;
 }
+
+image.account-avatar {
+    border-radius: 0px;
+}

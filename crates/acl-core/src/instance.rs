@@ -678,6 +678,8 @@ impl Instance {
 
 #[cfg(test)]
 mod tests {
+    use acl_common::hash::url_sha1;
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1219,7 +1221,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_instance_fetch_metadata_from_cache() {
-        use acl_minecraft::{VersionType, cache_key_for_url};
+        use acl_minecraft::VersionType;
 
         let temp = TempDirGuard::new("instance_fetch_metadata");
         let dirs = LauncherDirs::with_paths(
@@ -1252,9 +1254,7 @@ mod tests {
         }"#;
 
         fs::write(instance.version_json(), json_payload).expect("failed to write cached metadata");
-        let sha1 = cache_key_for_url(json_payload)
-            .trim_end_matches(".json")
-            .to_string();
+        let sha1 = url_sha1(json_payload).trim_end_matches(".json").to_string();
 
         let entry = VersionEntry {
             id: "1.21.1".to_string(),
