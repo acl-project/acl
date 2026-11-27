@@ -26,9 +26,12 @@ dependencies = [
 name = "acl-common"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "iana-time-zone",
  "semver",
  "serde",
+ "sha1",
+ "sha2 0.10.9",
  "sys-locale",
  "unic-langid",
  "version-compare",
@@ -68,7 +71,6 @@ dependencies = [
  "acl-minecraft",
  "fluent",
  "gtk4",
- "hex",
  "i18n-embed",
  "image",
  "libadwaita",
@@ -79,7 +81,6 @@ dependencies = [
  "reqwest",
  "rust-embed",
  "serde_json",
- "sha2 0.10.9",
  "thiserror 2.0.21",
  "tracing",
  "tracing-subscriber",

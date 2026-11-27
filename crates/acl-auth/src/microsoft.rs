@@ -67,7 +67,9 @@ impl MicrosoftAuth {
             fetch_minecraft_profile(client, MINECRAFT_PROFILE_URL, &minecraft_token.access_token)
                 .await?;
 
-        let account = Account::new_microsoft(profile.name, profile.id)?;
+        let skin_url = profile.active_skin_url();
+
+        let account = Account::new_microsoft(profile.name, profile.id, skin_url)?;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -140,10 +142,12 @@ impl MicrosoftAuth {
             expires_at,
         };
 
+        let skin_url = profile.active_skin_url();
         Ok(MicrosoftRefreshResult {
             tokens,
             username: profile.name,
             uuid: profile.id,
+            skin_url,
         })
     }
 }

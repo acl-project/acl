@@ -141,7 +141,11 @@ pub enum HomeInput {
 
 #[derive(Debug)]
 pub enum HomeCmdOutput {
-    UpdateUsername(Uuid, String),
+    UpdateProfile {
+        uuid: Uuid,
+        username: String,
+        skin_url: Option<String>,
+    },
     StageChanged(LaunchStage),
     LaunchFinished(Result<String, LaunchError>),
     GameExited {
@@ -229,7 +233,7 @@ impl HomePage {
         }
     }
 
-    // Get access_token; refresh if expired and update username
+    // Get access_token; refresh if expired and update username and skin_url
     pub async fn access_token(
         account: &mut Account,
         client: &reqwest::Client,
@@ -270,6 +274,10 @@ impl HomePage {
                     account.username = res.username;
                 }
 
+                if account.skin_url != res.skin_url {
+                    account.skin_url = res.skin_url;
+                }
+
                 Ok(res.tokens.access_token)
             }
         }
@@ -289,13 +297,15 @@ impl HomePage {
         // Log in to obtain an access token.
         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::Authenticating));
         let old_username = account.username.clone();
+        let old_skin_url = account.skin_url.clone();
         let access_token = Self::access_token(&mut account, &client, MICROSOFT_CLIENT_ID).await?;
 
-        if old_username != account.username {
-            let _ = out.send(HomeCmdOutput::UpdateUsername(
-                account.uuid,
-                account.username.clone(),
-            ));
+        if old_username != account.username || old_skin_url != account.skin_url {
+            let _ = out.send(HomeCmdOutput::UpdateProfile {
+                uuid: account.uuid,
+                username: account.username.clone(),
+                skin_url: account.skin_url.clone(),
+            });
         }
 
         // Load version metadata, updating the local copy if Mojang's version has changed
@@ -1058,15 +1068,29 @@ impl Component for HomePage {
                     let _ = sender.output(HomeOutput::ShowToast(msg));
                 }
             },
-            HomeCmdOutput::UpdateUsername(uuid, username) => {
+            HomeCmdOutput::UpdateProfile {
+                uuid,
+                username,
+                skin_url,
+            } => {
                 let mut accounts = self.accounts.write();
 
-                if let Some(account) = accounts.account_mut(uuid)
-                    && account.username != username
-                {
-                    info!("Update username {} to {}", account.username, username);
-                    account.username = username;
-                    if let Err(err) = accounts.save(&self.dirs.accounts_file()) {
+                if let Some(account) = accounts.account_mut(uuid) {
+                    let mut changed = false;
+
+                    if account.username != username {
+                        info!("Update username {} to {}", account.username, username);
+                        account.username = username;
+                        changed = true;
+                    }
+
+                    if account.skin_url != skin_url {
+                        info!("Update {} skin", account.username);
+                        account.skin_url = skin_url;
+                        changed = true;
+                    }
+
+                    if changed && let Err(err) = accounts.save(&self.dirs.accounts_file()) {
                         error!("Failed to save accounts: {err}");
                         let msg = t!(
                             "home-page-error-save-accounts",

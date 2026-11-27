@@ -6,13 +6,14 @@ use std::sync::Arc;
 
 use acl_auth::{Account, AccountStore, AccountType, CredentialStore, MICROSOFT_CLIENT_ID};
 use acl_core::LauncherConfig;
-use gtk::prelude::*;
+use gtk::{gdk, prelude::*};
 use libadwaita::prelude::*;
 use relm4::ComponentParts;
 use relm4::{SharedState, prelude::*};
 use tracing::error;
 use uuid::Uuid;
 
+use crate::skin::SkinCache;
 use crate::t;
 
 const XBOX_STORE_URL: &str =
@@ -22,6 +23,14 @@ const XBOX_STORE_URL: &str =
 pub struct AccountRow {
     account: Account,
     is_active: bool,
+    avatar: Option<gdk::Texture>,
+}
+
+#[derive(Debug)]
+pub struct AccountRowInit {
+    account: Account,
+    is_active: bool,
+    skin_cache: Arc<SkinCache>,
 }
 
 #[derive(Debug)]
@@ -46,10 +55,10 @@ impl AccountRow {
 
 #[relm4::factory(pub)]
 impl FactoryComponent for AccountRow {
-    type Init = (Account, bool);
+    type Init = AccountRowInit;
     type Input = AccountRowInput;
     type Output = AccountRowOutput;
-    type CommandOutput = ();
+    type CommandOutput = Option<gdk::Texture>;
     type ParentWidget = adw::PreferencesGroup;
 
     view! {
@@ -69,12 +78,23 @@ impl FactoryComponent for AccountRow {
                 let _ = sender.output(AccountRowOutput::Select(uuid));
             },
 
-            // Reserved avatar icon slot for player skin head
-            add_prefix = &adw::Avatar {
-                set_size: 36,
+            add_prefix = &gtk::Image {
+                set_pixel_size: 32,
+                set_valign: gtk::Align::Center,
+                set_icon_name: Some("avatar-default-symbolic"),
                 #[watch]
-                set_text: Some(&self.account.username),
-                set_show_initials: false,
+                set_visible: self.avatar.is_none(),
+            },
+
+            add_prefix = &gtk::Image {
+                set_pixel_size: 32,
+                set_valign: gtk::Align::Center,
+                set_overflow: gtk::Overflow::Hidden,
+                add_css_class: "account-avatar",
+                #[watch]
+                set_visible: self.avatar.is_some(),
+                #[watch]
+                set_paintable: self.avatar.as_ref(),
             },
 
             #[name = "select_check"]
@@ -131,12 +151,24 @@ impl FactoryComponent for AccountRow {
 
     }
 
-    fn init_model(
-        (account, is_active): Self::Init,
-        _index: &Self::Index,
-        _sender: FactorySender<Self>,
-    ) -> Self {
-        Self { account, is_active }
+    fn init_model(init: Self::Init, _index: &Self::Index, sender: FactorySender<Self>) -> Self {
+        let avatar = init
+            .account
+            .skin_url
+            .as_deref()
+            .and_then(|url| init.skin_cache.get(url));
+
+        if avatar.is_none()
+            && let Some(url) = init.account.skin_url.clone()
+        {
+            sender.oneshot_command(async move { init.skin_cache.load(&url).await });
+        }
+
+        Self {
+            account: init.account,
+            is_active: init.is_active,
+            avatar,
+        }
     }
 
     fn update(&mut self, msg: Self::Input, _sender: FactorySender<Self>) {
@@ -146,11 +178,18 @@ impl FactoryComponent for AccountRow {
             }
         }
     }
+
+    fn update_cmd(&mut self, msg: Self::CommandOutput, _sender: FactorySender<Self>) {
+        if let Some(tex) = msg {
+            self.avatar = Some(tex);
+        }
+    }
 }
 
 pub struct AccountsPage {
     accounts: Arc<SharedState<AccountStore>>,
     config: Arc<SharedState<LauncherConfig>>,
+    skin_cache: Arc<SkinCache>,
     accounts_path: PathBuf,
     account_rows: FactoryVecDeque<AccountRow>,
     add_offline_dialog: adw::AlertDialog,
@@ -181,6 +220,7 @@ pub struct AccountsInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub accounts_path: PathBuf,
     pub client: reqwest::Client,
+    pub skin_cache: Arc<SkinCache>,
 }
 
 impl AccountsPage {
@@ -203,7 +243,11 @@ impl AccountsPage {
         guard.clear();
         for account in store.accounts() {
             let is_active = Some(account.uuid) == active_uuid;
-            guard.push_back((account.clone(), is_active));
+            guard.push_back(AccountRowInit {
+                account: account.clone(),
+                is_active,
+                skin_cache: Arc::clone(&self.skin_cache),
+            });
         }
     }
 }
@@ -364,6 +408,7 @@ impl Component for AccountsPage {
             accounts: init.store,
             config: init.config,
             accounts_path: init.accounts_path,
+            skin_cache: init.skin_cache,
             account_rows,
             add_offline_dialog: adw::AlertDialog::new(None, None),
             username_entry: gtk::Entry::new(),
@@ -498,8 +543,10 @@ mod tests {
                 uuid: Uuid::nil(),
                 username: "Steve".to_string(),
                 account_type: AccountType::Offline,
+                skin_url: None,
             },
             is_active: false,
+            avatar: None,
         };
         assert_eq!(offline_row.account_type_label(), "Offline");
 
@@ -508,8 +555,10 @@ mod tests {
                 uuid: Uuid::nil(),
                 username: "Alex".to_string(),
                 account_type: AccountType::Microsoft,
+                skin_url: None,
             },
             is_active: true,
+            avatar: None,
         };
         assert_eq!(ms_row.account_type_label(), "Microsoft");
     }

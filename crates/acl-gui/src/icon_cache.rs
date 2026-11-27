@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use acl_common::hash::sha256_hex;
 use gtk::{
     gdk,
     glib::{self, object::Cast},
@@ -15,7 +16,6 @@ use gtk::{
 use image::imageops::FilterType;
 use lru::LruCache;
 use parking_lot::Mutex;
-use sha2::{Digest, Sha256};
 use tracing::debug;
 
 /// Target decoded icon dimension (128x128 fits 64px widgets at 2x HiDPI).
@@ -40,12 +40,6 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 const DISK_CACHE_PRUNE_TARGET_BYTES: u64 = 40 * 1024 * 1024;
 
 const MAX_MEMORY_ENTRIES: usize = 400;
-
-fn cache_key(url: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(url.as_bytes());
-    hex::encode(hasher.finalize())
-}
 
 #[derive(Debug)]
 enum CacheEntry {
@@ -163,49 +157,7 @@ impl IconCache {
     }
 
     async fn download_bytes(client: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
-        let mut response = match client.get(url).timeout(FETCH_TIMEOUT).send().await {
-            Ok(res) => match res.error_for_status() {
-                Ok(res) => res,
-                Err(e) => {
-                    debug!("Failed to get icon {}: {}", url, e);
-                    return None;
-                }
-            },
-            Err(e) => {
-                debug!("Failed to get icon {}: {}", url, e);
-                return None;
-            }
-        };
-
-        if let Some(len) = response.content_length()
-            && len > MAX_DOWNLOAD_BYTES as u64
-        {
-            debug!(
-                "Failed to get icon {}: download bytes {} greater than {}",
-                url, len, MAX_DOWNLOAD_BYTES
-            );
-            return None;
-        }
-
-        let mut bytes_read: usize = 0;
-        let mut buf = Vec::new();
-
-        while let Some(chunk) = response.chunk().await.ok()? {
-            bytes_read = bytes_read.saturating_add(chunk.len());
-
-            if bytes_read > MAX_DOWNLOAD_BYTES {
-                debug!("Failed to get icon {}: download size exceeds limit", url,);
-                return None;
-            }
-
-            buf.extend_from_slice(&chunk);
-        }
-
-        if buf.is_empty() {
-            return None;
-        }
-
-        Some(buf)
+        crate::cache::download_bytes(client, url, MAX_DOWNLOAD_BYTES, FETCH_TIMEOUT).await
     }
 
     pub async fn load(&self, url: &str) -> Option<gdk::Texture> {
@@ -223,7 +175,7 @@ impl IconCache {
             CacheLookup::Miss => {}
         }
 
-        let key = cache_key(url);
+        let key = sha256_hex(url);
         let icon_dir = self.icon_dir.clone();
         let icon_path = icon_dir.join(key);
 
@@ -440,21 +392,6 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_key_deterministic_and_sha256_hex() {
-        let key1 = cache_key("https://example.com/icon.png");
-        let key2 = cache_key("https://example.com/icon.png");
-        let key3 = cache_key("https://example.com/other.png");
-
-        assert_eq!(key1, key2);
-        assert_ne!(key1, key3);
-        assert_eq!(key1.len(), 64);
-        assert!(
-            key1.chars()
-                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-        );
-    }
-
-    #[test]
     fn test_bytes_to_texture_valid_and_invalid() {
         let png = sample_png_bytes(32, 16, [255, 0, 128, 255]);
         let texture = IconCache::bytes_to_texture(&png).expect("valid PNG should decode");
@@ -562,7 +499,7 @@ mod tests {
 
         let url = "http://127.0.0.1:9/offline-fresh-icon.png";
         let png = sample_png_bytes(24, 24, [10, 20, 30, 255]);
-        let disk_path = cache.icon_dir.join(cache_key(url));
+        let disk_path = cache.icon_dir.join(sha256_hex(url));
         write_file_with_mtime(&disk_path, &png, SystemTime::now());
 
         rt.block_on(async {
@@ -615,7 +552,7 @@ mod tests {
             assert_eq!(first.width(), ICON_DECODE_SIZE as i32);
             assert_eq!(first.height(), ICON_DECODE_SIZE as i32);
 
-            let disk_path = cache.icon_dir.join(cache_key(&url));
+            let disk_path = cache.icon_dir.join(sha256_hex(&url));
             assert_eq!(fs::read(&disk_path).expect("read cached icon"), png);
 
             let second = cache
@@ -706,7 +643,7 @@ mod tests {
 
             let url_corrupt = format!("http://{addr}/corrupt");
             assert!(cache.load(&url_corrupt).await.is_none());
-            assert!(!cache.icon_dir.join(cache_key(&url_corrupt)).exists());
+            assert!(!cache.icon_dir.join(sha256_hex(&url_corrupt)).exists());
 
             let url_large_header = format!("http://{addr}/too-large-header");
             assert!(cache.load(&url_large_header).await.is_none());
@@ -737,8 +674,8 @@ mod tests {
             let url_refresh = format!("http://{addr}/refresh.png");
             let url_fallback = format!("http://{addr}/fallback.png");
 
-            let refresh_path = cache.icon_dir.join(cache_key(&url_refresh));
-            let fallback_path = cache.icon_dir.join(cache_key(&url_fallback));
+            let refresh_path = cache.icon_dir.join(sha256_hex(&url_refresh));
+            let fallback_path = cache.icon_dir.join(sha256_hex(&url_fallback));
             write_file_with_mtime(&refresh_path, &old_png, stale_mtime);
             write_file_with_mtime(&fallback_path, &old_png, stale_mtime);
 

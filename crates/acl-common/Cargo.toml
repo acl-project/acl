@@ -10,3 +10,6 @@ serde = { workspace = true }
 version-compare = { workspace = true }
 semver = { workspace = true }
 unic-langid = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+sha1 = { workspace = true }

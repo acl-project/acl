@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::error::{MinecraftError, Result};
+use acl_common::hash::sha1_hex;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha1::{Digest, Sha1};
 use std::{
     fs::{self},
     path::Path,
@@ -13,9 +13,7 @@ use tracing::{debug, warn};
 pub const DEFAULT_MANIFEST_TTL: Duration = Duration::from_secs(3600);
 
 pub fn cache_key_for_url(url: &str) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(url.as_bytes());
-    format!("{}.json", hex::encode(hasher.finalize()))
+    format!("{}.json", sha1_hex(url))
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Cached<T> {
@@ -72,9 +70,8 @@ pub fn verify_sha1(bytes: &[u8], expected_sha1: &str, target: &str) -> Result<()
     if expected_sha1.is_empty() {
         return Ok(());
     }
-    let mut hasher = Sha1::new();
-    hasher.update(bytes);
-    let actual = hex::encode(hasher.finalize());
+
+    let actual = sha1_hex(bytes);
 
     if !actual.eq_ignore_ascii_case(expected_sha1) {
         return Err(MinecraftError::HashMismatch {
@@ -211,6 +208,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use sha1::{Digest, Sha1};
+
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};

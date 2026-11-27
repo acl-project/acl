@@ -721,7 +721,8 @@ mod tests {
         }
 
         let hex_uuid = "4566e69fc90748ee8d71d7ba5aaafced";
-        let account = Account::new_microsoft("Steve", hex_uuid).expect("failed to create account");
+        let account =
+            Account::new_microsoft("Steve", hex_uuid, None).expect("failed to create account");
         let java_path = PathBuf::from("/mock/java/bin/java");
         let java = JavaInstallation {
             path: java_path.clone(),

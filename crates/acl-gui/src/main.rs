@@ -7,8 +7,10 @@ pub mod i18n_errors_gen;
 pub mod icon_cache;
 pub mod install;
 pub mod pages;
+pub mod skin;
 pub mod widgets;
 
+mod cache;
 use std::process::ExitCode;
 
 use acl_core::LauncherDirs;
