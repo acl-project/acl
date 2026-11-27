@@ -351,7 +351,8 @@ impl VersionMetadata {
     }
 
     pub fn native_archives(&self, libraries_dir: &Path) -> Vec<NativeArchive> {
-        let mut archives = Vec::new();
+        // Collect all items first, then remove old versions at the end
+        let mut candidates = Vec::new();
         let mut seen_paths = HashSet::new();
 
         for lib in self.active_libraries() {
@@ -373,7 +374,7 @@ impl VersionMetadata {
             {
                 let archive_path = libraries_dir.join(rel_path);
                 if seen_paths.insert(archive_path.clone()) {
-                    archives.push(NativeArchive {
+                    candidates.push(NativeArchive {
                         name: format!("{}:{classifier_key}", lib.name),
                         archive_path,
                         exclude: exclude.clone(),
@@ -387,7 +388,7 @@ impl VersionMetadata {
             {
                 let archive_path = libraries_dir.join(rel_path);
                 if seen_paths.insert(archive_path.clone()) {
-                    archives.push(NativeArchive {
+                    candidates.push(NativeArchive {
                         name: lib.name.clone(),
                         archive_path,
                         exclude,
@@ -395,7 +396,37 @@ impl VersionMetadata {
                 }
             }
         }
-        archives
+
+        // Collect the latest version of each library
+        let mut latest_versions: HashMap<String, String> = HashMap::new();
+        for archive in &candidates {
+            if let Some((key, version)) = Self::split_maven_key_version(&archive.name) {
+                match latest_versions.get(&key) {
+                    Some(existing) if !is_newer_version(version, existing) => {}
+                    _ => {
+                        latest_versions.insert(key, version.to_string());
+                    }
+                }
+            }
+        }
+
+        // Filter out older or duplicate versions
+        let mut seen_keys = HashSet::new();
+        candidates
+            .into_iter()
+            .filter(|archive| {
+                let Some((key, version)) = Self::split_maven_key_version(&archive.name) else {
+                    warn!(
+                        "Skipping native archive '{}' with invalid Maven coordinate",
+                        archive.name
+                    );
+                    return false;
+                };
+
+                latest_versions.get(&key).map(String::as_str) == Some(version)
+                    && seen_keys.insert(key)
+            })
+            .collect()
     }
 
     /// Extract all active Linux native libraries into `natives_dir`.

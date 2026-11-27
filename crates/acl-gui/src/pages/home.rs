@@ -290,6 +290,7 @@ impl HomePage {
             }
         };
 
+        // Thanks to CurseForge, add an extra startup check to ensure the modpack doesn't break
         if !bypass_manual && acl_core::manual::exists(instance.game_dir()) {
             if self.stage.is_launching() {
                 return;
@@ -355,15 +356,23 @@ impl HomePage {
                             ));
                         }
 
-                        // Load local version metadata.
+                        // Load version metadata, updating the local copy if Mojang's version has changed
+                        // falls back to local cache when offline
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::LoadingMetadata));
-                        let metadata = instance.load_metadata().map_err(|e| {
-                            t!(
-                                "launch-error-metadata",
-                                "Failed to load version metadata: {e}",
-                                e = e
+                        let metadata = instance
+                            .refresh_and_load_metadata(
+                                &client,
+                                &dirs,
+                                global_config.download_source,
                             )
-                        })?;
+                            .await
+                            .map_err(|e| {
+                                t!(
+                                    "launch-error-metadata",
+                                    "Failed to load version metadata: {e}",
+                                    e = e
+                                )
+                            })?;
 
                         // Validate and select a matching Java runtime.
                         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::CheckingJava));

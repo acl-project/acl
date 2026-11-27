@@ -12,7 +12,8 @@ fn qualifier_rank(s: &str) -> Option<i32> {
         "rc" | "cr" | "pre" => Some(-2),
         "snapshot" => Some(-1),
         "" | "final" | "ga" | "release" => Some(0),
-        "sp" => Some(1), // Service Pack is greater than the official version
+        "sp" => Some(1),     // Service Pack is greater than the official version
+        "mojang" => Some(2), // Mojang's fix packs have the highest priority
         _ => None,
     }
 }

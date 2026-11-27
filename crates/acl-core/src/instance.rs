@@ -12,8 +12,8 @@ use std::{
 use crate::{CoreError, LauncherDirs, Result, java::JavaInstallation};
 use acl_common::Language;
 use acl_minecraft::{
-    AssetIndex, DownloadSource, ProjectType, VersionEntry, VersionMetadata, download::DownloadTask,
-    version::VersionPatch,
+    AssetIndex, DownloadSource, ProjectType, VERSION_MANIFEST_URL, VersionEntry, VersionManifest,
+    VersionMetadata, download::DownloadTask, version::VersionPatch,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
@@ -479,13 +479,8 @@ impl Instance {
         true
     }
 
-    /// Load the cached version metadata from `<id>.json`.
-    /// Automatically load loader.json and patch metadata
-    pub fn load_metadata(&self) -> Result<VersionMetadata> {
-        let path = self.version_json();
-        let content = fs::read_to_string(&path).map_err(|source| CoreError::Io { path, source })?;
-        let mut metadata: VersionMetadata = serde_json::from_str(&content)?;
-
+    /// Apply `loader.json` patch onto vanilla metadata if present.
+    fn apply_loader_patch(&self, metadata: &mut VersionMetadata) -> Result<()> {
         let loader_path = self.loader_json();
         if loader_path.exists() {
             let loader_content =
@@ -502,8 +497,80 @@ impl Instance {
                 self.config.mod_loader.label()
             );
         }
+        Ok(())
+    }
+
+    /// Load the cached version metadata from `<id>.json`.
+    /// Automatically load loader.json and patch metadata
+    pub fn load_metadata(&self) -> Result<VersionMetadata> {
+        let path = self.version_json();
+        let content = fs::read_to_string(&path).map_err(|source| CoreError::Io { path, source })?;
+        let mut metadata: VersionMetadata = serde_json::from_str(&content)?;
+
+        self.apply_loader_patch(&mut metadata)?;
 
         Ok(metadata)
+    }
+
+    /// Best-effort refresh vanilla `<id>.json` against the latest version manifest before launching.
+    /// Falls back to the local cached `<id>.json` on network error or unknown version.
+    pub async fn refresh_and_load_metadata(
+        &self,
+        client: &reqwest::Client,
+        dirs: &LauncherDirs,
+        download_source: DownloadSource,
+    ) -> Result<VersionMetadata> {
+        self.refresh_and_load_metadata_from_url(client, VERSION_MANIFEST_URL, dirs, download_source)
+            .await
+    }
+
+    pub async fn refresh_and_load_metadata_from_url(
+        &self,
+        client: &reqwest::Client,
+        manifest_url: &str,
+        dirs: &LauncherDirs,
+        download_source: DownloadSource,
+    ) -> Result<VersionMetadata> {
+        let result = async {
+            let manifest = VersionManifest::fetch_with_cache(
+                client,
+                manifest_url,
+                dirs.cache_dir(),
+                download_source,
+                false,
+            )
+            .await?;
+
+            let Some(entry) = manifest.find_version(&self.config.game_version) else {
+                warn!(
+                    "Game version '{}' not found in version manifest, using local metadata",
+                    self.config.game_version
+                );
+                return Ok(None);
+            };
+
+            // Check SHA-1 first and skip the network request if unchanged
+            let metadata = self
+                .fetch_metadata(client, entry, dirs, download_source)
+                .await?;
+            Ok::<_, CoreError>(Some(metadata))
+        }
+        .await;
+
+        match result {
+            Ok(Some(mut metadata)) => {
+                self.apply_loader_patch(&mut metadata)?;
+                Ok(metadata)
+            }
+            Ok(None) => self.load_metadata(),
+            Err(err) => {
+                warn!(
+                    "Failed to refresh metadata for '{}', falling back to local cache: {err}",
+                    self.id()
+                );
+                self.load_metadata()
+            }
+        }
     }
 
     pub fn mark_game_abnormal(&self) {
