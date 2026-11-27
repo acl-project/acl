@@ -121,15 +121,11 @@ impl IconCache {
                 return (None, false);
             }
 
-            let Some(age) = meta
+            let is_fresh = meta
                 .modified()
                 .ok()
                 .and_then(|mtime| SystemTime::now().duration_since(mtime).ok())
-            else {
-                return (None, false);
-            };
-
-            let is_fresh = age < DISK_CACHE_TTL;
+                .is_some_and(|age| age < DISK_CACHE_TTL);
 
             match fs::read(&icon_path) {
                 Ok(bytes) => (Some(bytes), is_fresh),
@@ -149,7 +145,7 @@ impl IconCache {
             }
         };
 
-        // Crop uniformly to a 96x96 square and convert to RGBA8
+        // Crop uniformly to a 128x128 square and convert to RGBA8
         let rgba = img
             .resize_to_fill(ICON_DECODE_SIZE, ICON_DECODE_SIZE, FilterType::Triangle)
             .to_rgba8();

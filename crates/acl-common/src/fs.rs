@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{io::Write, path::Path};
+use std::{
+    io::Write,
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 pub fn write_atomic(path: impl AsRef<Path>, bytes: &[u8]) -> std::io::Result<()> {
     let path = path.as_ref();
@@ -9,9 +13,13 @@ pub fn write_atomic(path: impl AsRef<Path>, bytes: &[u8]) -> std::io::Result<()>
         std::fs::create_dir_all(parent)?;
     }
 
+    static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seq = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+
     let mut tmp_os_str = path.as_os_str().to_os_string();
-    // Prevent interference caused by multiple processes.
-    tmp_os_str.push(format!(".tmp.{}", std::process::id()));
+
+    // Prevent interference caused by multiple processes or concurrent writes.
+    tmp_os_str.push(format!(".tmp.{}.{seq}", std::process::id()));
     let tmp_path = std::path::PathBuf::from(tmp_os_str);
 
     let res = (|| -> std::io::Result<()> {
