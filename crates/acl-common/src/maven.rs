@@ -12,7 +12,8 @@ fn qualifier_rank(s: &str) -> Option<i32> {
         "rc" | "cr" | "pre" => Some(-2),
         "snapshot" => Some(-1),
         "" | "final" | "ga" | "release" => Some(0),
-        "sp" => Some(1), // Service Pack is greater than the official version
+        "sp" => Some(1),     // Service Pack is greater than the official version
+        "mojang" => Some(2), // Mojang's fix packs have the highest priority
         _ => None,
     }
 }
@@ -114,6 +115,34 @@ mod tests {
             Some(Ordering::Greater)
         );
         assert_eq!(compare_maven_rules("1.0", "1.0-sp"), Some(Ordering::Less));
+    }
+
+    #[test]
+    fn test_compare_maven_rules_mojang_qualifier() {
+        assert_eq!(
+            compare_maven_rules("3.3.3-mojang-2.15.0", "3.3.3"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.3", "3.3.3-mojang-2.15.0"),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.3-mojang-2.15.0", "3.3.3-sp"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.3-mojang-2.15.0", "3.3.3-mojang-2.14.2"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.4", "3.3.3-mojang-2.15.0"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.3-MOJANG-2.15.0", "3.3.3"),
+            Some(Ordering::Greater)
+        );
     }
 
     #[test]

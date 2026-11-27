@@ -48,4 +48,20 @@ mod tests {
         assert!(is_newer_version("0.16.10", "0.16.9"));
         assert!(is_newer_version("14.23.5.2860", "14.23.5.2859"));
     }
+
+    #[test]
+    fn test_is_newer_version_mojang_qualifier() {
+        assert!(is_newer_version("3.3.3-mojang-2.15.0", "3.3.3"));
+        assert!(!is_newer_version("3.3.3", "3.3.3-mojang-2.15.0"));
+        assert!(is_newer_version(
+            "3.3.3-mojang-2.15.0",
+            "3.3.3-mojang-2.14.2"
+        ));
+        assert!(!is_newer_version(
+            "3.3.3-mojang-2.14.2",
+            "3.3.3-mojang-2.15.0"
+        ));
+        assert!(is_newer_version("3.4.4", "3.4.3"));
+        assert!(!is_newer_version("3.4.3", "3.4.3"));
+    }
 }
