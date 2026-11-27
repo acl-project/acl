@@ -1947,4 +1947,426 @@ mod tests {
         inst_missing.ensure_language(Language::SimplifiedChinese, &empty_assets);
         assert!(!inst_missing.game_dir().join("options.txt").exists());
     }
+
+    fn sha1_hex(bytes: &[u8]) -> String {
+        use sha1::{Digest, Sha1};
+        let mut hasher = Sha1::new();
+        hasher.update(bytes);
+        hex::encode(hasher.finalize())
+    }
+
+    fn write_sample_loader_patch(instance: &Instance) {
+        let patch = acl_minecraft::VersionPatch {
+            id: "fabric-loader-test".to_string(),
+            inherits_from: Some("1.21.1".to_string()),
+            main_class: Some("net.fabricmc.loader.impl.launch.knot.KnotClient".to_string()),
+            minecraft_arguments: None,
+            arguments: None,
+            libraries: vec![acl_minecraft::Library {
+                name: "net.fabricmc:fabric-loader:0.16.10".to_string(),
+                downloads: None,
+                natives: None,
+                rules: None,
+                extract: None,
+                url: Some("https://maven.fabricmc.net/".to_string()),
+                sha1: None,
+                size: None,
+            }],
+        };
+        fs::write(
+            instance.loader_json(),
+            serde_json::to_string(&patch).expect("serialize loader patch"),
+        )
+        .expect("write loader.json");
+    }
+
+    async fn serve_mock_http_requests(
+        listener: tokio::net::TcpListener,
+        routes: Vec<(String, u16, Vec<u8>)>,
+        expected_requests: usize,
+    ) -> Vec<String> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut requested_paths = Vec::with_capacity(expected_requests);
+        for _ in 0..expected_requests {
+            let (mut stream, _) = listener.accept().await.expect("accept mock connection");
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let path = req
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("")
+                .to_string();
+            requested_paths.push(path.clone());
+
+            let (status, body) = routes
+                .iter()
+                .find(|(route, _, _)| route == &path)
+                .map(|(_, status, body)| (*status, body.as_slice()))
+                .unwrap_or((404, b"not found"));
+            let reason = if status == 200 { "OK" } else { "Error" };
+            let header = format!(
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(header.as_bytes()).await;
+            let _ = stream.write_all(body).await;
+            let _ = stream.flush().await;
+        }
+        requested_paths
+    }
+
+    #[tokio::test]
+    async fn test_refresh_and_load_metadata_updates_when_sha1_changes_and_applies_loader_patch() {
+        let temp = TempDirGuard::new("refresh_meta_update");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+        let instance = save_test_instance(
+            "inst_refresh",
+            "Refresh Inst",
+            "1.21.1",
+            &dirs.versions_dir(),
+        );
+
+        let old_meta = sample_version_metadata();
+        fs::write(
+            instance.version_json(),
+            serde_json::to_vec(&old_meta).expect("serialize old metadata"),
+        )
+        .expect("write old metadata");
+        write_sample_loader_patch(&instance);
+
+        let mut new_meta = sample_version_metadata();
+        new_meta.assets = Some("24".to_string());
+        let new_meta_bytes = serde_json::to_vec(&new_meta).expect("serialize new metadata");
+        let new_meta_sha1 = sha1_hex(&new_meta_bytes);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let addr = listener.local_addr().expect("get local addr");
+        let manifest_url = format!("http://{addr}/manifest.json");
+        let metadata_url = format!("http://{addr}/1.21.1.json");
+
+        let manifest_bytes = serde_json::to_vec(&serde_json::json!({
+            "latest": { "release": "1.21.1", "snapshot": "1.21.1" },
+            "versions": [{
+                "id": "1.21.1",
+                "type": "release",
+                "url": metadata_url,
+                "time": "2026-01-01T00:00:00+00:00",
+                "releaseTime": "2026-01-01T00:00:00+00:00",
+                "sha1": new_meta_sha1,
+                "complianceLevel": 1
+            }]
+        }))
+        .expect("serialize manifest");
+
+        let server = tokio::spawn(serve_mock_http_requests(
+            listener,
+            vec![
+                ("/manifest.json".to_string(), 200, manifest_bytes),
+                ("/1.21.1.json".to_string(), 200, new_meta_bytes.clone()),
+            ],
+            2,
+        ));
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("build test client");
+        let loaded = instance
+            .refresh_and_load_metadata_from_url(
+                &client,
+                &manifest_url,
+                &dirs,
+                DownloadSource::Official,
+            )
+            .await
+            .expect("refresh_and_load_metadata should succeed");
+
+        let requested = server.await.expect("join mock server");
+        assert_eq!(requested, vec!["/manifest.json", "/1.21.1.json"]);
+
+        // Returned metadata should contain both the refreshed vanilla field and the loader patch
+        assert_eq!(loaded.assets.as_deref(), Some("24"));
+        assert_eq!(
+            loaded.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
+        assert_eq!(loaded.libraries.len(), 2);
+
+        // Disk <id>.json should be updated to the refreshed vanilla metadata
+        let persisted: VersionMetadata = serde_json::from_slice(
+            &fs::read(instance.version_json()).expect("read updated version json"),
+        )
+        .expect("parse updated version json");
+        assert_eq!(persisted.assets.as_deref(), Some("24"));
+    }
+
+    #[tokio::test]
+    async fn test_refresh_and_load_metadata_skips_download_when_sha1_matches() {
+        let temp = TempDirGuard::new("refresh_meta_sha1_match");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+        let instance =
+            save_test_instance("inst_cached", "Cached Inst", "1.21.1", &dirs.versions_dir());
+
+        let local_meta = sample_version_metadata();
+        let local_bytes = serde_json::to_vec(&local_meta).expect("serialize local metadata");
+        let local_sha1 = sha1_hex(&local_bytes);
+        fs::write(instance.version_json(), &local_bytes).expect("write local metadata");
+        write_sample_loader_patch(&instance);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let addr = listener.local_addr().expect("get local addr");
+        let manifest_url = format!("http://{addr}/manifest.json");
+
+        let manifest_bytes = serde_json::to_vec(&serde_json::json!({
+            "latest": { "release": "1.21.1", "snapshot": "1.21.1" },
+            "versions": [{
+                "id": "1.21.1",
+                "type": "release",
+                "url": "http://127.0.0.1:9/unused-metadata.json",
+                "time": "2026-01-01T00:00:00+00:00",
+                "releaseTime": "2026-01-01T00:00:00+00:00",
+                "sha1": local_sha1,
+                "complianceLevel": 1
+            }]
+        }))
+        .expect("serialize manifest");
+
+        let server = tokio::spawn(serve_mock_http_requests(
+            listener,
+            vec![("/manifest.json".to_string(), 200, manifest_bytes)],
+            1,
+        ));
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("build test client");
+        let loaded = instance
+            .refresh_and_load_metadata_from_url(
+                &client,
+                &manifest_url,
+                &dirs,
+                DownloadSource::Official,
+            )
+            .await
+            .expect("should load local verified metadata without fetching remote metadata");
+
+        let requested = server.await.expect("join mock server");
+        assert_eq!(requested, vec!["/manifest.json"]);
+        assert_eq!(
+            loaded.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
+        assert_eq!(loaded.libraries.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_refresh_and_load_metadata_falls_back_when_version_missing_from_manifest() {
+        let temp = TempDirGuard::new("refresh_meta_missing_ver");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+        let instance = save_test_instance(
+            "inst_custom_ver",
+            "Custom Version Inst",
+            "1.21.1-custom",
+            &dirs.versions_dir(),
+        );
+
+        let local_meta = sample_version_metadata();
+        fs::write(
+            instance.version_json(),
+            serde_json::to_vec(&local_meta).expect("serialize local metadata"),
+        )
+        .expect("write local metadata");
+        write_sample_loader_patch(&instance);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let addr = listener.local_addr().expect("get local addr");
+        let manifest_url = format!("http://{addr}/manifest.json");
+
+        let manifest_bytes = serde_json::to_vec(&serde_json::json!({
+            "latest": { "release": "1.21.4", "snapshot": "1.21.4" },
+            "versions": [{
+                "id": "1.21.4",
+                "type": "release",
+                "url": "http://127.0.0.1:9/1.21.4.json",
+                "time": "2026-01-01T00:00:00+00:00",
+                "releaseTime": "2026-01-01T00:00:00+00:00",
+                "sha1": "0000000000000000000000000000000000000000",
+                "complianceLevel": 1
+            }]
+        }))
+        .expect("serialize manifest");
+
+        let server = tokio::spawn(serve_mock_http_requests(
+            listener,
+            vec![("/manifest.json".to_string(), 200, manifest_bytes)],
+            1,
+        ));
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("build test client");
+        let loaded = instance
+            .refresh_and_load_metadata_from_url(
+                &client,
+                &manifest_url,
+                &dirs,
+                DownloadSource::Official,
+            )
+            .await
+            .expect("should fall back to local metadata when version is not in manifest");
+
+        let requested = server.await.expect("join mock server");
+        assert_eq!(requested, vec!["/manifest.json"]);
+        assert_eq!(loaded.id, local_meta.id);
+        assert_eq!(
+            loaded.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_refresh_and_load_metadata_falls_back_on_network_error() {
+        let temp = TempDirGuard::new("refresh_meta_net_err");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+        let instance = save_test_instance(
+            "inst_offline",
+            "Offline Inst",
+            "1.21.1",
+            &dirs.versions_dir(),
+        );
+
+        let local_meta = sample_version_metadata();
+        fs::write(
+            instance.version_json(),
+            serde_json::to_vec(&local_meta).expect("serialize local metadata"),
+        )
+        .expect("write local metadata");
+        write_sample_loader_patch(&instance);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let addr = listener.local_addr().expect("get local addr");
+        let manifest_url = format!("http://{addr}/manifest.json");
+
+        let server = tokio::spawn(serve_mock_http_requests(
+            listener,
+            vec![("/manifest.json".to_string(), 500, b"server error".to_vec())],
+            1,
+        ));
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("build test client");
+        let loaded = instance
+            .refresh_and_load_metadata_from_url(
+                &client,
+                &manifest_url,
+                &dirs,
+                DownloadSource::Official,
+            )
+            .await
+            .expect("should fall back to local metadata on HTTP error");
+
+        let requested = server.await.expect("join mock server");
+        assert_eq!(requested, vec!["/manifest.json"]);
+        assert_eq!(loaded.id, local_meta.id);
+        assert_eq!(
+            loaded.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_refresh_and_load_metadata_propagates_loader_patch_error() {
+        let temp = TempDirGuard::new("refresh_meta_bad_loader");
+        let dirs = LauncherDirs::with_paths(
+            temp.path().join("config"),
+            temp.path().join("data"),
+            temp.path().join("cache"),
+        );
+        let instance = save_test_instance(
+            "inst_bad_loader",
+            "Bad Loader Inst",
+            "1.21.1",
+            &dirs.versions_dir(),
+        );
+
+        let local_meta = sample_version_metadata();
+        let local_bytes = serde_json::to_vec(&local_meta).expect("serialize local metadata");
+        let local_sha1 = sha1_hex(&local_bytes);
+        fs::write(instance.version_json(), &local_bytes).expect("write local metadata");
+        fs::write(instance.loader_json(), b"{ invalid loader json").expect("write invalid loader");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let addr = listener.local_addr().expect("get local addr");
+        let manifest_url = format!("http://{addr}/manifest.json");
+
+        let manifest_bytes = serde_json::to_vec(&serde_json::json!({
+            "latest": { "release": "1.21.1", "snapshot": "1.21.1" },
+            "versions": [{
+                "id": "1.21.1",
+                "type": "release",
+                "url": "http://127.0.0.1:9/unused.json",
+                "time": "2026-01-01T00:00:00+00:00",
+                "releaseTime": "2026-01-01T00:00:00+00:00",
+                "sha1": local_sha1,
+                "complianceLevel": 1
+            }]
+        }))
+        .expect("serialize manifest");
+
+        let server = tokio::spawn(serve_mock_http_requests(
+            listener,
+            vec![("/manifest.json".to_string(), 200, manifest_bytes)],
+            1,
+        ));
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("build test client");
+        let err = instance
+            .refresh_and_load_metadata_from_url(
+                &client,
+                &manifest_url,
+                &dirs,
+                DownloadSource::Official,
+            )
+            .await
+            .expect_err("corrupted loader.json should return error");
+
+        let _ = server.await.expect("join mock server");
+        assert!(matches!(err, CoreError::Json(_)));
+    }
 }

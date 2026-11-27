@@ -118,6 +118,34 @@ mod tests {
     }
 
     #[test]
+    fn test_compare_maven_rules_mojang_qualifier() {
+        assert_eq!(
+            compare_maven_rules("3.3.3-mojang-2.15.0", "3.3.3"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.3", "3.3.3-mojang-2.15.0"),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.3-mojang-2.15.0", "3.3.3-sp"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.3-mojang-2.15.0", "3.3.3-mojang-2.14.2"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.4", "3.3.3-mojang-2.15.0"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare_maven_rules("3.3.3-MOJANG-2.15.0", "3.3.3"),
+            Some(Ordering::Greater)
+        );
+    }
+
+    #[test]
     fn test_compare_maven_rules_prereleases() {
         assert_eq!(
             compare_maven_rules("1.0", "1.0-alpha"),

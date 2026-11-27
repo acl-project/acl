@@ -1253,6 +1253,21 @@ mod tests {
     }
 
     #[test]
+    fn test_home_cmd_output_show_toast_and_freetype_warning_i18n() {
+        let msg = t!(
+            "launch-warning-vulnerable-freetype",
+            "This version uses an unpatched FreeType library; avoid untrusted server resource packs"
+        );
+        assert_eq!(
+            msg,
+            "This version uses an unpatched FreeType library; avoid untrusted server resource packs"
+        );
+
+        let cmd = HomeCmdOutput::ShowToast(msg.clone());
+        assert_eq!(format!("{cmd:?}"), format!("ShowToast({msg:?})"));
+    }
+
+    #[test]
     fn test_active_instance_index_calculation() {
         let compute =
             |instances: &[acl_core::instance::Instance], active_id: Option<&str>| -> u32 {

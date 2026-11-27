@@ -1885,4 +1885,226 @@ mod tests {
             ]
         );
     }
+
+    fn make_test_metadata(libraries: Vec<Library>) -> VersionMetadata {
+        VersionMetadata {
+            id: "1.21.1".to_string(),
+            version_type: VersionType::Release,
+            main_class: "net.minecraft.client.main.Main".to_string(),
+            arguments: None,
+            minecraft_arguments: None,
+            assets: None,
+            asset_index: AssetIndexInfo {
+                id: "17".to_string(),
+                sha1: "abc".to_string(),
+                size: 10,
+                total_size: 20,
+                url: "https://example.com".to_string(),
+            },
+            downloads: VersionDownloads {
+                client: DownloadFile {
+                    sha1: "sha_client".to_string(),
+                    size: 1000,
+                    url: "https://example.com/client.jar".to_string(),
+                },
+                server: None,
+            },
+            java_version: None,
+            libraries,
+        }
+    }
+
+    fn make_modern_linux_native(name: &str, path: &str) -> Library {
+        Library {
+            name: name.to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some(path.to_string()),
+                    sha1: "sha_dummy".to_string(),
+                    size: 100,
+                    url: "https://example.com/native.jar".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: None,
+            extract: None,
+            url: None,
+            sha1: None,
+            size: None,
+        }
+    }
+
+    fn make_legacy_linux_native(name: &str, path: &str) -> Library {
+        let mut natives = HashMap::new();
+        natives.insert("linux".to_string(), "natives-linux".to_string());
+
+        let mut classifiers = HashMap::new();
+        classifiers.insert(
+            "natives-linux".to_string(),
+            LibraryArtifact {
+                path: Some(path.to_string()),
+                sha1: "sha_dummy".to_string(),
+                size: 100,
+                url: "https://example.com/native.jar".to_string(),
+            },
+        );
+
+        Library {
+            name: name.to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: None,
+                classifiers: Some(classifiers),
+            }),
+            natives: Some(natives),
+            rules: None,
+            extract: None,
+            url: None,
+            sha1: None,
+            size: None,
+        }
+    }
+
+    #[test]
+    fn test_native_archives_version_deduplication() {
+        let libraries_dir = Path::new("/mock/libraries");
+
+        let freetype_old = make_modern_linux_native(
+            "org.lwjgl:lwjgl-freetype:3.3.3:natives-linux",
+            "org/lwjgl/lwjgl-freetype/3.3.3/lwjgl-freetype-3.3.3-natives-linux.jar",
+        );
+        let freetype_patched = make_modern_linux_native(
+            "org.lwjgl:lwjgl-freetype:3.3.3-mojang-2.15.0:natives-linux",
+            "org/lwjgl/lwjgl-freetype/3.3.3-mojang-2.15.0/lwjgl-freetype-3.3.3-mojang-2.15.0-natives-linux.jar",
+        );
+        // Same latest version with a distinct path should still be deduplicated by key
+        let freetype_patched_alt_path = make_modern_linux_native(
+            "org.lwjgl:lwjgl-freetype:3.3.3-mojang-2.15.0:natives-linux",
+            "alt/lwjgl-freetype-3.3.3-mojang-2.15.0-natives-linux.jar",
+        );
+        let legacy_old = make_legacy_linux_native(
+            "org.lwjgl:lwjgl-platform:2.9.4",
+            "org/lwjgl/lwjgl-platform/2.9.4/lwjgl-platform-2.9.4-natives-linux.jar",
+        );
+        let legacy_new = make_legacy_linux_native(
+            "org.lwjgl:lwjgl-platform:2.9.5",
+            "org/lwjgl/lwjgl-platform/2.9.5/lwjgl-platform-2.9.5-natives-linux.jar",
+        );
+        // Invalid Maven coordinate (fewer than 3 segments) should be skipped
+        let invalid_native = make_legacy_linux_native("invalid-coord", "invalid/native.jar");
+
+        // 1. Older declared before newer
+        let meta_old_first = make_test_metadata(vec![
+            freetype_old.clone(),
+            freetype_patched.clone(),
+            freetype_patched_alt_path,
+            legacy_old.clone(),
+            legacy_new.clone(),
+            invalid_native,
+        ]);
+        let archives = meta_old_first.native_archives(libraries_dir);
+        assert_eq!(archives.len(), 2);
+        assert_eq!(
+            archives[0].name,
+            "org.lwjgl:lwjgl-freetype:3.3.3-mojang-2.15.0:natives-linux"
+        );
+        assert_eq!(
+            archives[0].archive_path,
+            libraries_dir.join(
+                "org/lwjgl/lwjgl-freetype/3.3.3-mojang-2.15.0/lwjgl-freetype-3.3.3-mojang-2.15.0-natives-linux.jar"
+            )
+        );
+        assert_eq!(
+            archives[1].name,
+            "org.lwjgl:lwjgl-platform:2.9.5:natives-linux"
+        );
+
+        // 2. Newer declared before older (e.g. vanilla patched + loader pinning older version)
+        let meta_new_first = make_test_metadata(vec![freetype_patched, freetype_old]);
+        let archives_rev = meta_new_first.native_archives(libraries_dir);
+        assert_eq!(archives_rev.len(), 1);
+        assert_eq!(
+            archives_rev[0].name,
+            "org.lwjgl:lwjgl-freetype:3.3.3-mojang-2.15.0:natives-linux"
+        );
+    }
+
+    #[test]
+    fn test_vulnerable_freetype_version() {
+        let check = |version: &str| -> Option<String> {
+            let lib = make_modern_linux_native(
+                &format!("org.lwjgl:lwjgl-freetype:{version}:natives-linux"),
+                &format!(
+                    "org/lwjgl/lwjgl-freetype/{version}/lwjgl-freetype-{version}-natives-linux.jar"
+                ),
+            );
+            make_test_metadata(vec![lib]).vulnerable_freetype_version()
+        };
+
+        // Unpatched LWJGL versions
+        assert_eq!(check("3.3.3"), Some("3.3.3".to_string()));
+        assert_eq!(check("3.4.3"), Some("3.4.3".to_string()));
+
+        // Patched upstream LWJGL version
+        assert_eq!(check("3.4.4"), None);
+
+        // Mojang-patched FreeType versions
+        assert_eq!(
+            check("3.3.3-mojang-2.14.2"),
+            Some("3.3.3-mojang-2.14.2".to_string())
+        );
+        assert_eq!(check("3.3.3-mojang-2.15.0"), None);
+        assert_eq!(check("3.3.3-mojang-2.15.1"), None);
+
+        // Metadata without lwjgl-freetype
+        let no_freetype = make_test_metadata(vec![make_modern_linux_native(
+            "org.lwjgl:lwjgl:3.3.3:natives-linux",
+            "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar",
+        )]);
+        assert_eq!(no_freetype.vulnerable_freetype_version(), None);
+
+        // Non-Linux lwjgl-freetype should be ignored
+        let windows_freetype = make_test_metadata(vec![Library {
+            name: "org.lwjgl:lwjgl-freetype:3.3.3:natives-windows".to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryArtifact {
+                    path: Some(
+                        "org/lwjgl/lwjgl-freetype/3.3.3/lwjgl-freetype-3.3.3-natives-windows.jar"
+                            .to_string(),
+                    ),
+                    sha1: "sha_win".to_string(),
+                    size: 100,
+                    url: "https://example.com/win.jar".to_string(),
+                }),
+                classifiers: None,
+            }),
+            natives: None,
+            rules: Some(vec![Rule {
+                action: RuleAction::Allow,
+                os: Some(OsRule {
+                    name: Some("windows".to_string()),
+                    arch: None,
+                }),
+                features: None,
+            }]),
+            extract: None,
+            url: None,
+            sha1: None,
+            size: None,
+        }]);
+        assert_eq!(windows_freetype.vulnerable_freetype_version(), None);
+
+        // Deduplication selects patched version when both unpatched and patched exist
+        let mixed = make_test_metadata(vec![
+            make_modern_linux_native(
+                "org.lwjgl:lwjgl-freetype:3.3.3:natives-linux",
+                "org/lwjgl/lwjgl-freetype/3.3.3/lwjgl-freetype-3.3.3-natives-linux.jar",
+            ),
+            make_modern_linux_native(
+                "org.lwjgl:lwjgl-freetype:3.3.3-mojang-2.15.0:natives-linux",
+                "org/lwjgl/lwjgl-freetype/3.3.3-mojang-2.15.0/lwjgl-freetype-3.3.3-mojang-2.15.0-natives-linux.jar",
+            ),
+        ]);
+        assert_eq!(mixed.vulnerable_freetype_version(), None);
+    }
 }
