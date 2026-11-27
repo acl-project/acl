@@ -14,3 +14,8 @@ popover.folder-menu button,
 popover.folder-menu label {
     font-weight: normal;
 }
+
+/* Rounded corners for project icons in the download browser. */
+image.project-icon {
+    border-radius: 12px;
+}

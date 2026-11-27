@@ -7,7 +7,11 @@ use acl_core::LauncherConfig;
 use acl_minecraft::{
     AssetFilterState, AssetItemData, ProjectHost, ProjectType, SearchIndex, curseforge, modrinth,
 };
-use gtk::{glib::BoxedAnyObject, pango, prelude::*};
+use gtk::{
+    glib::{self, BoxedAnyObject},
+    pango,
+    prelude::*,
+};
 
 use relm4::{
     Component, ComponentParts, ComponentSender, RelmWidgetExt, SharedState, adw,
@@ -15,17 +19,25 @@ use relm4::{
 };
 use tracing::error;
 
-use crate::{i18n::LocalizeError, pages::LoadState, t};
+use crate::{
+    i18n::LocalizeError,
+    icon_cache::{CacheLookup, IconCache},
+    pages::LoadState,
+    t,
+};
 
 const PAGE_LIMIT: u32 = 20;
 const CURSEFORGE_MAX_RESULTS: u32 = 10_000;
 #[derive(Debug, Clone)]
 pub struct AssetRowItem {
     data: AssetItemData,
+    icon_cache: Arc<IconCache>,
 }
 
 pub struct AssetRowWidgets {
     icon: gtk::Image,
+    /// There's no need to use a generation count and fight the Rust borrow checker.
+    icon_task: Option<glib::JoinHandle<()>>,
     title: gtk::Label,
     author: gtk::Label,
     description: gtk::Label,
@@ -54,12 +66,14 @@ impl RelmListItem for AssetRowItem {
                 set_spacing: 12,
                 set_margin_all: 10,
 
-                // Left: project icon (48x48)
+                // Left: project icon (64x64)
                 #[name = "icon"]
                 gtk::Image {
                     set_icon_name: Some("application-x-addon-symbolic"),
-                    set_pixel_size: 48,
+                    set_pixel_size: 64,
                     set_valign: gtk::Align::Center,
+                    set_overflow: gtk::Overflow::Hidden,
+                    add_css_class: "project-icon",
                 },
 
                 // Middle: Title + Author /Introduction /Category Tags
@@ -145,6 +159,7 @@ impl RelmListItem for AssetRowItem {
             root,
             AssetRowWidgets {
                 icon,
+                icon_task: None,
                 title,
                 author,
                 description,
@@ -155,6 +170,10 @@ impl RelmListItem for AssetRowItem {
     }
 
     fn bind(&mut self, widgets: &mut Self::Widgets, _root: &mut Self::Root) {
+        if let Some(handle) = widgets.icon_task.take() {
+            handle.abort();
+        }
+
         widgets.title.set_label(&self.data.title);
         // Hide if there is no author (does this actually happen?)
         if self.data.author.is_empty() {
@@ -180,7 +199,41 @@ impl RelmListItem for AssetRowItem {
         widgets
             .downloads
             .set_label(&format_downloads(self.data.downloads));
-        // placeholder icon
+
+        const PLACEHOLDER_ICON: &str = "application-x-addon-symbolic";
+
+        if let Some(url) = self.data.icon_url.as_deref().filter(|u| !u.is_empty()) {
+            match self.icon_cache.get(url) {
+                CacheLookup::Hit(tex) => widgets.icon.set_paintable(Some(&tex)),
+                CacheLookup::Failed => widgets.icon.set_icon_name(Some(PLACEHOLDER_ICON)),
+                CacheLookup::Miss => {
+                    widgets.icon.set_icon_name(Some(PLACEHOLDER_ICON));
+                    let cache = Arc::clone(&self.icon_cache);
+                    let url = url.to_string();
+                    let icon_weak = widgets.icon.downgrade();
+
+                    widgets.icon_task = Some(glib::spawn_future_local(async move {
+                        let texture = relm4::spawn(async move { cache.load(&url).await })
+                            .await
+                            .ok()
+                            .flatten();
+
+                        if let (Some(icon), Some(tex)) = (icon_weak.upgrade(), texture) {
+                            icon.set_paintable(Some(&tex));
+                        }
+                    }));
+                }
+            }
+        } else {
+            // placeholder icon
+            widgets.icon.set_icon_name(Some(PLACEHOLDER_ICON));
+        }
+    }
+
+    fn unbind(&mut self, widgets: &mut Self::Widgets, _root: &mut Self::Root) {
+        if let Some(handle) = widgets.icon_task.take() {
+            handle.abort();
+        }
         widgets
             .icon
             .set_icon_name(Some("application-x-addon-symbolic"));
@@ -196,6 +249,7 @@ pub struct BrowserPage {
     list_view: TypedListView<AssetRowItem, gtk::SingleSelection>,
     state: LoadState,
     request_id: u64,
+    icon_cache: Arc<IconCache>,
 }
 
 pub struct BrowserInit {
@@ -203,6 +257,7 @@ pub struct BrowserInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
     pub cache_dir: PathBuf,
+    pub icon_cache: Arc<IconCache>,
 }
 
 #[derive(Debug)]
@@ -644,6 +699,7 @@ impl Component for BrowserPage {
             list_view,
             state: LoadState::Idle,
             request_id: 0,
+            icon_cache: init.icon_cache,
         };
 
         let widgets = view_output!();
@@ -732,7 +788,10 @@ impl Component for BrowserPage {
                         self.total_hits = total_hits;
                         self.list_view.clear();
                         self.list_view
-                            .extend_from_iter(items.into_iter().map(|data| AssetRowItem { data }));
+                            .extend_from_iter(items.into_iter().map(|data| AssetRowItem {
+                                data,
+                                icon_cache: Arc::clone(&self.icon_cache),
+                            }));
                         // Scroll the list back to the top
                         if let Some(adj) = self.list_view.view.vadjustment() {
                             adj.set_value(0.0);

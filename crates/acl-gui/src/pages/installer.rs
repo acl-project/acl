@@ -11,7 +11,7 @@ pub mod version_select;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use acl_core::{
@@ -22,6 +22,7 @@ use acl_minecraft::{
     VersionEntry, curseforge, modrinth,
 };
 
+use parking_lot::Mutex;
 use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, SharedState,
 };
@@ -277,12 +278,7 @@ pub struct InstallerPage {
 
 impl InstallerPage {
     fn validate_new_instance(&self, name: &str) -> Result<(), String> {
-        // You have poisoning and I am poisoned
-        if self
-            .active_install
-            .lock()
-            .map_or(true, |active| active.is_some())
-        {
+        if self.active_install.lock().is_some() {
             return Err(t!(
                 "instances-create-error-active-install",
                 "Another installation is already in progress"

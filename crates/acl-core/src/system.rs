@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::sync::{Mutex, OnceLock};
+use parking_lot::Mutex;
+use std::sync::OnceLock;
 use sysinfo::System;
 use tracing::error;
 /// Make system information a singleton.
@@ -24,9 +25,8 @@ pub fn memory_info() -> MemoryInfo {
         }
     });
 
-    if let Some(mutex) = sys.as_ref()
-        && let Ok(mut guard) = mutex.lock()
-    {
+    if let Some(mutex) = sys.as_ref() {
+        let mut guard = mutex.lock();
         guard.refresh_memory();
         MemoryInfo {
             total: guard.total_memory(),

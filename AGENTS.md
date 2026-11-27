@@ -34,7 +34,8 @@ When reviewing the code, follow these guidelines:
 - Ensure that all comments and log messages are written in English.
 - Verify that changes are being made on a branch other than `main`.
 - Ensure that branch names follow the `feat/` or `fix/` naming conventions, as appropriate.
-- Production code must not contain code that can cause crashes, such as unwrap/expect/panic!, direct slice indexing, raw arithmetic, etc.
+- Production code must avoid fallible operations that can panic at runtime (e.g., `unwrap`/`expect`/`panic!`, out-of-bounds slice indexing, division by zero, or integer overflow on untrusted/unbounded inputs).
+  - Do **not** blindly replace standard arithmetic (`+`, `-`, `*`, `/`) with `checked_*` / `saturating_*` or use `try_into()` when operands are compile-time constants or statically guaranteed to fit (e.g., `96 * 96`, `96_u32 as i32`, or values already bounds-checked). Reserve checked arithmetic and fallible conversions strictly for external, user-supplied, or unbounded runtime values.
 - Check for any files that are missing a copyright notice, or whose copyright notice format is incorrect.
 - It is strictly forbidden to read sensitive information, including files such as .cargo/config.toml.
 

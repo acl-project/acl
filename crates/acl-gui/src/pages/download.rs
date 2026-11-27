@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::icon_cache::IconCache;
 use crate::pages::download::browser::{BrowserInit, BrowserInput, BrowserOutput, BrowserPage};
 use crate::pages::download::game::{GameInit, GameInput, GameOutput, GamePage};
 use crate::t;
@@ -91,6 +92,7 @@ pub struct DownloadInit {
     pub config: Arc<SharedState<LauncherConfig>>,
     pub client: reqwest::Client,
     pub cache_dir: PathBuf,
+    pub icon_cache: Arc<IconCache>,
 }
 
 #[derive(Debug)]
@@ -202,6 +204,7 @@ impl SimpleComponent for DownloadPage {
                     config: Arc::clone(&init.config),
                     client: init.client.clone(),
                     cache_dir: init.cache_dir.clone(),
+                    icon_cache: Arc::clone(&init.icon_cache),
                 })
                 .forward(sender.input_sender(), |msg| match msg {
                     BrowserOutput::Selected(item) => DownloadInput::SelectAsset(item),
