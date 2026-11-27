@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::{path::PathBuf, sync::Arc};
 
 use acl_core::{
     CoreError, Instance, LauncherConfig, LauncherDirs, ModLoader, launch,
@@ -19,6 +16,7 @@ use acl_minecraft::{
     forge::{self, ForgeManifest, ModernInstallProfile, NeoForgeManifest},
 };
 
+use parking_lot::Mutex;
 use relm4::{SharedState, tokio};
 use tracing::warn;
 
@@ -200,7 +198,7 @@ impl InstallGuard {
         active_install: &Arc<Mutex<Option<String>>>,
         instance: &Instance,
     ) -> Result<Self, String> {
-        let mut active = active_install.lock().unwrap_or_else(|e| e.into_inner());
+        let mut active = active_install.lock();
         if active.is_some() {
             return Err(t!(
                 "install-error-already-in-progress",
@@ -231,10 +229,7 @@ impl InstallGuard {
 /// Automatically release active and clean the file if it fails.
 impl Drop for InstallGuard {
     fn drop(&mut self) {
-        let mut active = self
-            .active_install
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut active = self.active_install.lock();
 
         // Only release the slot if it still belongs to this install, preventing a
         // rejected or duplicate task from clearing another running installation's lock.
@@ -900,18 +895,18 @@ mod tests {
             .expect("first install guard should succeed");
         assert!(inst_a.dir.exists());
         assert!(inst_a.has_install_mark());
-        assert_eq!(active_install.lock().unwrap().as_deref(), Some("inst_a"));
+        assert_eq!(active_install.lock().as_deref(), Some("inst_a"));
 
         // Concurrent install while inst_a is active should fail without clearing inst_a's lock.
         let concurrent = InstallGuard::acquire(&active_install, &inst_b);
         assert!(concurrent.is_err());
         assert!(!inst_b.dir.exists());
-        assert_eq!(active_install.lock().unwrap().as_deref(), Some("inst_a"));
+        assert_eq!(active_install.lock().as_deref(), Some("inst_a"));
 
         // Dropping an uncompleted guard removes the marked directory and clears active_install.
         drop(guard);
         assert!(!inst_a.dir.exists());
-        assert_eq!(*active_install.lock().unwrap(), None);
+        assert_eq!(*active_install.lock(), None);
     }
 
     #[test]
@@ -930,7 +925,7 @@ mod tests {
         assert!(err.is_err());
         assert!(existing.dir.exists());
         assert!(existing.config_file().exists());
-        assert_eq!(*active_install.lock().unwrap(), None);
+        assert_eq!(*active_install.lock(), None);
 
         // Completed install clears the mark and preserves the instance directory on drop.
         let completed = Instance::new("completed", "Completed", "1.21.1", temp.path())
@@ -947,6 +942,6 @@ mod tests {
         assert!(completed.dir.exists());
         assert!(completed.config_file().exists());
         assert!(!completed.has_install_mark());
-        assert_eq!(*active_install.lock().unwrap(), None);
+        assert_eq!(*active_install.lock(), None);
     }
 }

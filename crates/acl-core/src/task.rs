@@ -4,12 +4,13 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
 
+use parking_lot::Mutex;
 use tokio::{
     sync::{Notify, broadcast},
     task::AbortHandle,
@@ -142,13 +143,8 @@ impl TaskManager {
         manager
     }
 
-    /// Forcefully take the task inside the lock
-    fn lock_tasks(&self) -> std::sync::MutexGuard<'_, HashMap<TaskId, TaskRecord>> {
-        self.tasks.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
     fn flush_dirty(&self) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let snapshots: Vec<TaskSnapshot> = {
             tasks
                 .values_mut()
@@ -166,7 +162,7 @@ impl TaskManager {
     }
 
     pub fn subscribe(self: &Arc<Self>) -> TaskSubscription {
-        let tasks = self.lock_tasks();
+        let tasks = self.tasks.lock();
         let rx = self.events.subscribe();
         let pending = tasks
             .values()
@@ -228,7 +224,7 @@ impl TaskManager {
             .abort_handle()
         });
 
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let abort_handle = spawn();
         let _ = self.events.send(TaskEvent::Upsert(snapshot.clone()));
         tasks.insert(
@@ -246,7 +242,7 @@ impl TaskManager {
     }
 
     fn finish(&self, id: TaskId, result: Result<(), String>) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let Some(record) = tasks.get_mut(&id) else {
             return;
         };
@@ -282,7 +278,7 @@ impl TaskManager {
     }
 
     pub fn cancel(&self, id: TaskId) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let Some(record) = tasks.get_mut(&id) else {
             return;
         };
@@ -306,7 +302,7 @@ impl TaskManager {
     }
 
     pub fn retry(&self, id: TaskId) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let Some(record) = tasks.get_mut(&id) else {
             return;
         };
@@ -334,7 +330,7 @@ impl TaskManager {
     }
 
     pub fn remove(&self, id: TaskId) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let can_remove = tasks
             .get(&id)
             .is_some_and(|record| record.snapshot.state.is_finished());
@@ -344,7 +340,7 @@ impl TaskManager {
     }
 
     pub fn clear_finished(&self) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let finished_ids: Vec<TaskId> = tasks
             .iter()
             .filter(|(_, record)| record.snapshot.state.is_finished())
@@ -359,7 +355,7 @@ impl TaskManager {
     }
 
     pub fn start_stage(&self, id: TaskId, stage_idx: usize) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let Some(record) = tasks.get_mut(&id) else {
             return;
         };
@@ -389,7 +385,7 @@ impl TaskManager {
         total: u64,
         bytes_per_sec: Option<u64>,
     ) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
         let Some(record) = tasks.get_mut(&id) else {
             return;
         };
@@ -410,7 +406,7 @@ impl TaskManager {
     }
 
     pub fn set_stage_unit(&self, id: TaskId, stage_idx: usize, unit: ProgressUnit) {
-        let mut tasks = self.lock_tasks();
+        let mut tasks = self.tasks.lock();
 
         let Some(record) = tasks.get_mut(&id) else {
             return;
@@ -454,7 +450,7 @@ impl TaskSubscription {
             match self.rx.recv().await {
                 Ok(ev) => return Some(ev),
                 Err(broadcast::error::RecvError::Lagged(_)) => {
-                    let tasks = self.manager.lock_tasks();
+                    let tasks = self.manager.tasks.lock();
                     self.pending.extend(
                         tasks
                             .values()
@@ -469,6 +465,8 @@ impl TaskSubscription {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::Mutex;
+
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize};
 
@@ -507,7 +505,7 @@ mod tests {
                 async move {
                     mgr.start_stage(id, 0);
                     mgr.start_stage(id, 1);
-                    let rx = done_rx.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    let rx = done_rx.lock().take();
                     if let Some(rx) = rx {
                         let _ = rx.await;
                     }
@@ -689,7 +687,7 @@ mod tests {
         tm.finish(task_id, Ok(()));
         tm.finish(task_id, Err("late error".to_string()));
         tm.cancel(task_id);
-        let tasks = tm.lock_tasks();
+        let tasks = tm.tasks.lock();
         assert_eq!(
             tasks.get(&task_id).map(|r| &r.snapshot.state),
             Some(&TaskState::Cancelled)
@@ -738,7 +736,7 @@ mod tests {
 
         // Removing a running task must be ignored.
         tm.remove(running_id);
-        assert!(tm.lock_tasks().contains_key(&running_id));
+        assert!(tm.tasks.lock().contains_key(&running_id));
 
         let done_id_1 = tm.submit("Done 1", vec![], |_, _| async { Ok(()) });
         let done_id_2 = tm.submit("Done 2", vec![], |_, _| async { Err("fail".to_string()) });
@@ -765,7 +763,7 @@ mod tests {
                 break;
             }
         }
-        assert!(!tm.lock_tasks().contains_key(&done_id_1));
+        assert!(!tm.tasks.lock().contains_key(&done_id_1));
 
         tm.clear_finished();
         loop {
@@ -775,8 +773,8 @@ mod tests {
                 break;
             }
         }
-        assert!(!tm.lock_tasks().contains_key(&done_id_2));
-        assert!(tm.lock_tasks().contains_key(&running_id));
+        assert!(!tm.tasks.lock().contains_key(&done_id_2));
+        assert!(tm.tasks.lock().contains_key(&running_id));
 
         running_release.notify_one();
         loop {
@@ -799,7 +797,8 @@ mod tests {
         // Wait until the pre-existing task completes before subscribing.
         for _ in 0..50 {
             let done = tm
-                .lock_tasks()
+                .tasks
+                .lock()
                 .get(&existing_id)
                 .is_some_and(|r| r.snapshot.state == TaskState::Succeeded);
             if done {

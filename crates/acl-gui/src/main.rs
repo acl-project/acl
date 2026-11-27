@@ -4,6 +4,7 @@
 pub mod app;
 pub mod i18n;
 pub mod i18n_errors_gen;
+pub mod icon_cache;
 pub mod install;
 pub mod pages;
 pub mod widgets;

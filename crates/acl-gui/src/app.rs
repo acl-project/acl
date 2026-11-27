@@ -1,15 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The Adwaita Craft Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{
-    path::PathBuf,
-    str::FromStr,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 use crate::{
     i18n::{LocalizeError, apply_language},
+    icon_cache::IconCache,
     install::{
         InstallContext, ModpackInstallSource, spawn_asset_download, spawn_install,
         spawn_modpack_install,
@@ -36,6 +32,7 @@ use acl_minecraft::{AssetItemData, AssetVersion, ModpackManifest, VersionEntry};
 use adw::prelude::*;
 use gtk::prelude::*;
 use libadwaita::NavigationPage;
+use parking_lot::Mutex;
 use relm4::{SharedState, prelude::*};
 
 use acl_auth::AccountStore;
@@ -449,6 +446,8 @@ impl SimpleComponent for AppModel {
 
         let active_install: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
+        let icon_cache = Arc::new(IconCache::new(client.clone(), dirs.cache_dir()));
+
         // Initialize ui widgets
 
         let ms_login = MsLoginDialog::builder()
@@ -534,6 +533,7 @@ impl SimpleComponent for AppModel {
                 config: Arc::clone(&config_state),
                 client: client.clone(),
                 cache_dir: dirs.cache_dir().to_path_buf(),
+                icon_cache,
             })
             .forward(sender.input_sender(), |msg| match msg {
                 DownloadOutput::Back => AppMsg::CloseDownload,
