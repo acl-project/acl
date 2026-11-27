@@ -673,8 +673,6 @@ pub async fn fetch_files_batch_with_cache(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use acl_common::hash::url_sha1;
-
     use super::*;
     use std::collections::HashMap;
     use std::fs;
@@ -1266,7 +1264,9 @@ pub(crate) mod tests {
             },
         };
 
-        let cache_file = temp.path().join(url_sha1(&params.url()));
+        let cache_file = temp
+            .path()
+            .join(crate::cache::cache_key_for_url(&params.url()));
         crate::cache::Cached::new(expected.clone(), DEFAULT_SEARCH_TTL)
             .expect("create search cache")
             .save_to_file(&cache_file)
@@ -1337,7 +1337,7 @@ pub(crate) mod tests {
                 index,
                 ModFile::FILES_PAGE_SIZE,
             );
-            let cache_file = temp.path().join(url_sha1(&url));
+            let cache_file = temp.path().join(crate::cache::cache_key_for_url(&url));
             crate::cache::Cached::new(resp.clone(), DEFAULT_SEARCH_TTL)
                 .expect("create page cache")
                 .save_to_file(&cache_file)
@@ -1379,7 +1379,11 @@ pub(crate) mod tests {
         };
         crate::cache::Cached::new(empty_resp, DEFAULT_SEARCH_TTL)
             .expect("create empty page cache")
-            .save_to_file(&temp.path().join(url_sha1(&empty_url)))
+            .save_to_file(
+                &temp
+                    .path()
+                    .join(crate::cache::cache_key_for_url(&empty_url)),
+            )
             .expect("save empty page cache");
 
         let empty_loaded =
@@ -1431,7 +1435,9 @@ pub(crate) mod tests {
         ] {
             let body = serde_json::json!({ "modIds": chunk });
             let cache_seed = format!("POST:{url}:{body}");
-            let cache_file = temp.path().join(url_sha1(&cache_seed));
+            let cache_file = temp
+                .path()
+                .join(crate::cache::cache_key_for_url(&cache_seed));
             let resp = DataResponse {
                 data: vec![sample_mod_info(sample_id, name)],
             };
@@ -1486,7 +1492,9 @@ pub(crate) mod tests {
         for (chunk, sample_id) in [(&chunk1, 1001_u64), (&chunk2, 1203_u64)] {
             let body = serde_json::json!({ "fileIds": chunk });
             let cache_seed = format!("POST:{url}:{body}");
-            let cache_file = temp.path().join(url_sha1(&cache_seed));
+            let cache_file = temp
+                .path()
+                .join(crate::cache::cache_key_for_url(&cache_seed));
             let resp = DataResponse {
                 data: vec![sample_mod_file(sample_id, 238_222)],
             };

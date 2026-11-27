@@ -678,7 +678,7 @@ impl Instance {
 
 #[cfg(test)]
 mod tests {
-    use acl_common::hash::url_sha1;
+    use acl_common::hash::sha1_hex;
 
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1254,7 +1254,7 @@ mod tests {
         }"#;
 
         fs::write(instance.version_json(), json_payload).expect("failed to write cached metadata");
-        let sha1 = url_sha1(json_payload).trim_end_matches(".json").to_string();
+        let sha1 = sha1_hex(json_payload.as_bytes());
 
         let entry = VersionEntry {
             id: "1.21.1".to_string(),
@@ -1946,13 +1946,6 @@ mod tests {
         let empty_assets = make_asset_index(None);
         inst_missing.ensure_language(Language::SimplifiedChinese, &empty_assets);
         assert!(!inst_missing.game_dir().join("options.txt").exists());
-    }
-
-    fn sha1_hex(bytes: &[u8]) -> String {
-        use sha1::{Digest, Sha1};
-        let mut hasher = Sha1::new();
-        hasher.update(bytes);
-        hex::encode(hasher.finalize())
     }
 
     fn write_sample_loader_patch(instance: &Instance) {

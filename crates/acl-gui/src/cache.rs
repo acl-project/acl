@@ -42,7 +42,7 @@ pub(crate) async fn download_bytes(
         bytes_read = bytes_read.saturating_add(chunk.len());
 
         if bytes_read > max_bytes {
-            debug!("Failed to download {}: download size exceeds limit", url,);
+            debug!("Failed to download {}: download size exceeds limit", url);
             return None;
         }
 

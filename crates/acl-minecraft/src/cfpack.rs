@@ -320,14 +320,12 @@ pub async fn resolve_files(
 
 #[cfg(test)]
 mod tests {
-    use acl_common::hash::url_sha1;
-
     use super::*;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::cache::Cached;
+    use crate::cache::{Cached, cache_key_for_url};
     use crate::curseforge::{CURSEFORGE_API_BASE_URL, DEFAULT_SEARCH_TTL, FileHash};
 
     struct EnvGuard {
@@ -480,7 +478,7 @@ mod tests {
     ) {
         let url = format!("{CURSEFORGE_API_BASE_URL}/{endpoint}");
         let cache_seed = format!("POST:{url}:{body}");
-        let cache_file = cache_dir.join(url_sha1(&cache_seed));
+        let cache_file = cache_dir.join(cache_key_for_url(&cache_seed));
         let resp = TestDataResponse { data };
         Cached::new(resp, DEFAULT_SEARCH_TTL)
             .expect("create batch cache entry")

@@ -233,7 +233,7 @@ impl HomePage {
         }
     }
 
-    // Get access_token; refresh if expired and update username
+    // Get access_token; refresh if expired and update username and skin_url
     pub async fn access_token(
         account: &mut Account,
         client: &reqwest::Client,

@@ -218,6 +218,7 @@ pub enum SkinVariant {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MinecraftSkin {
+    #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub state: SkinState,
@@ -240,7 +241,9 @@ impl MinecraftProfileResponse {
             .iter()
             .find(|s| s.state == SkinState::Active)
             .or_else(|| self.skins.first())
-            .map(|s| s.url.clone())
+            .map(|s| s.url.trim())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
     }
 }
 

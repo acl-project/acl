@@ -78,7 +78,6 @@ impl FactoryComponent for AccountRow {
                 let _ = sender.output(AccountRowOutput::Select(uuid));
             },
 
-            // Reserved avatar icon slot for player skin head
             add_prefix = &gtk::Image {
                 set_pixel_size: 32,
                 set_valign: gtk::Align::Center,

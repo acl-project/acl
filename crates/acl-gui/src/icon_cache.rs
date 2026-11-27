@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use acl_common::hash::url_sha256;
+use acl_common::hash::sha256_hex;
 use gtk::{
     gdk,
     glib::{self, object::Cast},
@@ -175,7 +175,7 @@ impl IconCache {
             CacheLookup::Miss => {}
         }
 
-        let key = url_sha256(url);
+        let key = sha256_hex(url);
         let icon_dir = self.icon_dir.clone();
         let icon_path = icon_dir.join(key);
 
@@ -499,7 +499,7 @@ mod tests {
 
         let url = "http://127.0.0.1:9/offline-fresh-icon.png";
         let png = sample_png_bytes(24, 24, [10, 20, 30, 255]);
-        let disk_path = cache.icon_dir.join(url_sha256(url));
+        let disk_path = cache.icon_dir.join(sha256_hex(url));
         write_file_with_mtime(&disk_path, &png, SystemTime::now());
 
         rt.block_on(async {
@@ -552,7 +552,7 @@ mod tests {
             assert_eq!(first.width(), ICON_DECODE_SIZE as i32);
             assert_eq!(first.height(), ICON_DECODE_SIZE as i32);
 
-            let disk_path = cache.icon_dir.join(url_sha256(&url));
+            let disk_path = cache.icon_dir.join(sha256_hex(&url));
             assert_eq!(fs::read(&disk_path).expect("read cached icon"), png);
 
             let second = cache
@@ -643,7 +643,7 @@ mod tests {
 
             let url_corrupt = format!("http://{addr}/corrupt");
             assert!(cache.load(&url_corrupt).await.is_none());
-            assert!(!cache.icon_dir.join(url_sha256(&url_corrupt)).exists());
+            assert!(!cache.icon_dir.join(sha256_hex(&url_corrupt)).exists());
 
             let url_large_header = format!("http://{addr}/too-large-header");
             assert!(cache.load(&url_large_header).await.is_none());
@@ -674,8 +674,8 @@ mod tests {
             let url_refresh = format!("http://{addr}/refresh.png");
             let url_fallback = format!("http://{addr}/fallback.png");
 
-            let refresh_path = cache.icon_dir.join(url_sha256(&url_refresh));
-            let fallback_path = cache.icon_dir.join(url_sha256(&url_fallback));
+            let refresh_path = cache.icon_dir.join(sha256_hex(&url_refresh));
+            let fallback_path = cache.icon_dir.join(sha256_hex(&url_fallback));
             write_file_with_mtime(&refresh_path, &old_png, stale_mtime);
             write_file_with_mtime(&fallback_path, &old_png, stale_mtime);
 

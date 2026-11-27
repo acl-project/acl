@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use acl_common::hash::url_sha256;
+use acl_common::hash::sha256_hex;
 use gtk::{
     gdk,
     glib::{self, object::Cast},
@@ -65,7 +65,7 @@ impl SkinCache {
             return None;
         }
         let scale = w / 64;
-        if h < 32 * scale {
+        if h != 32 * scale && h != 64 * scale {
             return None;
         }
 
@@ -121,7 +121,7 @@ impl SkinCache {
             return Some(texture);
         }
 
-        let hash = url_sha256(url);
+        let hash = sha256_hex(url);
         let skin_path = self.skin_dir.join(hash);
 
         if let Some(bytes) = Self::read_disk_cache(&skin_path).await
@@ -136,23 +136,23 @@ impl SkinCache {
         }
 
         if let Some(bytes) = Self::download_bytes(&self.client, url).await {
-            let c_url = url.to_string();
+            let skin_url = url.to_string();
             if let Ok(result) = relm4::tokio::task::spawn_blocking(move || {
-                let tex = Self::bytes_to_avatar_texture(&bytes)?;
+                let texture = Self::bytes_to_avatar_texture(&bytes)?;
 
                 if let Err(e) = acl_common::fs::write_atomic(&skin_path, &bytes) {
-                    debug!("Failed to save skin {c_url}: {e}");
+                    debug!("Failed to save skin {skin_url}: {e}");
                 }
 
-                Some(tex)
+                Some(texture)
             })
             .await
-                && let Some(tex) = result
+                && let Some(texture) = result
             {
                 let mut memory = self.memory.lock();
-                memory.insert(url.to_string(), tex.clone());
+                memory.insert(url.to_string(), texture.clone());
 
-                return Some(tex);
+                return Some(texture);
             }
         }
 
