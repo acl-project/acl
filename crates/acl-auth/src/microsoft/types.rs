@@ -398,6 +398,111 @@ mod tests {
         let profile_res: MinecraftProfileResponse = serde_json::from_str(profile_json).unwrap();
         assert_eq!(profile_res.id, "4566e69fc90748ee8d71d7ba5aaafced");
         assert_eq!(profile_res.name, "Steve");
+        assert!(profile_res.skins.is_empty());
+        assert_eq!(profile_res.active_skin_url(), None);
+    }
+
+    #[test]
+    fn test_serde_minecraft_skin_and_profile_skins() {
+        let profile_json = r#"{
+            "id": "4566e69fc90748ee8d71d7ba5aaafced",
+            "name": "Steve",
+            "skins": [
+                {
+                    "id": "skin-1",
+                    "state": "INACTIVE",
+                    "url": "https://textures.minecraft.net/texture/inactive",
+                    "variant": "CLASSIC"
+                },
+                {
+                    "id": "skin-2",
+                    "state": "ACTIVE",
+                    "url": "https://textures.minecraft.net/texture/active",
+                    "variant": "SLIM"
+                },
+                {
+                    "url": "https://textures.minecraft.net/texture/defaults"
+                },
+                {
+                    "id": "skin-4",
+                    "state": "FUTURE_STATE",
+                    "url": "https://textures.minecraft.net/texture/unknown",
+                    "variant": "FUTURE_VARIANT"
+                }
+            ]
+        }"#;
+
+        let profile: MinecraftProfileResponse = serde_json::from_str(profile_json).unwrap();
+        assert_eq!(profile.skins.len(), 4);
+
+        assert_eq!(profile.skins[0].id, "skin-1");
+        assert_eq!(profile.skins[0].state, SkinState::Inactive);
+        assert_eq!(profile.skins[0].variant, SkinVariant::Classic);
+
+        assert_eq!(profile.skins[1].id, "skin-2");
+        assert_eq!(profile.skins[1].state, SkinState::Active);
+        assert_eq!(profile.skins[1].variant, SkinVariant::Slim);
+
+        assert_eq!(profile.skins[2].id, "");
+        assert_eq!(profile.skins[2].state, SkinState::Unknown);
+        assert_eq!(profile.skins[2].variant, SkinVariant::Unknown);
+
+        assert_eq!(profile.skins[3].state, SkinState::Unknown);
+        assert_eq!(profile.skins[3].variant, SkinVariant::Unknown);
+    }
+
+    #[test]
+    fn test_profile_active_skin_url_selection() {
+        let make_skin = |state: SkinState, url: &str| MinecraftSkin {
+            id: String::new(),
+            state,
+            url: url.to_string(),
+            variant: SkinVariant::Classic,
+        };
+
+        // Prefers Active skin even when preceded by Inactive skins and trims whitespace
+        let with_active = MinecraftProfileResponse {
+            id: "id".to_string(),
+            name: "Steve".to_string(),
+            skins: vec![
+                make_skin(SkinState::Inactive, "https://example.com/inactive.png"),
+                make_skin(SkinState::Active, "  https://example.com/active.png  "),
+            ],
+        };
+        assert_eq!(
+            with_active.active_skin_url().as_deref(),
+            Some("https://example.com/active.png")
+        );
+
+        // Falls back to the first skin when none is Active
+        let without_active = MinecraftProfileResponse {
+            id: "id".to_string(),
+            name: "Steve".to_string(),
+            skins: vec![
+                make_skin(SkinState::Inactive, "https://example.com/first.png"),
+                make_skin(SkinState::Unknown, "https://example.com/second.png"),
+            ],
+        };
+        assert_eq!(
+            without_active.active_skin_url().as_deref(),
+            Some("https://example.com/first.png")
+        );
+
+        // Blank or whitespace-only URL returns None
+        let blank_url = MinecraftProfileResponse {
+            id: "id".to_string(),
+            name: "Steve".to_string(),
+            skins: vec![make_skin(SkinState::Active, "   ")],
+        };
+        assert_eq!(blank_url.active_skin_url(), None);
+
+        // Empty skins list returns None
+        let empty = MinecraftProfileResponse {
+            id: "id".to_string(),
+            name: "Steve".to_string(),
+            skins: Vec::new(),
+        };
+        assert_eq!(empty.active_skin_url(), None);
     }
 
     #[test]

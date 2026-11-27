@@ -208,4 +208,42 @@ mod tests {
         let err = Account::new_microsoft("Steve", "not-a-valid-uuid", None).unwrap_err();
         assert!(matches!(err, AuthError::Uuid(_)));
     }
+
+    #[test]
+    fn test_new_microsoft_with_skin_url_and_offline_default() {
+        let offline = Account::new_offline("Steve").unwrap();
+        assert_eq!(offline.skin_url, None);
+
+        let url = "https://textures.minecraft.net/texture/abc123".to_string();
+        let ms = Account::new_microsoft(
+            "Alex",
+            "4566e69fc90748ee8d71d7ba5aaafced",
+            Some(url.clone()),
+        )
+        .unwrap();
+        assert_eq!(ms.skin_url.as_deref(), Some(url.as_str()));
+    }
+
+    #[test]
+    fn test_account_serde_skin_url_compatibility() {
+        let legacy_json = r#"{
+            "uuid": "550e8400-e29b-41d4-a716-446655440000",
+            "username": "Steve",
+            "account_type": "microsoft"
+        }"#;
+        let legacy: Account = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(legacy.username, "Steve");
+        assert_eq!(legacy.account_type, AccountType::Microsoft);
+        assert_eq!(legacy.skin_url, None);
+
+        let with_skin = Account::new_microsoft(
+            "Alex",
+            "550e8400-e29b-41d4-a716-446655440000",
+            Some("https://textures.minecraft.net/texture/xyz".to_string()),
+        )
+        .unwrap();
+        let serialized = serde_json::to_string(&with_skin).unwrap();
+        let deserialized: Account = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, with_skin);
+    }
 }
