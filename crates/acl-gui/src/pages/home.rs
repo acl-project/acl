@@ -137,7 +137,6 @@ pub enum HomeInput {
     SelectInstance(usize),
     SelectAccount(usize),
     LaunchBypass(String),
-    ShowToast(String),
 }
 
 #[derive(Debug)]
@@ -300,7 +299,7 @@ impl HomePage {
         }
 
         // Load version metadata, updating the local copy if Mojang's version has changed
-        // falls back to local cache when offline
+        // Falls back to local cache when offline
         let _ = out.send(HomeCmdOutput::StageChanged(LaunchStage::LoadingMetadata));
         let metadata = instance
             .refresh_and_load_metadata(&client, &dirs, global_config.download_source)
@@ -950,9 +949,6 @@ impl Component for HomePage {
                 if let Err(err) = accounts.save(&self.dirs.accounts_file()) {
                     error!("Failed to save accounts: {err}");
                 }
-            }
-            HomeInput::ShowToast(m) => {
-                let _ = sender.output(HomeOutput::ShowToast(m));
             }
         }
     }
